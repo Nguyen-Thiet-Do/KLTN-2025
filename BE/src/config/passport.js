@@ -29,10 +29,12 @@ passport.use(
         if (!account)
           return done(null, false, { message: "Email hoặc mật khẩu không đúng" });
 
-        if (account.status === "locked")
+        const status = String(account.status || "").trim().toLowerCase();
+
+        if (status === "locked")
           return done(null, false, { message: "Tài khoản đã bị khóa" });
 
-        if (account.status !== "active")
+        if (status !== "active")
           return done(null, false, { message: "Tài khoản chưa được kích hoạt" });
 
         const isValidPassword = await bcrypt.compare(password, account.passwordHash);
@@ -75,7 +77,9 @@ passport.use(
       console.log("👤 [JWT] Account trong DB:", account ? account.toJSON() : "❌ Không có");
 
       if (!account) return done(null, false);
-      if (account.status !== "active") return done(null, false);
+      const status = String(account.status || "").trim().toLowerCase();
+
+      if (status !== "active") return done(null, false);
 
       if (account.roleId === 2) {
         const librarian = await Librarian.findOne({ where: { accountId: account.accountId } });

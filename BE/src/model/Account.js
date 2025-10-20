@@ -24,7 +24,7 @@ const Account = sequelize.define('Account', {
   passwordHash: {
     type: DataTypes.STRING(256),
     allowNull: false,
-    field: 'passwordHash',
+    field: 'password',
   },
   status: {
     type: DataTypes.ENUM('active', 'locked', 'inactive'),

@@ -1,72 +1,22 @@
+// src/model/LoanDetail.js
 const { DataTypes } = require('sequelize');
 const sequelize = require('../config/database');
 
 const LoanDetail = sequelize.define('LoanDetail', {
-  loanDetailId: {
-    type: DataTypes.STRING,
-    primaryKey: true,
-    allowNull: false
-  },
-  loanSlipId: {
-    type: DataTypes.STRING,
-    allowNull: false,
-    references: {
-      model: 'loan_slips',
-      key: 'loanSlipId'
-    }
-  },
-  documentCopyId: {
-    type: DataTypes.STRING,
-    allowNull: false,
-    references: {
-      model: 'document_copies',
-      key: 'documentCopyId'
-    }
-  },
-  returnDate: {
-    type: DataTypes.DATE,
-    allowNull: true
-  },
-  conditionBorrow: {
-    type: DataTypes.STRING,
-    allowNull: true
-  },
-  photoBeforeBorrow: {
-    type: DataTypes.STRING,
-    allowNull: true
-  },
-  conditionReturn: {
-    type: DataTypes.STRING,
-    allowNull: true
-  },
-  photoAfterReturn: {
-    type: DataTypes.STRING,
-    allowNull: true
-  },
-  depositAmount: {
-    type: DataTypes.DECIMAL(15, 2),
-    defaultValue: 0
-  },
-  fineAmount: {
-    type: DataTypes.DECIMAL(15, 2),
-    defaultValue: 0
-  },
-  renewalCount: {
-    type: DataTypes.INTEGER,
-    defaultValue: 0
-  },
-  status: {
-    type: DataTypes.STRING,
-    allowNull: false,
-    defaultValue: 'borrowed'
-  },
-  note: {
-    type: DataTypes.TEXT,
-    allowNull: true
-  }
-}, {
-  tableName: 'loan_details',
-  timestamps: true
-});
+  loanDetailId: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true, field: 'loanDetailId' },
+  loanSlipId: { type: DataTypes.INTEGER, allowNull: false, field: 'loanSlipId' },
+  documentCopyId: { type: DataTypes.INTEGER, allowNull: false, field: 'documentCopyId' },
+  returnDate: { type: DataTypes.DATEONLY, allowNull: true, field: 'returnDate' },
+  conditionBorrow: { type: DataTypes.STRING(100), allowNull: true, field: 'conditionBorrow' },
+  conditionReturn: { type: DataTypes.STRING(100), allowNull: true, field: 'conditionReturn' },
+  depositAmount: { type: DataTypes.DECIMAL(12,2), allowNull: true, field: 'depositAmount' },
+  fineAmount: { type: DataTypes.DECIMAL(12,2), allowNull: true, field: 'fineAmount' },
+  renewalCount: { type: DataTypes.INTEGER, allowNull: true, defaultValue: 0, field: 'renewalCount' },
+  status: { type: DataTypes.STRING(50), allowNull: true, defaultValue: 'BORROWED', field: 'status' },
+  note: { type: DataTypes.STRING(500), allowNull: true, field: 'note' },
+  deleted: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false, field: 'deleted' },
+  created_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW, field: 'created_at' },
+  updated_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW, field: 'updated_at' },
+}, { tableName: 'LoanDetails', timestamps: false });
 
 module.exports = LoanDetail;

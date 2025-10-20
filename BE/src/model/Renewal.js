@@ -1,48 +1,19 @@
+// src/model/Renawal.js
 const { DataTypes } = require('sequelize');
 const sequelize = require('../config/database');
 
+// DB table name is 'Renawals'
 const Renewal = sequelize.define('Renewal', {
-  renewalId: {
-    type: DataTypes.STRING,
-    primaryKey: true,
-    allowNull: false
-  },
-  loanDetailId: {
-    type: DataTypes.STRING,
-    allowNull: false,
-    references: {
-      model: 'loan_details',
-      key: 'loanDetailId'
-    }
-  },
-  oldDueDate: {
-    type: DataTypes.DATE,
-    allowNull: false
-  },
-  newDueDate: {
-    type: DataTypes.DATE,
-    allowNull: false
-  },
-  reason: {
-    type: DataTypes.TEXT,
-    allowNull: true
-  },
-  librarianId: {
-    type: DataTypes.STRING,
-    allowNull: true,
-    references: {
-      model: 'librarians',
-      key: 'librarianId'
-    }
-  },
-  status: {
-    type: DataTypes.STRING,
-    allowNull: false,
-    defaultValue: 'pending'
-  }
-}, {
-  tableName: 'renewals',
-  timestamps: true
-});
+  renewalId: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true, field: 'renewalId' },
+  loanDetailId: { type: DataTypes.INTEGER, allowNull: false, field: 'loanDetailId' },
+  oldDueDate: { type: DataTypes.DATEONLY, allowNull: false, field: 'oldDueDate' },
+  newDueDate: { type: DataTypes.DATEONLY, allowNull: false, field: 'newDueDate' },
+  reason: { type: DataTypes.STRING(300), allowNull: true, field: 'reason' },
+  librairianId: { type: DataTypes.INTEGER, allowNull: false, field: 'librairianId' },
+  status: { type: DataTypes.STRING(50), allowNull: true, defaultValue: 'APPROVED', field: 'status' },
+  deleted: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false, field: 'deleted' },
+  created_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW, field: 'created_at' },
+  updated_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW, field: 'updated_at' },
+}, { tableName: 'Renewals', timestamps: false });
 
 module.exports = Renewal;

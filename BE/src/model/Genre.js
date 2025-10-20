@@ -1,14 +1,15 @@
-// src/model/Category.js
+// src/model/Genre.js
 const { DataTypes } = require('sequelize');
 const sequelize = require('../config/database');
 
-const Category = sequelize.define('Category', {
-  categoryId: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true, field: 'categoryId' },
+const Genre = sequelize.define('Genre', {
+  genreId: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true, field: 'genreId' },
   name: { type: DataTypes.STRING(150), allowNull: false, field: 'name' },
-  deposit_rate: { type: DataTypes.FLOAT, allowNull: true, field: 'deposit_rate' },
+  documentType: { type: DataTypes.STRING(50), allowNull: true, field: 'documentType' },
+  description: { type: DataTypes.STRING(500), allowNull: true, field: 'description' },
   deleted: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false, field: 'deleted' },
   created_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW, field: 'created_at' },
   updated_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW, field: 'updated_at' },
-}, { tableName: 'Categorys', timestamps: false });
+}, { tableName: 'Genres', timestamps: false });
 
-module.exports = Category;
+module.exports = Genre;

@@ -1,101 +1,22 @@
-// models/Librarian.js
-const { DataTypes, Sequelize } = require('sequelize');
+// src/model/Librarian.js
+const { DataTypes } = require('sequelize');
 const sequelize = require('../config/database');
 
-const Librarian = sequelize.define(
-  'Librarian',
-  {
-    librarianId: {
-      type: DataTypes.INTEGER,
-      allowNull: false,
-      autoIncrement: true,
-      primaryKey: true,
-    },
-
-    accountId: {
-      type: DataTypes.INTEGER,
-      allowNull: false,
-      references: {
-        model: 'accounts',
-        key: 'accountId',
-      },
-    },
-
-    roleId: {
-      type: DataTypes.INTEGER,
-      allowNull: false,
-      references: {
-        model: 'roles',
-        key: 'roleId',
-      },
-    },
-
-    fullName: {
-      type: DataTypes.STRING(150),
-      allowNull: false,
-    },
-
-    dateOfBirth: {
-      type: DataTypes.DATEONLY, 
-      allowNull: true,
-    },
-
-    gender: {
-      type: DataTypes.BOOLEAN,
-      allowNull: true,
-    },
-
-    hireDate: {
-      type: DataTypes.DATEONLY,
-      allowNull: true,
-    },
-
-    cccd: {
-      type: DataTypes.STRING(50),
-      allowNull: true,
-    },
-
-    address: {
-      type: DataTypes.STRING(255),
-      allowNull: true,
-    },
-
-    basicSalary: {
-      type: DataTypes.DECIMAL(15, 2),
-      allowNull: true,
-    },
-
-    salaryCoefficient: {
-      type: DataTypes.DECIMAL(5, 2),
-      allowNull: true,
-    },
-
-    note: {
-      type: DataTypes.STRING(255),
-      allowNull: true,
-    },
-
-    created_at: {
-      type: DataTypes.DATE,
-      allowNull: true,
-      defaultValue: Sequelize.literal('CURRENT_TIMESTAMP'),
-      field: 'created_at',
-    },
-
-    updated_at: {
-      type: DataTypes.DATE,
-      allowNull: true,
-      defaultValue: Sequelize.literal('CURRENT_TIMESTAMP'),
-      field: 'updated_at',
-    },
-  },
-  {
-    tableName: 'librarians',
-    timestamps: true,
-    createdAt: 'created_at',
-    updatedAt: 'updated_at',
-    underscored: false,
-  }
-);
+const Librarian = sequelize.define('Librarian', {
+  librarianId: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true, field: 'librarianId' },
+  accountId: { type: DataTypes.INTEGER, allowNull: false, field: 'accountId' },
+  roleId: { type: DataTypes.INTEGER, allowNull: false, field: 'roleId' },
+  fullName: { type: DataTypes.STRING(150), allowNull: false, field: 'fullName' },
+  dateOfBirth: { type: DataTypes.DATEONLY, allowNull: true, field: 'dateOfBirth' },
+  gender: { type: DataTypes.STRING(20), allowNull: true, field: 'gender' },
+  hireDate: { type: DataTypes.DATEONLY, allowNull: true, field: 'hireDate' },
+  cccd: { type: DataTypes.STRING(20), allowNull: true, field: 'cccd' },
+  address: { type: DataTypes.STRING(255), allowNull: true, field: 'address' },
+  basicSalary: { type: DataTypes.DECIMAL(12, 2), allowNull: true, field: 'basicSalary' },
+  salaryCoefficient: { type: DataTypes.DECIMAL(5, 2), allowNull: true, field: 'salaryCoefficient' },
+  deleted: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false, field: 'deleted' },
+  created_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW, field: 'created_at' },
+  updated_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW, field: 'updated_at' },
+}, { tableName: 'Librarians', timestamps: false });
 
 module.exports = Librarian;
