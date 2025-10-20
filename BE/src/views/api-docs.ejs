@@ -1,14 +1,329 @@
+<%# eslint-disable %>
 <!DOCTYPE html>
 <html lang="vi">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title><%= title %></title>
-    <link rel="stylesheet" href="/css/style.css">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 40px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            opacity: 0.9;
+            font-size: 1.1em;
+        }
+
+        .auth-section {
+            background: #f8f9fa;
+            padding: 20px 40px;
+            border-bottom: 2px solid #e9ecef;
+        }
+
+        .auth-controls {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .auth-controls input {
+            flex: 1;
+            min-width: 250px;
+            padding: 12px 16px;
+            border: 2px solid #dee2e6;
+            border-radius: 8px;
+            font-size: 14px;
+        }
+
+        .auth-controls button {
+            padding: 12px 24px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.3s;
+        }
+
+        .auth-controls button:hover {
+            background: #5568d3;
+            transform: translateY(-2px);
+        }
+
+        .auth-status {
+            margin-top: 10px;
+            padding: 10px;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+
+        .auth-status.success {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .auth-status.error {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .content {
+            padding: 40px;
+        }
+
+        .api-group {
+            margin-bottom: 40px;
+        }
+
+        .group-title {
+            font-size: 1.8em;
+            color: #333;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 3px solid #667eea;
+        }
+
+        .endpoint {
+            background: #f8f9fa;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 20px;
+            border-left: 4px solid #667eea;
+        }
+
+        .endpoint-header {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            margin-bottom: 15px;
+            cursor: pointer;
+        }
+
+        .method-badge {
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-weight: bold;
+            font-size: 12px;
+            min-width: 70px;
+            text-align: center;
+        }
+
+        .method-GET { background: #28a745; color: white; }
+        .method-POST { background: #007bff; color: white; }
+        .method-PUT { background: #ffc107; color: #333; }
+        .method-DELETE { background: #dc3545; color: white; }
+
+        .endpoint-path {
+            font-family: 'Courier New', monospace;
+            font-size: 16px;
+            color: #333;
+            font-weight: 600;
+        }
+
+        .auth-badge {
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 11px;
+            background: #ff6b6b;
+            color: white;
+            margin-left: auto;
+        }
+
+        .endpoint-details {
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid #dee2e6;
+        }
+
+        .detail-section {
+            margin-bottom: 15px;
+        }
+
+        .detail-section h4 {
+            color: #667eea;
+            margin-bottom: 10px;
+            font-size: 14px;
+        }
+
+        .param-list {
+            background: white;
+            padding: 12px;
+            border-radius: 6px;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+        }
+
+        .param-item {
+            margin-bottom: 8px;
+            padding: 8px;
+            background: #f8f9fa;
+            border-radius: 4px;
+        }
+
+        .test-section {
+            margin-top: 20px;
+            padding: 20px;
+            background: white;
+            border-radius: 8px;
+            border: 2px solid #667eea;
+        }
+
+        .test-inputs {
+            display: grid;
+            gap: 12px;
+            margin-bottom: 15px;
+        }
+
+        .input-group {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+
+        .input-group label {
+            font-size: 13px;
+            font-weight: 600;
+            color: #495057;
+        }
+
+        .input-group input,
+        .input-group textarea {
+            padding: 10px;
+            border: 1px solid #ced4da;
+            border-radius: 6px;
+            font-size: 14px;
+            font-family: 'Courier New', monospace;
+        }
+
+        .input-group textarea {
+            min-height: 120px;
+            resize: vertical;
+        }
+
+        .test-button {
+            width: 100%;
+            padding: 14px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .test-button:hover {
+            background: #5568d3;
+            transform: translateY(-2px);
+        }
+
+        .test-button:disabled {
+            background: #6c757d;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .response-section {
+            margin-top: 15px;
+        }
+
+        .response-section h4 {
+            color: #667eea;
+            margin-bottom: 10px;
+        }
+
+        .response-box {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 15px;
+            border-radius: 6px;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+            max-height: 400px;
+            overflow: auto;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+
+        .response-status {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+
+        .status-success { background: #28a745; color: white; }
+        .status-error { background: #dc3545; color: white; }
+
+        .toggle-icon {
+            margin-left: auto;
+            transition: transform 0.3s;
+        }
+
+        .toggle-icon.open {
+            transform: rotate(180deg);
+        }
+
+        .footer {
+            background: #f8f9fa;
+            padding: 20px 40px;
+            text-align: center;
+            color: #6c757d;
+            border-top: 2px solid #e9ecef;
+        }
+    </style>
 </head>
 <body>
     <div class="container">
-        <%- include('partials/header') %>
+        <div class="header">
+            <h1><%= title %></h1>
+            <p><%= description %></p>
+            <p style="font-size: 0.9em; margin-top: 10px;">Version <%= version %> | Developer: <%= developer %></p>
+        </div>
+
+        <div class="auth-section">
+            <div class="auth-controls">
+                <input type="text" id="accessToken" placeholder="Access Token (tự động lưu sau khi login)">
+                <button onclick="saveToken()">💾 Lưu Token</button>
+                <button onclick="clearToken()">🗑️ Xóa Token</button>
+            </div>
+            <div id="authStatus"></div>
+        </div>
 
         <div class="content">
             <% endpoints.forEach(function(group) { %>
@@ -17,14 +332,285 @@
                         <%= group.icon %> <%= group.group %>
                     </h2>
                     
-                    <% group.routes.forEach(function(route) { %>
-                        <%- include('partials/endpoint', { route: route }) %>
+                    <% group.routes.forEach(function(route, index) { %>
+                        <div class="endpoint">
+                            <div class="endpoint-header" onclick="toggleEndpoint('endpoint-<%= group.group.replace(/\s+/g, '-') %>-<%= index %>')">
+                                <span class="method-badge method-<%= route.method %>"><%= route.method %></span>
+                                <span class="endpoint-path"><%= route.path %></span>
+                                <% if (route.auth) { %>
+                                    <span class="auth-badge">🔒 Auth Required</span>
+                                <% } %>
+                                <span class="toggle-icon" id="icon-endpoint-<%= group.group.replace(/\s+/g, '-') %>-<%= index %>">▼</span>
+                            </div>
+                            
+                            <div class="endpoint-details" id="endpoint-<%= group.group.replace(/\s+/g, '-') %>-<%= index %>" style="display: none;">
+                                <p style="margin-bottom: 15px; color: #6c757d;"><%= route.description %></p>
+                                
+                                <% if (route.role) { %>
+                                    <div class="detail-section">
+                                        <h4>👤 Role Required</h4>
+                                        <div class="param-list"><%= route.role %></div>
+                                    </div>
+                                <% } %>
+
+                                <% if (route.params) { %>
+                                    <div class="detail-section">
+                                        <h4>📋 URL Parameters</h4>
+                                        <div class="param-list">
+                                            <% Object.keys(route.params).forEach(function(key) { %>
+                                                <div class="param-item"><strong><%= key %>:</strong> <%= route.params[key] %></div>
+                                            <% }); %>
+                                        </div>
+                                    </div>
+                                <% } %>
+
+                                <% if (route.query) { %>
+                                    <div class="detail-section">
+                                        <h4>🔍 Query Parameters</h4>
+                                        <div class="param-list">
+                                            <% Object.keys(route.query).forEach(function(key) { %>
+                                                <div class="param-item"><strong><%= key %>:</strong> <%= route.query[key] %></div>
+                                            <% }); %>
+                                        </div>
+                                    </div>
+                                <% } %>
+
+                                <% if (route.body) { %>
+                                    <div class="detail-section">
+                                        <h4>📦 Request Body</h4>
+                                        <div class="param-list">
+                                            <% Object.keys(route.body).forEach(function(key) { %>
+                                                <div class="param-item"><strong><%= key %>:</strong> <%= route.body[key] %></div>
+                                            <% }); %>
+                                        </div>
+                                    </div>
+                                <% } %>
+
+                                <!-- Test Section -->
+                                <div class="test-section">
+                                    <h4 style="color: #667eea; margin-bottom: 15px;">🧪 Test API</h4>
+                                    
+                                    <div class="test-inputs">
+                                        <% if (route.params) { %>
+                                            <% Object.keys(route.params).forEach(function(key) { %>
+                                                <div class="input-group">
+                                                    <label>URL Param: <%= key %></label>
+                                                    <input type="text" id="param-<%= group.group.replace(/\s+/g, '-') %>-<%= index %>-<%= key %>" 
+                                                           placeholder="<%= route.params[key] %>">
+                                                </div>
+                                            <% }); %>
+                                        <% } %>
+
+                                        <% if (route.query) { %>
+                                            <% Object.keys(route.query).forEach(function(key) { %>
+                                                <div class="input-group">
+                                                    <label>Query: <%= key %></label>
+                                                    <input type="text" id="query-<%= group.group.replace(/\s+/g, '-') %>-<%= index %>-<%= key %>" 
+                                                           placeholder="<%= route.query[key] %>">
+                                                </div>
+                                            <% }); %>
+                                        <% } %>
+
+                                        <% if (route.body) { %>
+                                            <% 
+                                                // Tạo dữ liệu mẫu dựa trên type
+                                                var sampleBody = {};
+                                                Object.keys(route.body).forEach(function(key) {
+                                                    var type = route.body[key].toLowerCase();
+                                                    if (type.includes('email')) {
+                                                        sampleBody[key] = 'example@email.com';
+                                                    } else if (type.includes('password')) {
+                                                        sampleBody[key] = '123456';
+                                                    } else if (type.includes('number')) {
+                                                        sampleBody[key] = 0;
+                                                    } else if (type.includes('date')) {
+                                                        sampleBody[key] = '2000-01-01';
+                                                    } else if (type.includes('phone')) {
+                                                        sampleBody[key] = '0123456789';
+                                                    } else if (type.includes('cccd')) {
+                                                        sampleBody[key] = '001234567890';
+                                                    } else if (key.toLowerCase().includes('name')) {
+                                                        sampleBody[key] = 'Nguyen Van A';
+                                                    } else if (key.toLowerCase().includes('address')) {
+                                                        sampleBody[key] = 'Ha Noi, Viet Nam';
+                                                    } else if (key.toLowerCase().includes('token')) {
+                                                        sampleBody[key] = 'your_refresh_token_here';
+                                                    } else {
+                                                        sampleBody[key] = '';
+                                                    }
+                                                });
+                                            %>
+                                            <div class="input-group">
+                                                <label>Request Body (JSON)</label>
+                                                <textarea id="body-<%= group.group.replace(/\s+/g, '-') %>-<%= index %>"><%= JSON.stringify(sampleBody, null, 2) %></textarea>
+                                            </div>
+                                        <% } %>
+                                    </div>
+
+                                    <% var requiresAuth = route.auth ? 'true' : 'false'; %>
+                                    <button class="test-button" 
+                                            onclick="testAPI('<%= route.method %>', '<%= route.path %>', '<%= group.group.replace(/\s+/g, '-') %>', <%= index %>, <%= requiresAuth %>)">
+                                        🚀 Send Request
+                                    </button>
+
+                                    <div class="response-section" id="response-<%= group.group.replace(/\s+/g, '-') %>-<%= index %>" style="display: none;">
+                                        <h4>Response</h4>
+                                        <div id="response-status-<%= group.group.replace(/\s+/g, '-') %>-<%= index %>"></div>
+                                        <div class="response-box" id="response-body-<%= group.group.replace(/\s+/g, '-') %>-<%= index %>"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
                     <% }); %>
                 </div>
             <% }); %>
         </div>
 
-        <%- include('partials/footer') %>
+        <div class="footer">
+            <p>📚 <%= title %> | Server Time: <%= serverTime %></p>
+            <p style="margin-top: 5px; font-size: 0.9em;">Base URL: <%= baseUrl %></p>
+        </div>
     </div>
+
+    <script>
+        // Load saved token on page load
+        window.addEventListener('DOMContentLoaded', function() {
+            const savedToken = localStorage.getItem('accessToken');
+            if (savedToken) {
+                document.getElementById('accessToken').value = savedToken;
+                showAuthStatus('Token đã được tải từ localStorage', 'success');
+            }
+        });
+
+        function saveToken() {
+            const token = document.getElementById('accessToken').value.trim();
+            if (token) {
+                localStorage.setItem('accessToken', token);
+                showAuthStatus('Token đã được lưu thành công!', 'success');
+            } else {
+                showAuthStatus('Vui lòng nhập token!', 'error');
+            }
+        }
+
+        function clearToken() {
+            localStorage.removeItem('accessToken');
+            document.getElementById('accessToken').value = '';
+            showAuthStatus('Token đã được xóa!', 'success');
+        }
+
+        function showAuthStatus(message, type) {
+            const statusEl = document.getElementById('authStatus');
+            statusEl.className = `auth-status ${type}`;
+            statusEl.textContent = message;
+            statusEl.style.display = 'block';
+            setTimeout(() => {
+                statusEl.style.display = 'none';
+            }, 3000);
+        }
+
+        function toggleEndpoint(id) {
+            const element = document.getElementById(id);
+            const icon = document.getElementById('icon-' + id);
+            if (element.style.display === 'none') {
+                element.style.display = 'block';
+                icon.classList.add('open');
+            } else {
+                element.style.display = 'none';
+                icon.classList.remove('open');
+            }
+        }
+
+        async function testAPI(method, path, group, index, requireAuth) {
+            const responseSection = document.getElementById(`response-${group}-${index}`);
+            const responseStatus = document.getElementById(`response-status-${group}-${index}`);
+            const responseBody = document.getElementById(`response-body-${group}-${index}`);
+            
+            // Build URL
+            let url = '<%= baseUrl %>' + path;
+            
+            // Replace URL params
+            const paramInputs = document.querySelectorAll(`[id^="param-${group}-${index}-"]`);
+            paramInputs.forEach(input => {
+                const paramName = input.id.split('-').pop();
+                const paramValue = input.value.trim();
+                if (paramValue) {
+                    url = url.replace(`:${paramName}`, paramValue);
+                }
+            });
+            
+            // Add query params
+            const queryInputs = document.querySelectorAll(`[id^="query-${group}-${index}-"]`);
+            const queryParams = new URLSearchParams();
+            queryInputs.forEach(input => {
+                const queryName = input.id.split('-').pop();
+                const queryValue = input.value.trim();
+                if (queryValue) {
+                    queryParams.append(queryName, queryValue);
+                }
+            });
+            if (queryParams.toString()) {
+                url += '?' + queryParams.toString();
+            }
+            
+            // Build request options
+            const options = {
+                method: method,
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            };
+            
+            // Add auth token if required
+            if (requireAuth) {
+                const token = document.getElementById('accessToken').value.trim();
+                if (!token) {
+                    alert('API này yêu cầu authentication. Vui lòng nhập token!');
+                    return;
+                }
+                options.headers['Authorization'] = `Bearer ${token}`;
+            }
+            
+            // Add body for POST/PUT
+            if (method === 'POST' || method === 'PUT') {
+                const bodyInput = document.getElementById(`body-${group}-${index}`);
+                if (bodyInput && bodyInput.value.trim()) {
+                    try {
+                        options.body = JSON.stringify(JSON.parse(bodyInput.value));
+                    } catch (e) {
+                        alert('Invalid JSON format in request body!');
+                        return;
+                    }
+                }
+            }
+            
+            // Show loading
+            responseSection.style.display = 'block';
+            responseBody.textContent = 'Loading...';
+            
+            try {
+                const response = await fetch(url, options);
+                const data = await response.json();
+                
+                // Show status
+                responseStatus.innerHTML = `<span class="response-status ${response.ok ? 'status-success' : 'status-error'}">
+                    Status: ${response.status} ${response.statusText}
+                </span>`;
+                
+                // Show response body
+                responseBody.textContent = JSON.stringify(data, null, 2);
+                
+                // Auto-save token if this is a login request
+                if (path.includes('/login') && response.ok && data.accessToken) {
+                    document.getElementById('accessToken').value = data.accessToken;
+                    localStorage.setItem('accessToken', data.accessToken);
+                    showAuthStatus('Token đã được tự động lưu từ response!', 'success');
+                }
+                
+            } catch (error) {
+                responseStatus.innerHTML = `<span class="response-status status-error">Error</span>`;
+                responseBody.textContent = 'Error: ' + error.message;
+            }
+        }
+    </script>
 </body>
 </html>

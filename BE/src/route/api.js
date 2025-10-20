@@ -101,25 +101,79 @@ routeApi.get('/', (req, res) => {
           },
         ]
       },
-      // {
-//   group: 'Librarians',
-//   icon: '📚',
-//   routes: [
-//     {
-//       method: 'GET',
-//       path: '/api/librarian',
-//       description: 'Lấy danh sách tất cả thủ thư (Admin only)',
-//       auth: true,
-//       role: 'Admin (roleId = 1)',
-//       query: {
-//         page: 'number (optional, default=1)',
-//         limit: 'number (optional, default=10)',
-//         search: 'string (optional, tìm kiếm theo tên hoặc email)'
-//       }
-//     }
-//   ]
-// },
-
+      {
+        group: 'Librarians',
+        icon: '📚',
+        routes: [
+          {
+            method: 'GET',
+            path: '/api/librarian',
+            description: 'Lấy danh sách tất cả thủ thư',
+            auth: true,
+            role: 'Admin (roleId = 1)',
+            query: {
+              page: 'number (optional, default=1)',
+              limit: 'number (optional, default=10)',
+              search: 'string (optional, tìm theo tên, email)'
+            }
+          },
+          {
+            method: 'GET',
+            path: '/api/librarian/me',
+            description: 'Lấy thông tin thủ thư hiện tại',
+            auth: true,
+            role: 'Librarian (roleId = 2)'
+          },
+          {
+            method: 'POST',
+            path: '/api/librarian',
+            description: 'Thêm thủ thư mới',
+            auth: true,
+            role: 'Admin (roleId = 1)',
+            body: {
+              accountId: 'number (required)',
+              fullName: 'string (required)',
+              dateOfBirth: 'date (optional)',
+              gender: 'number (optional, 0=Nữ, 1=Nam)',
+              cccd: 'string (optional)',
+              address: 'string (optional)',
+              hireDate: 'date (optional)',
+              basicSalary: 'number (optional)',
+              salaryCoefficient: 'number (optional)'
+            }
+          },
+          {
+            method: 'PUT',
+            path: '/api/librarian/:id',
+            description: 'Cập nhật thông tin thủ thư',
+            auth: true,
+            role: 'Admin (roleId = 1)',
+            params: {
+              id: 'number (required)'
+            },
+            body: {
+              fullName: 'string (optional)',
+              dateOfBirth: 'date (optional)',
+              gender: 'number (optional, 0=Nữ, 1=Nam)',
+              cccd: 'string (optional)',
+              address: 'string (optional)',
+              hireDate: 'date (optional)',
+              basicSalary: 'number (optional)',
+              salaryCoefficient: 'number (optional)'
+            }
+          },
+          {
+            method: 'DELETE',
+            path: '/api/librarian/:id',
+            description: 'Xóa thủ thư theo ID',
+            auth: true,
+            role: 'Admin (roleId = 1)',
+            params: {
+              id: 'number (required)'
+            }
+          }
+        ]
+      },
       {
         group: 'Test',
         icon: '🧪',
