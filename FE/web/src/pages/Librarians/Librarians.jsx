@@ -1,17 +1,25 @@
 import "./Librarians.css";
 import { FaPlus, FaSearch, FaFilter, FaTrash, FaEdit } from "react-icons/fa";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { getLibrarians, deleteLibrarian } from "../../services/librarianService";
 import AddLibrarian from "./AddLibrarian";
-import EditLibrarian from "./EditLibrarian"; // 👈 import form sửa mới
+import EditLibrarian from "./EditLibrarian";
 
 export default function Librarians() {
   const [librarians, setLibrarians] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [showAddModal, setShowAddModal] = useState(false);
-  const [editingLibrarian, setEditingLibrarian] = useState(null); // 👈 lưu đối tượng đang sửa
+  const [editingLibrarian, setEditingLibrarian] = useState(null);
 
+  // 🔍 Tìm kiếm
+  const [searchQuery, setSearchQuery] = useState("");
+
+  // 🔢 Phân trang
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
+
+  // 🔄 Lấy danh sách thủ thư
   const fetchData = async () => {
     try {
       const token = sessionStorage.getItem("accessToken");
@@ -42,13 +50,25 @@ export default function Librarians() {
     fetchData();
   }, []);
 
+  // 👀 Hiển thị giới tính (chuẩn như bên Độc giả)
   const getGenderDisplay = (gender) => {
-    if (gender && typeof gender === "object" && gender.type === "Buffer" && Array.isArray(gender.data)) {
-      const value = gender.data[0];
-      return value === 1 ? "Nam" : value === 0 ? "Nữ" : "-";
+    if (!gender) return "-";
+
+    // Sequelize có thể trả Buffer hoặc Uint8Array
+    if (typeof gender === "object") {
+      const value =
+        gender?.data?.[0] ??
+        (gender instanceof Uint8Array ? gender[0] : undefined);
+      if (value === 1) return "Nam";
+      if (value === 0) return "Nữ";
+      return "Khác";
     }
-    if (gender === 1 || gender === "1") return "Nam";
-    if (gender === 0 || gender === "0") return "Nữ";
+
+    // Chuẩn hoá dạng chuỗi
+    const g = gender.toString().trim().toLowerCase();
+    if (["male", "nam", "1"].includes(g)) return "Nam";
+    if (["female", "nu", "nữ", "0"].includes(g)) return "Nữ";
+    if (["other", "khac", "khác"].includes(g)) return "Khác";
     return "-";
   };
 
@@ -69,10 +89,27 @@ export default function Librarians() {
     }
   };
 
+  // 🔎 Lọc thủ thư theo tên hoặc email
+  const filteredLibrarians = useMemo(() => {
+    const keyword = searchQuery.trim().toLowerCase();
+    if (!keyword) return librarians;
+    return librarians.filter(
+      (lib) =>
+        lib.fullName?.toLowerCase().includes(keyword) ||
+        lib.email?.toLowerCase().includes(keyword)
+    );
+  }, [librarians, searchQuery]);
+
+  // 📄 Phân trang
+  const totalPages = Math.ceil(filteredLibrarians.length / itemsPerPage);
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const currentLibrarians = filteredLibrarians.slice(startIndex, startIndex + itemsPerPage);
+
   return (
     <div className="librarian-page">
       <h2>Quản lý Thủ thư</h2>
 
+      {/* Thanh công cụ */}
       <div className="librarian-toolbar">
         <button className="btn btn-list" onClick={fetchData}>
           Danh sách Thủ thư
@@ -82,10 +119,19 @@ export default function Librarians() {
         </button>
       </div>
 
+      {/* Ô tìm kiếm */}
       <div className="librarian-search">
         <div className="search-box">
           <FaSearch />
-          <input type="text" placeholder="Tìm kiếm thủ thư" />
+          <input
+            type="text"
+            placeholder="Tìm kiếm theo tên hoặc email..."
+            value={searchQuery}
+            onChange={(e) => {
+              setSearchQuery(e.target.value);
+              setCurrentPage(1);
+            }}
+          />
         </div>
         <FaFilter className="filter-icon" />
       </div>
@@ -107,24 +153,28 @@ export default function Librarians() {
               </tr>
             </thead>
             <tbody>
-              {librarians.length === 0 ? (
+              {currentLibrarians.length === 0 ? (
                 <tr>
                   <td colSpan="6" style={{ textAlign: "center" }}>
                     Không có dữ liệu
                   </td>
                 </tr>
               ) : (
-                librarians.map((lib) => (
+                currentLibrarians.map((lib) => (
                   <tr key={lib.librarianId}>
                     <td>{lib.librarianCode || `TT${lib.librarianId}`}</td>
                     <td>{lib.fullName}</td>
                     <td>{getGenderDisplay(lib.gender)}</td>
-                    <td>{lib.dateOfBirth ? new Date(lib.dateOfBirth).toLocaleDateString("vi-VN") : "-"}</td>
+                    <td>
+                      {lib.dateOfBirth
+                        ? new Date(lib.dateOfBirth).toLocaleDateString("vi-VN")
+                        : "-"}
+                    </td>
                     <td>{lib.email}</td>
                     <td>
                       <button
                         className="btn-edit"
-                        onClick={() => setEditingLibrarian(lib)} // 👈 mở modal sửa
+                        onClick={() => setEditingLibrarian(lib)}
                       >
                         <FaEdit /> Sửa
                       </button>{" "}
@@ -140,6 +190,33 @@ export default function Librarians() {
               )}
             </tbody>
           </table>
+
+          {/* 📜 Phân trang */}
+          {totalPages > 1 && (
+            <div className="pagination">
+              <button
+                disabled={currentPage === 1}
+                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+              >
+                Trước
+              </button>
+              {Array.from({ length: totalPages }, (_, i) => (
+                <button
+                  key={i + 1}
+                  className={currentPage === i + 1 ? "active" : ""}
+                  onClick={() => setCurrentPage(i + 1)}
+                >
+                  {i + 1}
+                </button>
+              ))}
+              <button
+                disabled={currentPage === totalPages}
+                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+              >
+                Sau
+              </button>
+            </div>
+          )}
         </div>
       )}
 
