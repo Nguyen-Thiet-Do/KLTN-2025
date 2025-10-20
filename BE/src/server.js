@@ -51,6 +51,7 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 // Khởi tạo Passport
 app.use(passport.initialize());
 
+app.set('trust proxy', 1);
 app.use(httpsRedirect);
 
 // ============================================================
