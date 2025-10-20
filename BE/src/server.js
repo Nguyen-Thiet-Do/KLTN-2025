@@ -6,7 +6,7 @@
 require('dotenv').config();
 
 const express = require('express');
-import { httpsRedirect } from './middleware/httpsRedirect.js'; 
+const  httpsRedirect  = require('./middleware/httpsRedirect');
 const cors = require('cors');
 const sequelize = require('./config/database');
 const passport = require('./config/passport'); // passport sử dụng JWT_SECRET từ .env
