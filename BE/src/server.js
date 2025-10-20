@@ -13,7 +13,7 @@ const passport = require('./config/passport'); // passport sử dụng JWT_SECRE
 const authRoutes = require('./route/authRoutes');
 const routeApi = require('./route/api');
 const librarianRoutes = require("./route/librarianRoutes");
-
+const readerRoutes = require("./route/readerRoutes");
 const app = express();
 const port = process.env.PORT || 8080;
 
@@ -61,6 +61,7 @@ app.use(httpsRedirect);
 // Auth routes (JWT authentication)
 app.use('/api/auth', authRoutes);
 app.use('/api/librarian', librarianRoutes);
+app.use('/api/reader', readerRoutes);
 app.use('/', routeApi);
 // app.use('/api', routeApi);
 

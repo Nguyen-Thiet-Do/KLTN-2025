@@ -2,7 +2,7 @@
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcrypt");
 const sequelize = require("../config/database");
-const { Account, Reader, Librarian } = require("../model/Index");
+const { Account, Reader, Librarian } = require("../model/index");
 
 // =============================
 // 🔐 TOKEN HANDLERS

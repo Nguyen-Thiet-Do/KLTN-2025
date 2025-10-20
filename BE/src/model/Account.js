@@ -64,11 +64,13 @@ const Account = sequelize.define('Account', {
   },
 
   // ✅ Scope để Passport có thể truy cập mật khẩu
-  scopes: {
-    withSecrets: {
-      attributes: { include: ['passwordHash', 'refresh_token'] },
-    },
+ scopes: {
+  withSecrets: {
+    // chỉ cần lấy tất cả cột, không cần specify include
+    attributes: { exclude: [] },
   },
+},
+
 });
 
 module.exports = Account;
