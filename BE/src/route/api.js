@@ -83,6 +83,47 @@ routeApi.get('/', (req, res) => {
           }
         ]
       },
+
+      {
+        group: 'Documents of Reader',
+        icon: '📚',
+        routes: [
+          {
+            method: 'GET',
+            path: '/api/documets/reader',
+            description: 'Lấy tài liệu theo loại (Book, Newspaper, Magazine, all) kèm cọc min/max, số bản sao sẵn sàng',
+            auth: true,
+            role: 'Reader (roleId = 3)',
+            query: {
+              page: 'number (optional, default=1): trang hiện tại',
+              limit: 'number (optional, default=10):  số lượng bản ghi trên mỗi trang',
+              search: 'string (optional, tìm kiếm theo tiêu đề): tên tài liệu cần tìm',
+              type: "string (optional, 'book' | 'magazine' | 'newspaper' | 'all', default='all'): loại tài liệu"
+            }
+          },
+          {
+            method: 'GET',
+            path: '/api/documents/reader/:id',
+            description: 'Lấy chi tiết 1 tài liệu kèm cọc min/max, số bản sao sẵn sàng',
+            auth: true,
+            role: 'Reader (roleId = 3)',
+            params: {
+              id: 'number (required): ID của tài liệu cần lấy chi tiết'
+            }
+          },
+          {
+            method: 'GET',
+            path: '/api/documents/ebook/:id',
+            description: 'Lấy URL ebook của tài liệu',
+            auth: true,
+            role: 'Reader (roleId = 3)',
+            params: {
+              id: 'number (required): ID của tài liệu cần lấy URL ebook'
+            }
+          }
+      
+        ]
+      },
       {
         group: 'Users ( đang phát triển )',
         icon: '👥',
