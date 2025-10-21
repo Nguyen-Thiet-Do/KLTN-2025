@@ -90,7 +90,7 @@ routeApi.get('/', (req, res) => {
         routes: [
           {
             method: 'GET',
-            path: '/api/documets/reader',
+            path: '/api/documents/reader',
             description: 'Lấy tài liệu theo loại (Book, Newspaper, Magazine, all) kèm cọc min/max, số bản sao sẵn sàng',
             auth: true,
             role: 'Reader (roleId = 3)',
