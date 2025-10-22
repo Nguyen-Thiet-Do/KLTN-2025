@@ -1,52 +1,79 @@
-import axios from 'axios';
+// services/api.js
+import axios from "axios";
+
+const BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8080/api";
 
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:8080/api',
+  baseURL: BASE_URL,
   timeout: 10000,
-  headers: { 'Content-Type': 'application/json' },
+  headers: { "Content-Type": "application/json" },
 });
 
-// Request interceptor
+// Gắn access token cho mọi request (nếu có)
 api.interceptors.request.use(
   (config) => {
-    const token = sessionStorage.getItem('accessToken');
-    if (token) config.headers.Authorization = `Bearer ${token}`;
+    const token = sessionStorage.getItem("accessToken");
+    if (token) {
+      config.headers = config.headers || {};
+      config.headers.Authorization = `Bearer ${token}`;
+    }
     return config;
   },
   (error) => Promise.reject(error)
 );
 
-// Response interceptor
+// Helper lấy message từ lỗi BE
+const pickMessage = (err) =>
+  err?.response?.data?.message ||
+  err?.response?.data?.error ||
+  err?.response?.data?.detail ||
+  (Array.isArray(err?.response?.data?.errors) && err.response.data.errors[0]?.message) ||
+  err?.message ||
+  "Có lỗi xảy ra.";
+
+// Refresh token nếu 401 (trừ request auth/skip)
 api.interceptors.response.use(
-  (response) => response,
+  (res) => res,
   async (error) => {
-    const originalRequest = error.config;
+    const original = error.config || {};
+    const status = error?.response?.status;
 
-    if (error.response?.status === 401 && !originalRequest._retry) {
-      originalRequest._retry = true;
+    const url = original?.url || "";
+    const skipRefresh =
+      original.__skipRefresh ||
+      url.includes("/auth/login") ||
+      url.includes("/auth/register") ||
+      url.includes("/auth/forgot-password") ||
+      url.includes("/auth/reset-password");
 
+    if (!skipRefresh && status === 401 && !original._retry) {
+      original._retry = true;
       try {
-        const refreshToken = sessionStorage.getItem('refreshToken');
-        if (!refreshToken) throw new Error('No refresh token');
+        const refreshToken = sessionStorage.getItem("refreshToken");
+        if (!refreshToken) throw new Error("No refresh token");
 
-        const response = await axios.post(
-          `${import.meta.env.VITE_API_URL}/auth/refresh-token`,
-          { refreshToken }
-        );
+        const res = await axios.post(`${BASE_URL}/auth/refresh-token`, { refreshToken });
+        // BE của bạn trả kiểu:
+        // { success, message, data: { accessToken, refreshToken? } }
+        const newAccess = res?.data?.data?.accessToken;
+        const newRefresh = res?.data?.data?.refreshToken;
 
-        const { accessToken } = response.data.data;
-        sessionStorage.setItem('accessToken', accessToken);
+        if (!newAccess) throw new Error("No new access token");
 
-        originalRequest.headers.Authorization = `Bearer ${accessToken}`;
-        return api(originalRequest);
-      } catch (refreshError) {
+        sessionStorage.setItem("accessToken", newAccess);
+        if (newRefresh) sessionStorage.setItem("refreshToken", newRefresh);
+
+        original.headers = original.headers || {};
+        original.headers.Authorization = `Bearer ${newAccess}`;
+        return api(original);
+      } catch (e) {
         sessionStorage.clear();
-        window.location.href = '/login';
-        return Promise.reject(refreshError);
+        if (!skipRefresh) window.location.href = "/login";
+        return Promise.reject(new Error(pickMessage(e)));
       }
     }
 
-    return Promise.reject(error);
+    return Promise.reject(new Error(pickMessage(error)));
   }
 );
 
