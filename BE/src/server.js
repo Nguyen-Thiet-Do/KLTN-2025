@@ -15,6 +15,7 @@ const routeApi = require('./route/api');
 const librarianRoutes = require("./route/librarianRoutes");
 const readerRoutes = require("./route/readerRoutes");
 const documentRoutes = require('./route/documentRoutes');
+const fileRoute = require('./route/fileRoutes');
 const app = express();
 const port = process.env.PORT || 8080;
 
@@ -65,6 +66,7 @@ app.use('/api/librarian', librarianRoutes);
 app.use('/api/reader', readerRoutes);
 app.use('/', routeApi);
 app.use('/api/documents', documentRoutes);
+app.use('/api/files', fileRoute);
 // app.use('/api', routeApi);
 
 
