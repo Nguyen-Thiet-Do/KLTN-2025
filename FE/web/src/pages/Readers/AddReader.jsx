@@ -1,12 +1,33 @@
 import { useState } from "react";
+import {
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  TextField,
+  Button,
+  MenuItem,
+  FormControl,
+  InputLabel,
+  Select,
+  Box,
+  Alert,
+  CircularProgress,
+  Typography,
+  IconButton,
+  Card,
+  CardContent,
+} from "@mui/material";
+import { Close } from "@mui/icons-material";
 import { createReader } from "../../services/readerService";
-import "./AddReader.css";
 
-export default function AddReader({ onSuccess, onCancel }) {
+export default function AddReader({ onSuccess, onCancel, open = true }) {
   const [form, setForm] = useState({
-    fullName: "",
+    // account
     email: "",
     password: "",
+    // profile
+    fullName: "",
     gender: "",
     dateOfBirth: "",
     phoneNumber: "",
@@ -18,6 +39,7 @@ export default function AddReader({ onSuccess, onCancel }) {
 
   const handleChange = (e) => {
     setForm({ ...form, [e.target.name]: e.target.value });
+    if (error) setError(null);
   };
 
   const handleSubmit = async (e) => {
@@ -27,12 +49,8 @@ export default function AddReader({ onSuccess, onCancel }) {
     try {
       const token = sessionStorage.getItem("accessToken");
       const res = await createReader(token, form);
-      if (res.success) {
-        alert("✅ Thêm độc giả thành công!");
-        onSuccess();
-      } else {
-        setError(res.message || "Thêm độc giả thất bại");
-      }
+      if (res.success) onSuccess();
+      else setError(res.message || "Thêm thất bại");
     } catch (err) {
       console.error(err);
       setError(err.response?.data?.message || "Lỗi khi thêm độc giả");
@@ -41,74 +59,296 @@ export default function AddReader({ onSuccess, onCancel }) {
     }
   };
 
+  const handleClose = () => {
+    if (!loading) onCancel();
+  };
+
+  // style helper cho TextField/Select
+  const fieldSx = {
+    "& .MuiOutlinedInput-root": {
+      borderRadius: 2,
+      "&:hover fieldset": { borderColor: "#667EEA" },
+      "&.Mui-focused fieldset": { borderColor: "#667EEA", borderWidth: 2 },
+    },
+  };
+
   return (
-    <div className="modal-overlay" onClick={onCancel}>
-      <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-        <h3>Thêm Độc Giả Mới</h3>
-        {error && <p className="error">{error}</p>}
-        <form onSubmit={handleSubmit}>
-          <input
-            name="fullName"
-            placeholder="Họ tên"
-            value={form.fullName}
-            onChange={handleChange}
-            required
-          />
-          <input
-            name="email"
-            type="email"
-            placeholder="Email"
-            value={form.email}
-            onChange={handleChange}
-            required
-          />
-          <input
-            name="password"
-            type="password"
-            placeholder="Mật khẩu"
-            value={form.password}
-            onChange={handleChange}
-            required
-          />
-          <select name="gender" value={form.gender} onChange={handleChange}>
-            <option value="">Giới tính</option>
-            <option value="1">Nam</option>
-            <option value="0">Nữ</option>
-          </select>
-          <input
-            name="dateOfBirth"
-            type="date"
-            value={form.dateOfBirth}
-            onChange={handleChange}
-          />
-          <input
-            name="phoneNumber"
-            placeholder="Số điện thoại"
-            value={form.phoneNumber}
-            onChange={handleChange}
-          />
-          <input
-            name="address"
-            placeholder="Địa chỉ"
-            value={form.address}
-            onChange={handleChange}
-          />
-          <textarea
-            name="note"
-            placeholder="Ghi chú"
-            value={form.note}
-            onChange={handleChange}
-          />
-          <div className="modal-actions">
-            <button type="submit" disabled={loading}>
-              {loading ? "Đang xử lý..." : "Thêm độc giả"}
-            </button>
-            <button type="button" onClick={onCancel}>
-              Hủy
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
+    <Dialog
+      open={open}
+      onClose={handleClose}
+      maxWidth="md"
+      fullWidth
+      scroll="paper"
+      PaperProps={{
+        sx: {
+          borderRadius: 3,
+          boxShadow: "0 20px 60px rgba(0,0,0,0.3)",
+          height: "90vh",
+          display: "grid",
+          gridTemplateRows: "auto 1fr auto", // Header | Content (scroll) | Actions
+          overflow: "hidden",
+        },
+      }}
+    >
+      {/* Header */}
+      <DialogTitle
+        sx={{
+          background: "linear-gradient(135deg, #667EEA 0%, #764BA2 100%)",
+          color: "white",
+          py: 2,
+          position: "relative",
+        }}
+      >
+        <Typography variant="h5" fontWeight={700} textAlign="center">
+          Thêm Độc Giả Mới
+        </Typography>
+        <IconButton
+          onClick={handleClose}
+          disabled={loading}
+          sx={{
+            position: "absolute",
+            right: 16,
+            top: "50%",
+            transform: "translateY(-50%)",
+            color: "white",
+            "&:hover": { backgroundColor: "rgba(255,255,255,0.1)" },
+          }}
+        >
+          <Close />
+        </IconButton>
+      </DialogTitle>
+
+      {/* Form giữ grid order: content + actions */}
+      <Box component="form" onSubmit={handleSubmit} sx={{ display: "contents" }}>
+        {/* Content (scroll area) */}
+        <DialogContent
+          sx={{
+            p: 0,
+            overflowY: "auto",
+            minHeight: 0,
+            display: "flex",
+            flexDirection: "column",
+          }}
+        >
+          {error && (
+            <Alert severity="error" sx={{ m: 3, mb: 2, borderRadius: 2, "& .MuiAlert-message": { py: 1 } }}>
+              {error}
+            </Alert>
+          )}
+
+          {/* Section 1: Tài khoản (2 cột) */}
+          <Card elevation={0} sx={{ borderRadius: 0, borderBottom: "1px solid #e0e0e0" }}>
+            <CardContent sx={{ p: 4, pb: 3 }}>
+              <Typography
+                variant="h6"
+                fontWeight={600}
+                sx={{
+                  mb: 3,
+                  color: "#667EEA",
+                  display: "flex",
+                  alignItems: "center",
+                  "&::before": {
+                    content: '"1"',
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    width: 24,
+                    height: 24,
+                    backgroundColor: "#667EEA",
+                    color: "white",
+                    borderRadius: "50%",
+                    fontSize: "0.875rem",
+                    mr: 2,
+                  },
+                }}
+              >
+                Thông Tin Tài Khoản
+              </Typography>
+
+              <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" }, gap: 3 }}>
+                <TextField
+                  name="email"
+                  type="email"
+                  label="Email đăng nhập"
+                  value={form.email}
+                  onChange={handleChange}
+                  required
+                  disabled={loading}
+                  placeholder="Nhập email đăng nhập"
+                  sx={fieldSx}
+                />
+                <TextField
+                  name="password"
+                  type="password"
+                  label="Mật khẩu"
+                  value={form.password}
+                  onChange={handleChange}
+                  required
+                  disabled={loading}
+                  placeholder="Nhập mật khẩu"
+                  sx={fieldSx}
+                />
+              </Box>
+            </CardContent>
+          </Card>
+
+          {/* Section 2: Thông tin cá nhân (2 cột) */}
+          <Card elevation={0} sx={{ borderRadius: 0 }}>
+            <CardContent sx={{ p: 4, pt: 3 }}>
+              <Typography
+                variant="h6"
+                fontWeight={600}
+                sx={{
+                  mb: 3,
+                  color: "#667EEA",
+                  display: "flex",
+                  alignItems: "center",
+                  "&::before": {
+                    content: '"2"',
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    width: 24,
+                    height: 24,
+                    backgroundColor: "#667EEA",
+                    color: "white",
+                    borderRadius: "50%",
+                    fontSize: "0.875rem",
+                    mr: 2,
+                  },
+                }}
+              >
+                Thông Tin Cá Nhân
+              </Typography>
+
+              <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" }, gap: 3 }}>
+                <TextField
+                  name="fullName"
+                  label="Họ và tên"
+                  value={form.fullName}
+                  onChange={handleChange}
+                  required
+                  disabled={loading}
+                  placeholder="Nhập họ và tên đầy đủ"
+                  sx={fieldSx}
+                />
+
+                <FormControl required sx={fieldSx}>
+                  <InputLabel id="gender-label">Giới tính</InputLabel>
+                  <Select labelId="gender-label" name="gender" value={form.gender} label="Giới tính" onChange={handleChange} disabled={loading}>
+                    <MenuItem value="">
+                      <em>Chọn giới tính</em>
+                    </MenuItem>
+                    <MenuItem value="1">Nam</MenuItem>
+                    <MenuItem value="0">Nữ</MenuItem>
+                    <MenuItem value="other">Khác</MenuItem>
+                  </Select>
+                </FormControl>
+
+                <TextField
+                  name="dateOfBirth"
+                  type="date"
+                  label="Ngày sinh"
+                  value={form.dateOfBirth}
+                  onChange={handleChange}
+                  disabled={loading}
+                  InputLabelProps={{ shrink: true }}
+                  sx={fieldSx}
+                />
+
+                <TextField
+                  name="phoneNumber"
+                  label="Số điện thoại"
+                  value={form.phoneNumber}
+                  onChange={handleChange}
+                  disabled={loading}
+                  placeholder="Nhập số điện thoại"
+                  sx={fieldSx}
+                />
+
+                <TextField
+                  name="address"
+                  label="Địa chỉ"
+                  value={form.address}
+                  onChange={handleChange}
+                  disabled={loading}
+                  placeholder="Nhập địa chỉ đầy đủ"
+                  sx={{ ...fieldSx, gridColumn: { xs: "auto", md: "1 / span 2" } }}
+                />
+
+                <TextField
+                  name="note"
+                  label="Ghi chú"
+                  value={form.note}
+                  onChange={handleChange}
+                  disabled={loading}
+                  placeholder="Thêm ghi chú (nếu có)"
+                  multiline
+                  rows={3}
+                  sx={{ ...fieldSx, gridColumn: { xs: "auto", md: "1 / span 2" } }}
+                />
+              </Box>
+            </CardContent>
+          </Card>
+        </DialogContent>
+
+        {/* Actions */}
+        <DialogActions
+          sx={{
+            px: 4,
+            pb: 3,
+            pt: 3,
+            gap: 2,
+            borderTop: "1px solid #e0e0e0",
+            backgroundColor: "white",
+          }}
+        >
+          <Button
+            onClick={handleClose}
+            disabled={loading}
+            variant="outlined"
+            sx={{
+              px: 4,
+              py: 1,
+              borderRadius: 2,
+              borderColor: "#667EEA",
+              color: "#667EEA",
+              fontWeight: 600,
+              "&:hover": { borderColor: "#5A67D8", backgroundColor: "rgba(102,126,234,0.04)" },
+            }}
+          >
+            Hủy
+          </Button>
+          <Button
+            type="submit"
+            disabled={loading}
+            variant="contained"
+            sx={{
+              px: 4,
+              py: 1,
+              borderRadius: 2,
+              background: "linear-gradient(135deg, #667EEA 0%, #764BA2 100%)",
+              fontWeight: 600,
+              boxShadow: "0 4px 12px rgba(102,126,234,0.3)",
+              "&:hover": {
+                background: "linear-gradient(135deg, #5A67D8 0%, #6B46C1 100%)",
+                boxShadow: "0 6px 16px rgba(102,126,234,0.4)",
+                transform: "translateY(-1px)",
+              },
+              "&:disabled": { background: "#ccc", boxShadow: "none", transform: "none" },
+            }}
+          >
+            {loading ? (
+              <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                <CircularProgress size={16} sx={{ color: "white" }} />
+                <span>Đang xử lý...</span>
+              </Box>
+            ) : (
+              "Thêm độc giả"
+            )}
+          </Button>
+        </DialogActions>
+      </Box>
+    </Dialog>
   );
 }

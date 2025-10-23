@@ -45,7 +45,7 @@ export default function Librarians() {
 
   // 🔢 Phân trang
   const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 10;
+  const itemsPerPage = 5;
 
   // 🔄 Lấy danh sách thủ thư
   const fetchData = async () => {
