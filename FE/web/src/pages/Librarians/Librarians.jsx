@@ -33,6 +33,8 @@ import { getLibrarians, deleteLibrarian } from "../../services/librarianService"
 import AddLibrarian from "./AddLibrarian";
 import EditLibrarian from "./EditLibrarian";
 
+import ButtonLoader from "../../components/Loading/ButtonLoader";
+
 export default function Librarians() {
   const [librarians, setLibrarians] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -234,7 +236,7 @@ export default function Librarians() {
       {/* Loading và Error */}
       {loading && (
         <Box sx={{ display: 'flex', justifyContent: 'center', my: 4 }}>
-          <CircularProgress />
+          <ButtonLoader inline size={350} />
         </Box>
       )}
       

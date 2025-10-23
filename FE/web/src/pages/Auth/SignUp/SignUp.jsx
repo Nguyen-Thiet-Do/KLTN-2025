@@ -225,7 +225,7 @@ export default function SignUp() {
           <Stack spacing={2} alignItems="center" textAlign="center">
             <Box
               component="img"
-              src="/logo.png"
+              src="/logoo.png"
               alt="Logo Thư Viện"
               sx={{
                 width: 92,
@@ -260,7 +260,7 @@ export default function SignUp() {
                   fontFamily: '"Inter", sans-serif',
                 }}
               >
-                Thư Viện Cộng Đồng
+                Thư Viện Book-tech
               </Typography>
               <Typography
                 variant="h6"
@@ -274,7 +274,7 @@ export default function SignUp() {
                   letterSpacing: '-0.01em',
                 }}
               >
-                KDC Hoàng Mai
+             
               </Typography>
               <Typography
                 variant="body2"

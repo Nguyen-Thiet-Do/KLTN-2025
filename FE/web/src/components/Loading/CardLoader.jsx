@@ -1,20 +1,11 @@
-import Skeleton from 'react-loading-skeleton';
-import 'react-loading-skeleton/dist/skeleton.css';
-import './CardLoader.css';
+import { Player } from "@lottiefiles/react-lottie-player";
+import book from "../../assets/Book.json"; // đặt file vào src/assets
 
-export default function CardLoader({ count = 3 }) {
+export default function BookLoader() {
   return (
-    <div className="card-loader-container">
-      {Array.from({ length: count }).map((_, i) => (
-        <div key={i} className="skeleton-card">
-          <Skeleton height={180} />
-          <div className="skeleton-card-content">
-            <Skeleton height={24} width="70%" />
-            <Skeleton count={2} height={16} />
-            <Skeleton height={16} width="50%" />
-          </div>
-        </div>
-      ))}
+    <div className="fixed inset-0 grid place-items-center bg-white/80 z-50">
+      <Player autoplay loop src={book} style={{ width: 160, height: 160 }} />
+      <span className="mt-3 text-gray-600">Đang tải dữ liệu...</span>
     </div>
   );
 }

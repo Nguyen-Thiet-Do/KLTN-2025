@@ -1,7 +1,7 @@
 import { RouterProvider } from "react-router-dom";
 import { AuthProvider } from "./contexts/AuthContext";
 import { router } from "./routes";
-
+import ButtonLoader from './components/Loading/ButtonLoader.jsx';
 function App() {
   return (
     <AuthProvider>

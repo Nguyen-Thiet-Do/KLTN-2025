@@ -1,21 +1,11 @@
-import { BarLoader } from 'react-spinners';
+import { Player } from "@lottiefiles/react-lottie-player";
+import book from "../../assets/Book.json"; // đặt file vào src/assets
 
-export default function InlineLoader({ 
-  loading = true, 
-  color = '#667eea',
-  width = '100%',
-  height = 4 
-}) {
-  if (!loading) return null;
-  
+export default function BookLoader() {
   return (
-    <div style={{ width: '100%', margin: '10px 0' }}>
-      <BarLoader 
-        color={color} 
-        width={width}
-        height={height}
-        speedMultiplier={0.8}
-      />
+    <div className="fixed inset-0 grid place-items-center bg-white/80 z-50">
+      <Player autoplay loop src={book} style={{ width: 160, height: 160 }} />
+      <span className="mt-3 text-gray-600">Đang tải dữ liệu...</span>
     </div>
   );
 }

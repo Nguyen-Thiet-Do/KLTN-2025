@@ -10,7 +10,6 @@ import {
   Stack,
   InputAdornment,
   IconButton,
-  CircularProgress,
   Checkbox,
   FormControlLabel,
   Divider,
@@ -18,6 +17,8 @@ import {
 import Visibility from '@mui/icons-material/Visibility';
 import VisibilityOff from '@mui/icons-material/VisibilityOff';
 import { useAuth } from '../../../contexts/AuthContext';
+import ButtonLoader from '../../../components/Loading/ButtonLoader.jsx';
+
 
 export default function Login() {
   const navigate = useNavigate();
@@ -170,13 +171,13 @@ export default function Login() {
           },
           animation: 'slideUpFade 500ms cubic-bezier(0.16, 1, 0.3, 1)',
           '@keyframes slideUpFade': {
-            from: { 
-              opacity: 0, 
-              transform: 'translateY(24px) scale(0.98)' 
+            from: {
+              opacity: 0,
+              transform: 'translateY(24px) scale(0.98)'
             },
-            to: { 
-              opacity: 1, 
-              transform: 'translateY(0) scale(1)' 
+            to: {
+              opacity: 1,
+              transform: 'translateY(0) scale(1)'
             },
           },
           transition: 'transform 0.3s ease, box-shadow 0.3s ease',
@@ -195,7 +196,7 @@ export default function Login() {
           <Stack spacing={2} alignItems="center" textAlign="center">
             <Box
               component="img"
-              src="/logo.png"
+              src="/logoo.png"
               alt="Logo Thư Viện"
               sx={{
                 width: 92,
@@ -218,8 +219,8 @@ export default function Login() {
               }}
             />
             <Stack spacing={0.8}>
-              <Typography 
-                variant="h5" 
+              <Typography
+                variant="h5"
                 fontWeight={800}
                 sx={{
                   background: 'linear-gradient(135deg, #2D3748 0%, #4A5568 100%)',
@@ -230,10 +231,10 @@ export default function Login() {
                   fontFamily: '"Inter", sans-serif',
                 }}
               >
-                Thư Viện Cộng Đồng
+                Thư Viện Book-Tech
               </Typography>
-              <Typography 
-                variant="h6" 
+              <Typography
+                variant="h6"
                 fontWeight={700}
                 sx={{
                   background: 'linear-gradient(135deg, #667EEA 0%, #764BA2 100%)',
@@ -244,10 +245,9 @@ export default function Login() {
                   letterSpacing: '-0.01em',
                 }}
               >
-                KDC Hoàng Mai
               </Typography>
-              <Typography 
-                variant="body2" 
+              <Typography
+                variant="body2"
                 color="text.secondary"
                 sx={{
                   mt: 0.5,
@@ -398,9 +398,9 @@ export default function Login() {
                 />
               }
               label={
-                <Typography 
-                  variant="body2" 
-                  sx={{ 
+                <Typography
+                  variant="body2"
+                  sx={{
                     fontFamily: '"Inter", sans-serif',
                     fontWeight: 500,
                     userSelect: 'none',
@@ -421,7 +421,7 @@ export default function Login() {
                 fontWeight: 600,
                 fontFamily: '"Inter", sans-serif',
                 transition: 'all 0.2s ease',
-                '&:hover': { 
+                '&:hover': {
                   textDecoration: 'underline',
                   color: 'primary.dark',
                 },
@@ -485,7 +485,7 @@ export default function Login() {
           >
             {isSubmitting ? (
               <Stack direction="row" spacing={1.5} alignItems="center">
-                <CircularProgress size={20} sx={{ color: 'white' }} />
+                <ButtonLoader inline size={35} />
                 <span>Đang đăng nhập...</span>
               </Stack>
             ) : (
@@ -495,9 +495,9 @@ export default function Login() {
 
           <Divider sx={{ my: 2, opacity: 0.4 }} />
 
-          <Typography 
-            variant="body2" 
-            color="text.secondary" 
+          <Typography
+            variant="body2"
+            color="text.secondary"
             textAlign="center"
             sx={{
               fontFamily: '"Inter", sans-serif',
@@ -514,7 +514,7 @@ export default function Login() {
                 textDecoration: 'none',
                 transition: 'all 0.2s ease',
                 fontFamily: '"Inter", sans-serif',
-                '&:hover': { 
+                '&:hover': {
                   textDecoration: 'underline',
                   color: 'primary.dark',
                 },

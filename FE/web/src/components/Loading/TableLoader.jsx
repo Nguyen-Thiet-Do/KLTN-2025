@@ -1,31 +1,11 @@
-import Skeleton from 'react-loading-skeleton';
-import 'react-loading-skeleton/dist/skeleton.css';
-import './TableLoader.css';
+import { Player } from "@lottiefiles/react-lottie-player";
+import book from "../../assets/Book.json"; // đặt file vào src/assets
 
-export default function TableLoader({ rows = 5, columns = 4 }) {
+export default function BookLoader() {
   return (
-    <div className="table-loader">
-      <div className="table-container">
-        {/* Header */}
-        <div className="skeleton-row skeleton-header">
-          {Array.from({ length: columns }).map((_, i) => (
-            <div key={i} className="skeleton-cell">
-              <Skeleton height={30} />
-            </div>
-          ))}
-        </div>
-        
-        {/* Body */}
-        {Array.from({ length: rows }).map((_, i) => (
-          <div key={i} className="skeleton-row">
-            {Array.from({ length: columns }).map((_, j) => (
-              <div key={j} className="skeleton-cell">
-                <Skeleton height={40} />
-              </div>
-            ))}
-          </div>
-        ))}
-      </div>
+    <div className="fixed inset-0 grid place-items-center bg-white/80 z-50">
+      <Player autoplay loop src={book} style={{ width: 160, height: 160 }} />
+      <span className="mt-3 text-gray-600">Đang tải dữ liệu...</span>
     </div>
   );
 }
