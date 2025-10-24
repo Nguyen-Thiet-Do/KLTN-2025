@@ -89,5 +89,132 @@ const getEbookUrlReader = async (req, res) => {
   }
 };
 
+const getAllGenres = async (req, res) => {
+  try {
+    const genres = await documentService.getGenre();
+    return res.status(200).json({
+      success: true,
+      message: 'Lấy danh sách thể loại thành công',
+      data: genres
+    });
+  }
+  catch (error) {
+    console.error('Error in getAllGenre:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Lỗi khi lấy danh sách thể loại',
+      error: error.message
+    });
+  }
+};
 
-module.exports = { getAllBooksReader, getDocumentDetailReader, getEbookUrlReader };
+// Lọc tài liệu theo thể loại (genre) — match any|all
+const getDocumentsByGenreReader = async (req, res) => {
+  try {
+    const page = Math.max(parseInt(req.query.page) || 1, 1);
+    const limit = Math.max(parseInt(req.query.limit) || 10, 1);
+    const search = (req.query.search || '').toString().trim();
+
+    const type = (req.query.type || 'all').toLowerCase();
+    const validTypes = ['book', 'magazine', 'newspaper', 'all'];
+    const documentType = validTypes.includes(type) ? type : 'all';
+
+    const matchRaw = (req.query.match || 'any').toLowerCase();
+    const match = (matchRaw === 'all') ? 'all' : 'any';
+
+    const genreIdsRaw = (req.query.genreIds || '').toString();
+    const genreIds = genreIdsRaw
+      .split(',')
+      .map(s => s.trim())
+      .filter(Boolean)
+      .map(n => parseInt(n, 10))
+      .filter(n => Number.isInteger(n) && n > 0);
+
+    if (!genreIds.length) {
+      return res.status(400).json({
+        success: false,
+        message: 'Thiếu danh sách thể loại (genreIds). Ví dụ: ?genreIds=2,5,9'
+      });
+    }
+
+    const result = await documentService.getDocumentsByGenre({
+      page,
+      limit,
+      search,
+      documentType,
+      genreIds,
+      match
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Lọc tài liệu theo thể loại thành công',
+      data: result.items,
+      pagination: {
+        currentPage: result.currentPage,
+        totalPages: result.totalPages,
+        totalItems: result.totalItems,
+        limit: result.limit,
+        hasNextPage: result.hasNextPage,
+        hasPrevPage: result.hasPrevPage
+      },
+      filter: { type: documentType, search, genreIds, match }
+    });
+  } catch (error) {
+    console.error('Error in getDocumentsByGenreReader:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Lỗi khi lọc tài liệu theo thể loại',
+      error: error.message
+    });
+  }
+};
+
+const searchDocumentsUniversalReader = async (req, res) => {
+  try {
+    const page = Math.max(parseInt(req.query.page) || 1, 1);
+    const limit = Math.max(parseInt(req.query.limit) || 10, 1);
+    const q = (req.query.q || req.query.search || '').toString().trim(); // hỗ trợ q hoặc search
+    const type = (req.query.type || 'all').toLowerCase();
+    const validTypes = ['book', 'magazine', 'newspaper', 'all'];
+    const documentType = validTypes.includes(type) ? type : 'all';
+
+    const result = await documentService.searchDocumentsUniversal({
+      page,
+      limit,
+      q,
+      documentType
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Tìm kiếm thành công',
+      data: result.items,
+      pagination: {
+        currentPage: result.currentPage,
+        totalPages: result.totalPages,
+        totalItems: result.totalItems,
+        limit: result.limit,
+        hasNextPage: result.hasNextPage,
+        hasPrevPage: result.hasPrevPage
+      },
+      filter: { q, type: documentType }
+    });
+  } catch (error) {
+    console.error('Error in searchDocumentsUniversalReader:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Lỗi khi tìm kiếm',
+      error: error.message
+    });
+  }
+};
+
+module.exports = {
+  getAllBooksReader,
+  getDocumentDetailReader,
+  getEbookUrlReader,
+  getAllGenres,
+  getDocumentsByGenreReader,
+  searchDocumentsUniversalReader
+};

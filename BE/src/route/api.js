@@ -120,10 +120,45 @@ routeApi.get('/', (req, res) => {
             params: {
               id: 'number (required): ID của tài liệu cần lấy URL ebook'
             }
+          },
+          {
+            method: 'GET',
+            path: '/api/documents/genres',
+            description: 'Lấy danh sách thể loại tài liệu',
+            auth: true
+
+          },
+          {
+            method: 'GET',
+            path: '/api/documents/reader/by-genre',
+            description: "Lọc tài liệu theo thể loại (genre) — hỗ trợ match 'any' | 'all'",
+            auth: true,
+            role: 'Reader (roleId = 3)',
+            query: {
+              page: 'number (optional, default=1): trang hiện tại',
+              limit: 'number (optional, default=10):  số lượng bản ghi trên mỗi trang',
+              search: 'string (optional, tìm kiếm theo tiêu đề): tên tài liệu cần tìm',
+              type: "string (optional, 'book' | 'magazine' | 'newspaper' | 'all', default='all'): loại tài liệu",
+              genreIds: 'string (required, ví dụ: "2,5,9"): Danh sách genreId, cách nhau bởi dấu phẩy',
+              match: "string (optional, 'any' | 'all', default='any'): 'any' (ít nhất 1) | 'all' (đầy đủ)"
+            }
+          },
+          {
+            method: 'GET',
+            path: '/api/documents/reader/search',
+            description: 'Tìm kiếm tài liệu toàn diện (tiêu đề, tác giả, mô tả, thể loại v.v.)',
+            auth: true,
+            role: 'Reader (roleId = 3)',
+            query: {
+              page: 'number (optional, default=1): trang hiện tại',
+              limit: 'number (optional, default=10):  số lượng bản ghi trên mỗi trang',
+              q: 'string (required): từ khóa tìm kiếm'
+            }
           }
-      
+
         ]
       },
+
       {
         group: 'Users ( đang phát triển )',
         icon: '👥',
