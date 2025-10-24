@@ -149,6 +149,7 @@ const getDocumentDetailWithDeposit = async (documentId) => {
         'categoryId',
         'publisherId',
         'title',
+        'shelfLocation',
         'language',
         'publicationYear',
         'coverPrice',
@@ -178,7 +179,7 @@ const getDocumentDetailWithDeposit = async (documentId) => {
         {
           model: DocumentCopy,
           as: 'copies',
-          attributes: ['documentCopyId', 'barCode', 'shelfLocation', 'status', 'conditionNote', 'entryDate', 'deleted'],
+          attributes: ['documentCopyId', 'barCode', 'status', 'conditionNote', 'entryDate', 'deleted'],
           where: { deleted: false },
           required: false
         },
@@ -239,7 +240,6 @@ const getDocumentDetailWithDeposit = async (documentId) => {
     const copyList = copies.map(c => ({
       documentCopyId: c.documentCopyId,
       barCode: c.barCode,
-      shelfLocation: c.shelfLocation,
       status: c.status,
       conditionNote: c.conditionNote,
       entryDate: c.entryDate
