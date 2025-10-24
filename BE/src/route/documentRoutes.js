@@ -31,6 +31,11 @@ router.get('/reader/:id', requireAuth, requireRole([3]), documentController.getD
  * @param   id - ID của tài liệu
  */
 router.get('/ebook/:id', requireAuth, requireRole([3]), documentController.getEbookUrlReader); 
+
+
 // Các route khác dành cho thủ thư hoặc admin 
+
+
+
 
 module.exports = router;

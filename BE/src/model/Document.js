@@ -7,6 +7,7 @@ const Document = sequelize.define('Document', {
   categoryId: { type: DataTypes.INTEGER, allowNull: false, field: 'categoryId' },
   publisherId: { type: DataTypes.INTEGER, allowNull: true, field: 'publisherId' },
   title: { type: DataTypes.STRING(300), allowNull: false, field: 'title' },
+  shelfLocation: { type: DataTypes.STRING(100), allowNull: true, field: 'shelfLocation' },
   language: { type: DataTypes.STRING(50), allowNull: true, field: 'language' },
   publicationYear: { type: DataTypes.INTEGER, allowNull: true, field: 'publicationYear' },
   coverPrice: { type: DataTypes.INTEGER, allowNull: true, field: 'coverPrice' },

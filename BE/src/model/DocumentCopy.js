@@ -6,7 +6,6 @@ const DocumentCopy = sequelize.define('DocumentCopy', {
   documentCopyId: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true, field: 'documentCopyId' },
   documentId: { type: DataTypes.INTEGER, allowNull: false, field: 'documentId' },
   barCode: { type: DataTypes.STRING(100), allowNull: false, field: 'barCode' },
-  shelfLocation: { type: DataTypes.STRING(100), allowNull: true, field: 'shelfLocation' },
   status: { type: DataTypes.STRING(50), allowNull: true, defaultValue: 'AVAILABLE', field: 'status' },
   conditionNote: { type: DataTypes.STRING(500), allowNull: true, field: 'conditionNote' },
   entryDate: { type: DataTypes.DATEONLY, allowNull: true, field: 'entryDate' },
