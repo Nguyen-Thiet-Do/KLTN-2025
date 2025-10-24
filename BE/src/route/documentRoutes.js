@@ -34,10 +34,10 @@ router.get('/reader', requireAuth, requireRole([3]), documentController.getAllBo
  *
  * Lưu ý: đặt route này TRƯỚC /reader/:id để tránh bị bắt nhầm vào param :id.
  */
-router.get('/reader/by-genre', documentController.getDocumentsByGenreReader);
+router.get('/reader/by-genre', requireAuth, documentController.getDocumentsByGenreReader);
 
 router.get('/reader/search',
-   
+    requireAuth,
     documentController.searchDocumentsUniversalReader
 );
 
