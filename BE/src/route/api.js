@@ -196,6 +196,135 @@ routeApi.get('/', (req, res) => {
         ]
       },
       {
+        group: 'Metadata',
+        icon: '🗂️',
+        routes: [
+          {
+            method: 'GET',
+            path: '/api/metadata/authors',
+            description: 'Lấy danh sách tất cả tác giả',
+            auth: false
+          },
+          {
+            method: 'GET',
+            path: '/api/metadata/categories',
+            description: 'Lấy danh sách tất cả thể loại',
+            auth: false
+          },
+          {
+            method: 'GET',
+            path: '/api/metadata/publishers',
+            description: 'Lấy danh sách tất cả nhà xuất bản',
+            auth: false
+          },
+          {
+            method: 'GET',
+            path: '/api/metadata/genres',
+            description: 'Lấy danh sách tất cả thể loại (genre)',
+            auth: false
+          },
+          {
+            method: 'POST',
+            path: '/api/metadata/author',
+            description: 'Thêm tác giả mới',
+            auth: true,
+            role: 'Admin (roleId = 1), librarian (roleId = 2)',
+            body: {
+              name: 'string (required)',
+              note: 'string (optional)',
+            }
+          },
+          {
+            method: 'POST',
+            path: '/api/metadata/genre',
+            description: 'Thêm thể loại mới',
+            auth: true,
+            role: 'Admin (roleId = 1), librarian (roleId = 2)',
+            body: {
+              name: 'string (required)',
+              note: 'string (optional)',
+            }
+          },
+          {
+            method: 'POST',
+            path: '/api/metadata/publisher',
+            description: 'Thêm nhà xuất bản mới',
+            auth: true,
+            role: 'Admin (roleId = 1), librarian (roleId = 2)',
+            body: {
+              name: 'string (required)',
+              note: 'string (optional)',
+            }
+          }
+
+        ]
+      },
+      {
+        group: 'document Admin',
+        icon: '📚',
+        routes: [
+          {
+            method: 'GET',
+            path: '/api/documents/admin/books/basic',
+            description: 'Lấy danh sách tài liệu cơ bản loại Sách (Book)',
+            auth: true,
+            role: 'Admin (roleId = 1), Librarian (roleId = 2)',
+            query: {
+              page: 'number (optional, default=1)',
+              limit: 'number (optional, default=20, max=100)',
+              search: 'string (optional, tìm theo tiêu đề)'
+            }
+          },
+          {
+            method: 'GET',
+            path: '/api/documents/admin/magazines/basic',
+            description: 'Lấy danh sách tài liệu cơ bản loại Tạp chí (Magazine)',
+            auth: true,
+            role: 'Admin (roleId = 1), Librarian (roleId = 2)',
+            query: {
+              page: 'number (optional, default=1)',
+              limit: 'number (optional, default=20, max=100)',
+              search: 'string (optional, tìm theo tiêu đề)'
+            }
+          },
+          {
+            method: 'GET',
+            path: '/api/documents/admin/newspapers/basic',
+            description: 'Lấy danh sách tài liệu cơ bản loại Báo (Newspaper)',
+            auth: true,
+            role: 'Admin (roleId = 1), Librarian (roleId = 2)',
+            query: {
+              page: 'number (optional, default=1)',
+              limit: 'number (optional, default=20, max=100)',
+              search: 'string (optional, tìm theo tiêu đề)'
+            }
+          },
+          {
+            method: 'GET',
+            path: '/api/documents/admin/basic',
+            description: 'Lấy danh sách tài liệu cơ bản theo loại (Book, Magazine, Newspaper, All)',
+            auth: true,
+            role: 'Admin (roleId = 1), Librarian (roleId = 2)',
+            query: {
+              documentType: "string (optional, 'book' | 'magazine' | 'newspaper' | 'all', default='all')",
+              page: 'number (optional, default=1)',
+              limit: 'number (optional, default=20, max=100)',
+              search: 'string (optional, tìm theo tiêu đề)'
+            }
+          },
+          {
+            method: 'GET',
+            path: '/api/documents/admin/:id/copies',
+            description: 'Lấy danh sách bản sao của tài liệu kèm thông tin cọc min/max',
+            auth: true,
+            role: 'Admin (roleId = 1), Librarian (roleId = 2)',
+            params: {
+              id: 'number (required): ID của tài liệu cần lấy bản sao'
+            }
+          }
+        ]
+      },
+      {
         group: 'Librarians',
         icon: '📚',
         routes: [

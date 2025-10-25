@@ -1,10 +1,17 @@
 // src/service/documentService.js
+/* =============================================================================
+ *                              IMPORTS & SETUP
+ * ========================================================================== */
 const {
   Document, Book, Magazine, Newspaper,
   Category, DocumentCopy, Author, DocumentAuthorMap,
   Publisher, Genre, DocumentGenreMap
 } = require('../model');
 const { Op, col, fn, where } = require('sequelize');
+
+/* =============================================================================
+ *                              CONSTANTS & LABELS
+ * ========================================================================== */
 /**
  * Bảng nhãn loại tài liệu theo Category.name (đa ngôn ngữ/biến thể viết)
  * Dùng để suy luận documentType từ tên Category.
@@ -28,10 +35,9 @@ function inferTypeFromCategoryName(name = '') {
   return 'unknown';
 }
 
-/* -----------------------------------------------------------------------------
- *                       CÁC BUILDER CHO WHERE / INCLUDE
- * ---------------------------------------------------------------------------*/
-
+/* =============================================================================
+ *                          QUERY BUILDERS (WHERE/INCLUDE)
+ * ========================================================================== */
 /**
  * Tạo where cho bảng Document theo text search.
  * @param {string} [search=''] - Tìm theo tiêu đề (LIKE %search%)
@@ -137,10 +143,9 @@ function detailInclude(categoryWhere) {
   ];
 }
 
-/* -----------------------------------------------------------------------------
- *                   HELPERS NGHIỆP VỤ: TÍNH CỌC / CHUẨN HOÁ
- * ---------------------------------------------------------------------------*/
-
+/* =============================================================================
+ *                       BUSINESS HELPERS (TÍNH CỌC / CHUẨN HOÁ)
+ * ========================================================================== */
 function safeToNumber(x) {
   const v = parseFloat(x);
   return Number.isNaN(v) ? null : v;
@@ -232,10 +237,17 @@ function mapListItem(d) {
   };
 }
 
-/* -----------------------------------------------------------------------------
- *                        HÀM TRUY VẤN CỐT LÕI (REUSE)
- * ---------------------------------------------------------------------------*/
+// ===== Helper: chuẩn hoá từ khoá tìm kiếm
+function buildLikePattern(q) {
+  const s = String(q || '').trim();
+  if (!s) return null;
+  // có thể thêm escape % _ nếu cần
+  return `%${s}%`;
+}
 
+/* =============================================================================
+ *                          CORE QUERY (REUSABLE)
+ * ========================================================================== */
 async function countDocuments(whereDoc, whereCat) {
   return Document.count({
     where: whereDoc,
@@ -284,10 +296,9 @@ async function findDocumentDetail(documentId, whereCat) {
   });
 }
 
-/* -----------------------------------------------------------------------------
- *                   LỌC THEO GENRE (ANY / ALL) — FIX PHÂN TRANG
- * ---------------------------------------------------------------------------*/
-
+/* =============================================================================
+ *                       GENRE FILTERING (ANY / ALL) — PAGINATION-FIXED
+ * ========================================================================== */
 /**
  * Lấy danh sách documentId cho match 'any' (ít nhất 1 genre)
  * Áp limit/offset trên ID duy nhất để phân trang ổn.
@@ -527,137 +538,9 @@ async function getDocumentsByGenre({
   };
 }
 
-/* -----------------------------------------------------------------------------
- *                                PUBLIC APIS
- * ---------------------------------------------------------------------------*/
-
-const getAllDocumentsWithDepositInfo = async (
-  page = 1,
-  limit = 10,
-  search = '',
-  documentType = 'all'
-) => {
-  try {
-    const offset = (page - 1) * limit;
-
-    const whereDoc = buildDocumentWhere(search);
-    const whereCat = buildCategoryWhere(documentType);
-
-    const totalItems = await countDocuments(whereDoc, whereCat);
-    const rows = await findDocuments(whereDoc, whereCat, { limit, offset });
-
-    const items = rows.map(mapListItem);
-    const totalPages = Math.ceil(totalItems / limit);
-
-    return {
-      items,
-      currentPage: page,
-      totalPages,
-      totalItems,
-      limit,
-      hasNextPage: page < totalPages,
-      hasPrevPage: page > 1
-    };
-  } catch (error) {
-    console.error('Error in getAllDocumentsWithDepositInfo:', error);
-    throw error;
-  }
-};
-
-const getDocumentDetailWithDeposit = async (documentId) => {
-  try {
-    const whereCat = { deleted: false };
-    const doc = await findDocumentDetail(documentId, whereCat);
-    if (!doc) return null;
-
-    const o = doc.toJSON();
-    const documentType = inferTypeFromCategoryName(o.Category?.name);
-
-    const coverPrice = o.coverPrice || 0;
-    const depositRate = o.Category?.deposit_rate || 0;
-    const copies = Array.isArray(o.copies) ? o.copies : [];
-    const availableCopies = copies.filter(c => c.status === 'AVAILABLE').length;
-    const { minDeposit, maxDeposit } = computeDepositStats(coverPrice, depositRate, copies);
-
-    const { book, magazine, newspaper } = extractSubtypeInfo(o);
-
-    const publisher = o.Publisher ? {
-      publisherId: o.Publisher.publisherId,
-      name: o.Publisher.name,
-      note: o.Publisher.note ?? null
-    } : null;
-
-    return {
-      documentId: o.documentId,
-      documentType,
-      title: o.title,
-      language: o.language,
-      publicationYear: o.publicationYear,
-      coverPrice: o.coverPrice,
-      description: o.description,
-      coverPhoto: o.coverPhoto,
-      ebookUrl: o.ebookUrl,
-      numberOfCopy: o.numberOfCopy,
-
-      category: {
-        categoryId: o.Category?.categoryId,
-        name: o.Category?.name,
-        depositRate
-      },
-      publisher,
-
-      book,
-      magazine,
-      newspaper,
-
-      deposit: { minDeposit, maxDeposit },
-      authors: normalizeAuthors(o.authors || []),
-      genres: normalizeGenres(o.genres || []),
-      copies: normalizeCopies(copies),
-      totalCopies: copies.length,
-      availableCopies
-    };
-  } catch (error) {
-    console.error('Error in getDocumentDetailWithDeposit:', error);
-    throw error;
-  }
-};
-
-const getEbookUrlByDocumentId = async (documentId) => {
-  const doc = await Document.findOne({
-    where: { documentId, deleted: false },
-    attributes: ['ebookUrl']
-  });
-  if (!doc) return null;
-  return doc.ebookUrl || null;
-};
-
-const getGenre = async () => {
-  try {
-    const genres = await Genre.findAll({
-      where: { deleted: false },
-      attributes: ['genreId', 'name'],
-      order: [['name', 'ASC']]
-    });
-    return genres.map(g => ({
-      genreId: g.genreId,
-      name: g.name
-    }));
-  } catch (error) {
-    console.error('Error in getGenre:', error);
-    throw error;
-  }
-};
-// tìm kiếm all 
-
-// ===== Helper: chuẩn hoá từ khoá tìm kiếm
-function buildLikePattern(q) {
-  const s = String(q || '').trim();
-  if (!s) return null;
-  // có thể thêm escape % _ nếu cần
-  return `%${s}%`;
-}
-
+/* =============================================================================
+ *                         UNIVERSAL SEARCH (NHIỀU TRƯỜNG)
+ * ========================================================================== */
 /**
  * Truy vấn ra danh sách documentId thỏa tìm kiếm tổng quát.
  * Tìm theo: title, Category.name, Publisher.name, authors.fullName, genres.name,
@@ -685,9 +568,7 @@ async function findDocumentIdsByUniversalSearch({ q, documentType = 'all', limit
         { '$newspaper.issn$': { [Op.like]: like } }
       ]
     },
-    attributes: [
-      'documentId'
-    ],
+    attributes: ['documentId'],
     include: [
       // Category (lọc loại nếu có)
       { model: Category, attributes: [], where: whereCat, required: true },
@@ -827,6 +708,9 @@ async function searchDocumentsUniversal({
   };
 }
 
+/* =============================================================================
+ *                      SIMILAR DOCS (RECOMMENDER FOR READERS)
+ * ========================================================================== */
 /**
  * Lấy thông tin tối thiểu cho 1 document phục vụ gợi ý
  */
@@ -1023,12 +907,146 @@ async function getSimilarDocumentsForReader(documentId, {
 
   return { items };
 }
+
+/* =============================================================================
+ *                               PUBLIC APIS
+ * ========================================================================== */
+const getAllDocumentsWithDepositInfo = async (
+  page = 1,
+  limit = 10,
+  search = '',
+  documentType = 'all'
+) => {
+  try {
+    const offset = (page - 1) * limit;
+
+    const whereDoc = buildDocumentWhere(search);
+    const whereCat = buildCategoryWhere(documentType);
+
+    const totalItems = await countDocuments(whereDoc, whereCat);
+    const rows = await findDocuments(whereDoc, whereCat, { limit, offset });
+
+    const items = rows.map(mapListItem);
+    const totalPages = Math.ceil(totalItems / limit);
+
+    return {
+      items,
+      currentPage: page,
+      totalPages,
+      totalItems,
+      limit,
+      hasNextPage: page < totalPages,
+      hasPrevPage: page > 1
+    };
+  } catch (error) {
+    console.error('Error in getAllDocumentsWithDepositInfo:', error);
+    throw error;
+  }
+};
+
+const getDocumentDetailWithDeposit = async (documentId) => {
+  try {
+    const whereCat = { deleted: false };
+    const doc = await findDocumentDetail(documentId, whereCat);
+    if (!doc) return null;
+
+    const o = doc.toJSON();
+    const documentType = inferTypeFromCategoryName(o.Category?.name);
+
+    const coverPrice = o.coverPrice || 0;
+    const depositRate = o.Category?.deposit_rate || 0;
+    const copies = Array.isArray(o.copies) ? o.copies : [];
+    const availableCopies = copies.filter(c => c.status === 'AVAILABLE').length;
+    const { minDeposit, maxDeposit } = computeDepositStats(coverPrice, depositRate, copies);
+
+    const { book, magazine, newspaper } = extractSubtypeInfo(o);
+
+    const publisher = o.Publisher ? {
+      publisherId: o.Publisher.publisherId,
+      name: o.Publisher.name,
+      note: o.Publisher.note ?? null
+    } : null;
+
+    return {
+      documentId: o.documentId,
+      documentType,
+      title: o.title,
+      language: o.language,
+      publicationYear: o.publicationYear,
+      coverPrice: o.coverPrice,
+      description: o.description,
+      coverPhoto: o.coverPhoto,
+      ebookUrl: o.ebookUrl,
+      numberOfCopy: o.numberOfCopy,
+
+      category: {
+        categoryId: o.Category?.categoryId,
+        name: o.Category?.name,
+        depositRate
+      },
+      publisher,
+
+      book,
+      magazine,
+      newspaper,
+
+      deposit: { minDeposit, maxDeposit },
+      authors: normalizeAuthors(o.authors || []),
+      genres: normalizeGenres(o.genres || []),
+      copies: normalizeCopies(copies),
+      totalCopies: copies.length,
+      availableCopies
+    };
+  } catch (error) {
+    console.error('Error in getDocumentDetailWithDeposit:', error);
+    throw error;
+  }
+};
+
+const getEbookUrlByDocumentId = async (documentId) => {
+  const doc = await Document.findOne({
+    where: { documentId, deleted: false },
+    attributes: ['ebookUrl']
+  });
+  if (!doc) return null;
+  return doc.ebookUrl || null;
+};
+
+const getGenre = async () => {
+  try {
+    const genres = await Genre.findAll({
+      where: { deleted: false },
+      attributes: ['genreId', 'name'],
+      order: [['name', 'ASC']]
+    });
+    return genres.map(g => ({
+      genreId: g.genreId,
+      name: g.name
+    }));
+  } catch (error) {
+    console.error('Error in getGenre:', error);
+    throw error;
+  }
+};
+
+/* =============================================================================
+ *                                  EXPORTS
+ * ========================================================================== */
 module.exports = {
+  // Public list/detail APIs
   getAllDocumentsWithDepositInfo,
   getDocumentDetailWithDeposit,
+
+  // Small helpers APIs
   getEbookUrlByDocumentId,
   getGenre,
+
+  // Genre-based list API
   getDocumentsByGenre,
-  searchDocumentsUniversal, 
+
+  // Universal search API
+  searchDocumentsUniversal,
+
+  // Recommender API
   getSimilarDocumentsForReader
 };

@@ -17,6 +17,8 @@ const readerRoutes = require("./route/readerRoutes");
 const documentRoutes = require('./route/documentRoutes');
 const fileRoute = require('./route/fileRoutes');
 const profileRoutes = require("./route/profileRoutes");
+const metadataRoutes = require("./route/metadataRoutes");
+const documentAdminRoutes = require('./route/documentAdminRoutes');
 
 const app = express();
 const port = process.env.PORT || 8080;
@@ -70,6 +72,8 @@ app.use('/', routeApi);
 app.use('/api/documents', documentRoutes);
 app.use('/api/files', fileRoute);
 app.use('/api/profile', profileRoutes);
+app.use('/api/metadata', metadataRoutes);
+app.use('/api/documents/admin', documentAdminRoutes);
 
 // app.use('/api', routeApi);
 
