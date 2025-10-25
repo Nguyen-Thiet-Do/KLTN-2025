@@ -210,11 +210,50 @@ const searchDocumentsUniversalReader = async (req, res) => {
   }
 };
 
+// Gợi ý tài liệu tương tự cho Reader
+const getSimilarDocumentsReader = async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!id || Number.isNaN(id)) {
+      return res.status(400).json({ success: false, message: 'documentId không hợp lệ' });
+    }
+
+    const limit = Math.max(parseInt(req.query.limit) || 10, 1);
+
+    // Tuỳ chọn: cho phép FE truyền weights để tinh chỉnh
+    const weights = {
+      genre: req.query.wGenre ? Number(req.query.wGenre) : 2,
+      author: req.query.wAuthor ? Number(req.query.wAuthor) : 3,
+      publisher: req.query.wPublisher ? Number(req.query.wPublisher) : 1,
+      category: req.query.wCategory ? Number(req.query.wCategory) : 1
+    };
+
+    const result = await documentService.getSimilarDocumentsForReader(id, { limit, weights });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Gợi ý tài liệu tương tự',
+      data: result.items,
+      pagination: { limit },
+      filter: { weights }
+    });
+  } catch (error) {
+    console.error('Error in getSimilarDocumentsReader:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Lỗi khi lấy gợi ý tài liệu tương tự',
+      error: error.message
+    });
+  }
+};
+
+
 module.exports = {
   getAllBooksReader,
   getDocumentDetailReader,
   getEbookUrlReader,
   getAllGenres,
   getDocumentsByGenreReader,
-  searchDocumentsUniversalReader
+  searchDocumentsUniversalReader,
+  getSimilarDocumentsReader
 };

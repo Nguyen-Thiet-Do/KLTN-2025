@@ -83,7 +83,32 @@ routeApi.get('/', (req, res) => {
           }
         ]
       },
-
+      {
+        group: 'Profile',
+        icon: '👤',
+        routes: [
+          {
+            method: 'GET',
+            path: '/api/profile/me',
+            description: 'Lấy thông tin cá nhân của độc giả hiện tại',
+            auth: true,
+            role: 'Reader (roleId = 3)'
+          },
+          {
+            method: 'PUT',
+            path: '/api/profile/me',
+            description: 'Cập nhật thông tin cá nhân của độc giả hiện tại',
+            auth: true,
+            role: 'Reader (roleId = 3)',
+            body: {
+              fullName: 'string (optional)',
+              phoneNumber: 'string (optional, 10-11 digits)',
+              dateOfBirth: 'date (optional)',
+              address: 'string (optional)',
+            }
+          }
+        ]
+      },
       {
         group: 'Documents of Reader',
         icon: '📚',
@@ -92,8 +117,7 @@ routeApi.get('/', (req, res) => {
             method: 'GET',
             path: '/api/documents/reader',
             description: 'Lấy tài liệu theo loại (Book, Newspaper, Magazine, all) kèm cọc min/max, số bản sao sẵn sàng',
-            auth: true,
-            role: 'Reader (roleId = 3)',
+            auth: false,
             query: {
               page: 'number (optional, default=1): trang hiện tại',
               limit: 'number (optional, default=10):  số lượng bản ghi trên mỗi trang',
@@ -105,8 +129,7 @@ routeApi.get('/', (req, res) => {
             method: 'GET',
             path: '/api/documents/reader/:id',
             description: 'Lấy chi tiết 1 tài liệu kèm cọc min/max, số bản sao sẵn sàng',
-            auth: true,
-            role: 'Reader (roleId = 3)',
+            auth: false,
             params: {
               id: 'number (required): ID của tài liệu cần lấy chi tiết'
             }
@@ -125,15 +148,14 @@ routeApi.get('/', (req, res) => {
             method: 'GET',
             path: '/api/documents/genres',
             description: 'Lấy danh sách thể loại tài liệu',
-            auth: true
+            auth: false
 
           },
           {
             method: 'GET',
             path: '/api/documents/reader/by-genre',
             description: "Lọc tài liệu theo thể loại (genre) — hỗ trợ match 'any' | 'all'",
-            auth: true,
-            role: 'Reader (roleId = 3)',
+            auth: false,
             query: {
               page: 'number (optional, default=1): trang hiện tại',
               limit: 'number (optional, default=10):  số lượng bản ghi trên mỗi trang',
@@ -147,34 +169,30 @@ routeApi.get('/', (req, res) => {
             method: 'GET',
             path: '/api/documents/reader/search',
             description: 'Tìm kiếm tài liệu toàn diện (tiêu đề, tác giả, mô tả, thể loại v.v.)',
-            auth: true,
-            role: 'Reader (roleId = 3)',
+            auth: false,
             query: {
               page: 'number (optional, default=1): trang hiện tại',
               limit: 'number (optional, default=10):  số lượng bản ghi trên mỗi trang',
               q: 'string (required): từ khóa tìm kiếm'
             }
-          }
-
-        ]
-      },
-
-      {
-        group: 'Users ( đang phát triển )',
-        icon: '👥',
-        routes: [
+          },
           {
             method: 'GET',
-            path: '/api/users',
-            description: 'Lấy danh sách người dùng (Admin only)',
-            auth: true,
-            role: 'Admin (roleId = 1)',
+            path: '/api/documents/reader/:id/similar',
+            description: 'Gợi ý tài liệu tương tự theo id tài liệu đang xem',
+            auth: false,
+            params: {
+              id: 'number (required): ID của tài liệu hiện tại'
+            },
             query: {
-              page: 'number (optional, default=1)',
-              limit: 'number (optional, default=10)',
-              search: 'string (optional, tìm kiếm theo tên hoặc email)'
+              limit: 'number (optional, default=10): số lượng gợi ý',
+              // wGenre: 'number (optional, default=2): trọng số genre',
+              // wAuthor: 'number (optional, default=3): trọng số author',
+              // wPublisher: 'number (optional, default=1): trọng số publisher',
+              // wCategory: 'number (optional, default=1): trọng số category'
             }
-          },
+          }
+
         ]
       },
       {

@@ -17,7 +17,7 @@ const documentController = require('../controller/documentController');
  * @access  Reader (roleId=3)
  * @example GET /api/books/reader?page=1&limit=10&type=magazine&search=data
  */
-router.get('/reader', requireAuth, requireRole([3]), documentController.getAllBooksReader);
+router.get('/reader', documentController.getAllBooksReader);
 
 /**
  * @route   GET /api/books/reader/by-genre
@@ -34,11 +34,26 @@ router.get('/reader', requireAuth, requireRole([3]), documentController.getAllBo
  *
  * Lưu ý: đặt route này TRƯỚC /reader/:id để tránh bị bắt nhầm vào param :id.
  */
-router.get('/reader/by-genre', requireAuth, documentController.getDocumentsByGenreReader);
+router.get('/reader/by-genre', documentController.getDocumentsByGenreReader);
 
 router.get('/reader/search',
     requireAuth,
     documentController.searchDocumentsUniversalReader
+);
+
+// Gợi ý tương tự theo id tài liệu đang xem
+/**
+ * @route   GET /api/books/reader/:id/similar
+ * @query   limit      - số lượng gợi ý (mặc định 10)
+ * @query   wGenre     - trọng số genre (mặc định 2)
+ * @query   wAuthor    - trọng số author (mặc định 3)
+ * @query   wPublisher - trọng số publisher (mặc định 1)
+ * @query   wCategory  - trọng số category (mặc định 1)
+ * @access  Reader (roleId=3)
+ */
+router.get('/reader/:id/similar',
+    
+    documentController.getSimilarDocumentsReader
 );
 
 /**
@@ -47,7 +62,7 @@ router.get('/reader/search',
  * @param   id - ID của tài liệu
  * @access  Reader (roleId=3)
  */
-router.get('/reader/:id', requireAuth, requireRole([3]), documentController.getDocumentDetailReader);
+router.get('/reader/:id', documentController.getDocumentDetailReader);
 
 /**
  * @route   GET /api/books/ebook/:id
@@ -62,11 +77,10 @@ router.get('/ebook/:id', requireAuth, requireRole([3]), documentController.getEb
  * @desc    Lấy danh sách thể loại (genre)
  * @access  Yêu cầu đăng nhập (mọi role)
  */
-router.get('/genres', requireAuth, documentController.getAllGenres);
+router.get('/genres', documentController.getAllGenres);
 
 
-// ======================= CÁC ROUTE KHÁC DÀNH CHO THỦ THƯ / ADMIN =======================
-// TODO: Thêm các route cho Librarian/Admin khi cần (tạo/sửa/xoá tài liệu, quản lý copies, v.v.)
+
 
 
 module.exports = router;

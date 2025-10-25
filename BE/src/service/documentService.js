@@ -826,11 +826,209 @@ async function searchDocumentsUniversal({
     hasPrevPage: page > 1
   };
 }
+
+/**
+ * Lấy thông tin tối thiểu cho 1 document phục vụ gợi ý
+ */
+async function getSimilarSeed(documentId) {
+  const doc = await Document.findOne({
+    where: { documentId, deleted: false },
+    attributes: ['documentId', 'categoryId', 'publisherId', 'language'],
+    include: [
+      { model: Category, attributes: ['categoryId', 'name', 'deposit_rate'], where: { deleted: false }, required: true },
+      { model: Author, as: 'authors', attributes: ['authorId'], through: { attributes: [], where: { deleted: false } }, where: { deleted: false }, required: false },
+      { model: Genre, as: 'genres', attributes: ['genreId'], through: { attributes: [], where: { deleted: false } }, where: { deleted: false }, required: false }
+    ]
+  });
+  if (!doc) return null;
+
+  const o = doc.toJSON();
+  return {
+    categoryId: o.categoryId,
+    publisherId: o.publisherId || null,
+    authorIds: (o.authors || []).map(a => a.authorId),
+    genreIds: (o.genres || []).map(g => g.genreId)
+  };
+}
+
+/**
+ * Tìm theo giao genres -> trả Map(id => sharedGenreCount)
+ */
+async function findBySharedGenres(genreIds = [], excludeId, limit = 200) {
+  if (!genreIds.length) return new Map();
+  const rows = await Document.findAll({
+    where: { deleted: false, documentId: { [Op.ne]: excludeId } },
+    attributes: [
+      'documentId',
+      [fn('COUNT', fn('DISTINCT', col('genres.genreId'))), 'sharedGenreCount']
+    ],
+    include: [{
+      model: Genre,
+      as: 'genres',
+      attributes: [],
+      through: { attributes: [], where: { deleted: false } },
+      where: { deleted: false, genreId: { [Op.in]: genreIds } },
+      required: true
+    }],
+    group: ['Document.documentId'],
+    order: [[col('sharedGenreCount'), 'DESC']],
+    limit,
+    subQuery: false
+  });
+  const map = new Map();
+  rows.forEach(r => map.set(r.documentId, Number(r.get('sharedGenreCount')) || 0));
+  return map;
+}
+
+/**
+ * Tìm theo giao authors -> trả Map(id => sharedAuthorCount)
+ */
+async function findBySharedAuthors(authorIds = [], excludeId, limit = 200) {
+  if (!authorIds.length) return new Map();
+  const rows = await Document.findAll({
+    where: { deleted: false, documentId: { [Op.ne]: excludeId } },
+    attributes: [
+      'documentId',
+      [fn('COUNT', fn('DISTINCT', col('authors.authorId'))), 'sharedAuthorCount']
+    ],
+    include: [{
+      model: Author,
+      as: 'authors',
+      attributes: [],
+      through: { attributes: [], where: { deleted: false } },
+      where: { deleted: false, authorId: { [Op.in]: authorIds } },
+      required: true
+    }],
+    group: ['Document.documentId'],
+    order: [[col('sharedAuthorCount'), 'DESC']],
+    limit,
+    subQuery: false
+  });
+  const map = new Map();
+  rows.forEach(r => map.set(r.documentId, Number(r.get('sharedAuthorCount')) || 0));
+  return map;
+}
+
+/**
+ * Lấy danh sách id cùng publisher
+ */
+async function findByPublisher(publisherId, excludeId, limit = 200) {
+  if (!publisherId) return new Set();
+  const rows = await Document.findAll({
+    where: { deleted: false, publisherId, documentId: { [Op.ne]: excludeId } },
+    attributes: ['documentId'],
+    order: [['documentId', 'DESC']],
+    limit
+  });
+  return new Set(rows.map(r => r.documentId));
+}
+
+/**
+ * Lấy danh sách id cùng category
+ */
+async function findByCategory(categoryId, excludeId, limit = 200) {
+  if (!categoryId) return new Set();
+  const rows = await Document.findAll({
+    where: { deleted: false, categoryId, documentId: { [Op.ne]: excludeId } },
+    attributes: ['documentId'],
+    order: [['documentId', 'DESC']],
+    limit
+  });
+  return new Set(rows.map(r => r.documentId));
+}
+
+/**
+ * Gợi ý tài liệu tương tự (Reader)
+ * - Tính điểm theo trọng số: genre, author, publisher, category
+ * - Trả về items dạng list (mapListItem), kèm score và matchedBy
+ */
+async function getSimilarDocumentsForReader(documentId, {
+  limit = 10,
+  weights = { genre: 2, author: 3, publisher: 1, category: 1 }
+} = {}) {
+  const seed = await getSimilarSeed(documentId);
+  if (!seed) return { items: [] };
+
+  // 1) Thu thập ứng viên
+  const [byGenres, byAuthors, setPub, setCat] = await Promise.all([
+    findBySharedGenres(seed.genreIds, documentId, 300),
+    findBySharedAuthors(seed.authorIds, documentId, 300),
+    findByPublisher(seed.publisherId, documentId, 200),
+    findByCategory(seed.categoryId, documentId, 200)
+  ]);
+
+  // 2) Gộp & chấm điểm
+  const candidateIds = new Set([
+    ...byGenres.keys(),
+    ...byAuthors.keys(),
+    ...setPub.values(),
+    ...setCat.values()
+  ]);
+
+  if (candidateIds.size === 0) return { items: [] };
+
+  const scored = [];
+  for (const id of candidateIds) {
+    const sharedGenre = byGenres.get(id) || 0;
+    const sharedAuthor = byAuthors.get(id) || 0;
+    const pubMatch = setPub.has(id) ? 1 : 0;
+    const catMatch = setCat.has(id) ? 1 : 0;
+
+    const score =
+      sharedGenre * (weights.genre || 0) +
+      sharedAuthor * (weights.author || 0) +
+      pubMatch * (weights.publisher || 0) +
+      catMatch * (weights.category || 0);
+
+    const matchedBy = [];
+    if (sharedGenre > 0) matchedBy.push('genre');
+    if (sharedAuthor > 0) matchedBy.push('author');
+    if (pubMatch) matchedBy.push('publisher');
+    if (catMatch) matchedBy.push('category');
+
+    scored.push({ id, score, matchedBy, sharedGenre, sharedAuthor, pubMatch, catMatch });
+  }
+
+  // 3) Sắp xếp theo điểm (desc), rồi id desc
+  scored.sort((a, b) => (b.score - a.score) || (b.id - a.id));
+
+  // 4) Lấy chi tiết top N (để tính min/max cọc & copies)
+  const topIds = scored.slice(0, limit).map(x => x.id);
+  const whereDoc = { deleted: false, documentId: { [Op.in]: topIds } };
+  const whereCat = { deleted: false };
+
+  const rows = await Document.findAll({
+    where: whereDoc,
+    include: listIncludeForDocuments(whereCat),
+    attributes: ['documentId', 'title', 'coverPhoto', 'coverPrice', 'categoryId'],
+    order: [['documentId', 'DESC']],
+    distinct: true,
+    subQuery: false
+  });
+
+  // map giữ thứ tự theo scoring
+  const byId = new Map(rows.map(r => [r.documentId, r]));
+  const items = [];
+  for (const s of scored) {
+    if (!topIds.includes(s.id)) continue;
+    const row = byId.get(s.id);
+    if (!row) continue;
+    const base = mapListItem(row);
+    items.push({
+      ...base,
+      score: s.score,
+      matchedBy: s.matchedBy
+    });
+  }
+
+  return { items };
+}
 module.exports = {
   getAllDocumentsWithDepositInfo,
   getDocumentDetailWithDeposit,
   getEbookUrlByDocumentId,
   getGenre,
   getDocumentsByGenre,
-  searchDocumentsUniversal
+  searchDocumentsUniversal, 
+  getSimilarDocumentsForReader
 };
