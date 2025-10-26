@@ -1,7 +1,7 @@
 import axios from "axios";
 
 const http = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE,
+  baseURL: import.meta.env.VITE_API_URL,
   timeout: 15000,
 });
 
@@ -16,7 +16,7 @@ http.interceptors.request.use((config) => {
 export const documentApi = {
   // 📘 Danh sách tài liệu (trang chủ)
   list: async ({ page = 1, limit = 12, search = "", type = "all" } = {}) =>
-    http.get("/api/documents/reader", { params: { page, limit, search, type } }),
+    http.get("/documents/reader", { params: { page, limit, search, type } }),
 
   // 🎯 Lọc theo thể loại (sidebar)
   byGenre: async ({
@@ -27,7 +27,7 @@ export const documentApi = {
     genreIds = [],
     match = "any",
   } = {}) =>
-    http.get("/api/documents/reader/by-genre", {
+    http.get("/documents/reader/by-genre", {
       params: {
         page,
         limit,
@@ -42,14 +42,14 @@ export const documentApi = {
 
   // 🔍 Tìm kiếm tài liệu
   search: async ({ page = 1, limit = 12, q = "", type = "all" } = {}) =>
-    http.get("/api/documents/reader/search", { params: { page, limit, q, type } }),
+    http.get("/documents/reader/search", { params: { page, limit, q, type } }),
 
   // 📄 Chi tiết 1 tài liệu
-  detail: async (id) => http.get(`/api/documents/reader/${id}`),
+  detail: async (id) => http.get(`/documents/reader/${id}`),
 
   // 🗂️ Danh mục thể loại
-  genres: async () => http.get("/api/documents/genres"),
+  genres: async () => http.get("/documents/genres"),
 
   // 📖 Lấy URL ebook
-  ebookUrl: async (id) => http.get(`/api/documents/ebook/${id}`),
+  ebookUrl: async (id) => http.get(`/documents/ebook/${id}`),
 };
