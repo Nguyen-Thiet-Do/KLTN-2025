@@ -37,7 +37,6 @@ router.get('/reader', documentController.getAllBooksReader);
 router.get('/reader/by-genre', documentController.getDocumentsByGenreReader);
 
 router.get('/reader/search',
-    requireAuth,
     documentController.searchDocumentsUniversalReader
 );
 
@@ -52,7 +51,7 @@ router.get('/reader/search',
  * @access  Reader (roleId=3)
  */
 router.get('/reader/:id/similar',
-    
+
     documentController.getSimilarDocumentsReader
 );
 
