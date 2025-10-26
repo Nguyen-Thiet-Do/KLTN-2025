@@ -84,7 +84,8 @@ function listIncludeForDocuments(categoryWhere) {
       as: 'copies',
       attributes: ['documentCopyId', 'conditionNote', 'status'],
       where: { deleted: false },
-      required: false
+      required: false,
+      separate: true
     }
   ];
 }
@@ -270,8 +271,7 @@ async function findDocuments(whereDoc, whereCat, { limit, offset }) {
     limit,
     offset,
     order: [['documentId', 'DESC']],
-    distinct: true,
-    subQuery: false
+    
   });
 }
 
