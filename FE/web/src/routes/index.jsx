@@ -9,6 +9,7 @@ import NotFound from "../pages/NotFound";
 // === Import thêm các trang Reader (FE cho độc giả) ===
 import ReaderHome from "../pages/ReaderHome/ReaderHome";
 import ReaderSearch from "../pages/ReaderHome/ReaderSearch"; 
+import LibraryHome from "../pages/LibraryHome";
 
 // === Định nghĩa router chính ===
 export const router = createBrowserRouter([
@@ -16,11 +17,11 @@ export const router = createBrowserRouter([
   {
     path: "/",
     children: [
-      { index: true, element: <ReaderHome /> },
+      { index: true, element: <LibraryHome /> },
       { path: "books", element: <ReaderHome type="book" /> },
       { path: "newspapers", element: <ReaderHome type="newspaper" /> },
       { path: "magazines", element: <ReaderHome type="magazine" /> },
-      { path: "search", element: <ReaderSearch /> }, 
+      
     ],
   },
 

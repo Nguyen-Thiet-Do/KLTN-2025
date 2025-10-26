@@ -1,32 +1,26 @@
-import axios from "axios";
-const API_URL = import.meta.env.VITE_API_URL;
+// services/librarianApi.js (chuẩn hoá dùng chung api.js)
+import api from "./api";
 
-export const getLibrarians = async (token) => {
-  const res = await axios.get(`${API_URL}/librarian`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
+// 📋 Danh sách thủ thư
+export const getLibrarians = async () => {
+  const res = await api.get("/librarian");
   return res.data;
 };
 
 // ➕ Thêm mới thủ thư
-export const createLibrarian = async (token, data) => {
-  const res = await axios.post(`${API_URL}/librarian`, data, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
+export const createLibrarian = async (data) => {
+  const res = await api.post("/librarian", data);
   return res.data;
 };
+
 // 🗑️ Xóa thủ thư
-export const deleteLibrarian = async (id, token) => {
-  const res = await axios.delete(`${API_URL}/librarian/${id}`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
+export const deleteLibrarian = async (id) => {
+  const res = await api.delete(`/librarian/${id}`);
   return res.data;
 };
 
 // ✏️ Cập nhật thông tin thủ thư
-export const updateLibrarian = async (id, data, token) => {
-  const res = await axios.put(`${API_URL}/librarian/${id}`, data, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
+export const updateLibrarian = async (id, data) => {
+  const res = await api.put(`/librarian/${id}`, data);
   return res.data;
 };

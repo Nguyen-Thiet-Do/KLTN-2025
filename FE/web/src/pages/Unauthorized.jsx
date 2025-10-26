@@ -10,7 +10,7 @@ export default function Unauthorized() {
       const routes = {
         1: '/admin',
         2: '/librarian',
-        3: '/reader',
+        3: '/',
       };
       navigate(routes[user.roleId] || '/login');
     } else {
@@ -59,7 +59,7 @@ export default function Unauthorized() {
           <button
             onClick={() => {
               logout();
-              navigate('/login');
+              navigate('/');
             }}
             style={{
               padding: '12px 24px',
