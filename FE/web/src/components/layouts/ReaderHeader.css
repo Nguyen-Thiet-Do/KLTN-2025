@@ -1,0 +1,224 @@
+/* --- Tổng thể header --- */
+.reader-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 36px;
+  background: #ffffff;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  font-family: "Inter", sans-serif;
+}
+
+/* --- Bên trái: logo + menu --- */
+.left-section {
+  display: flex;
+  align-items: center;
+  gap: 32px;
+}
+
+.logo-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+}
+
+.logo-img {
+  width: 40px;
+  height: 40px;
+  object-fit: contain;
+}
+
+.logo-text {
+  font-size: 20px;
+  font-weight: 700;
+  color: #004d40;
+  white-space: nowrap;
+}
+
+/* --- Menu danh mục --- */
+.nav-links {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.nav-links a {
+  color: #333;
+  text-decoration: none;
+  font-weight: 500;
+  padding: 6px 2px;
+  transition: color 0.2s;
+}
+
+.nav-links a:hover {
+  color: #00796b;
+}
+
+.nav-links a.active {
+  color: #00796b;
+  border-bottom: 2px solid #00796b;
+}
+
+/* --- Giữa: ô tìm kiếm --- */
+.search-bar {
+  display: flex;
+  align-items: center;
+  background: #f4f6f6;
+  border-radius: 24px;
+  padding: 4px 12px;
+  width: 320px;
+  transition: all 0.2s ease;
+}
+
+.search-bar input {
+  flex: 1;
+  border: none;
+  outline: none;
+  background: transparent;
+  padding: 6px 8px;
+  font-size: 14px;
+  color: #333;
+}
+
+.search-bar button {
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: #00796b;
+  font-size: 16px;
+  padding: 6px;
+}
+
+.search-bar:hover {
+  background: #e8f5f3;
+}
+
+/* --- Phải: đăng nhập / người dùng --- */
+.auth-section {
+  display: flex;
+  align-items: center;
+  position: relative;
+  gap: 10px;
+}
+
+/* Nút đăng nhập / đăng ký */
+.login-btn,
+.register-btn {
+  padding: 6px 14px;
+  border-radius: 6px;
+  border: none;
+  cursor: pointer;
+  font-weight: 500;
+  font-size: 14px;
+  transition: all 0.2s ease;
+}
+
+.login-btn {
+  background: #e0e0e0;
+  color: #333;
+}
+
+.login-btn:hover {
+  background: #d5d5d5;
+}
+
+.register-btn {
+  background: #00796b;
+  color: white;
+}
+
+.register-btn:hover {
+  background: #00695c;
+}
+
+/* --- Khi đã đăng nhập --- */
+.user-menu {
+  position: relative;
+  cursor: pointer;
+}
+
+.avatar {
+  background: #00796b;
+  color: #fff;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 15px;
+  user-select: none;
+  transition: background 0.2s ease;
+}
+
+.avatar:hover {
+  background: #00695c;
+}
+
+/* --- Dropdown user info --- */
+.dropdown {
+  position: absolute;
+  top: 50px;
+  right: 0;
+  background: #fff;
+  border-radius: 10px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  padding: 10px;
+  min-width: 220px;
+  z-index: 200;
+}
+
+.dropdown .user-info {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 8px;
+}
+
+.dropdown .user-info strong {
+  font-size: 15px;
+  color: #222;
+}
+
+.dropdown .user-info span {
+  font-size: 13px;
+  color: #555;
+}
+
+.dropdown .user-info small {
+  color: #777;
+  font-size: 12px;
+  margin-top: 2px;
+}
+
+.dropdown hr {
+  border: none;
+  border-top: 1px solid #e5e5e5;
+  margin: 8px 0;
+}
+
+.dropdown button {
+  background: none;
+  border: none;
+  text-align: left;
+  width: 100%;
+  padding: 6px 8px;
+  cursor: pointer;
+  font-size: 14px;
+  color: #333;
+  border-radius: 6px;
+  transition: background 0.2s ease;
+}
+
+.dropdown button:hover {
+  background: #f0f0f0;
+}
+
+.logout-btn {
+  color: #c62828;
+  font-weight: 600;
+}

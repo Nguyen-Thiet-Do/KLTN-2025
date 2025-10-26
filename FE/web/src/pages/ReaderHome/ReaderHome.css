@@ -1,0 +1,16 @@
+.reader-home {
+  display: flex;
+  min-height: calc(100vh - 80px);
+}
+.reader-main {
+  flex: 1;
+  padding: 24px 40px;
+}
+.reader-main h2 {
+  margin-bottom: 20px;
+}
+.reader-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 16px;
+}

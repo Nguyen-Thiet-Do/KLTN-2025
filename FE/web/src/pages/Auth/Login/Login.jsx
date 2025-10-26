@@ -42,7 +42,8 @@ export default function Login() {
   // Tự động chuyển trang nếu đã đăng nhập
   useEffect(() => {
     if (isAuthenticated && user) {
-      const routes = { 1: '/admin', 2: '/librarian', 3: '/reader' };
+      // const routes = { 1: '/admin', 2: '/librarian', 3: '/reader' };
+         const routes = { 1: '/admin', 2: '/librarian', 3: '/' };
       navigate(routes[user.roleId] || '/admin', { replace: true });
     }
   }, [isAuthenticated, user, navigate]);
@@ -86,7 +87,8 @@ export default function Login() {
       else localStorage.removeItem('last_login_email');
 
       const account = await login(formData.email, formData.password);
-      const routes = { 1: '/admin', 2: '/librarian', 3: '/reader' };
+      // const routes = { 1: '/admin', 2: '/librarian', 3: '/reader' };
+         const routes = { 1: '/admin', 2: '/librarian', 3: '/' };
       navigate(routes[account.roleId] || '/admin');
     } catch (error) {
       console.error('Login error:', error);

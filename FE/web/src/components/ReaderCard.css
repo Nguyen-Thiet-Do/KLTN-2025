@@ -1,0 +1,27 @@
+.reader-card {
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+  overflow: hidden;
+  transition: 0.2s;
+}
+.reader-card:hover {
+  transform: translateY(-3px);
+}
+.reader-card img {
+  width: 100%;
+  height: 220px;
+  object-fit: cover;
+}
+.reader-card-body {
+  padding: 12px;
+}
+.reader-card-body h4 {
+  margin: 0 0 6px;
+  font-size: 16px;
+}
+.reader-card-body .category {
+  font-size: 14px;
+  color: #777;
+  margin-bottom: 8px;
+}
