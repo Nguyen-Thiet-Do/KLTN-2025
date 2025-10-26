@@ -3,6 +3,7 @@ import Dashboard from "../pages/Dashboard/Dashboard";
 import Readers from "../pages/Readers/Readers";
 import Librarians from "../pages/Librarians/Librarians";
 import Borrow from "../pages/Borrow/Borrow";
+import Book from "../pages/Documents/Books/Book";
 import ProtectedRoute from "./ProtectedRoute";
 
 export const adminRoutes = {
@@ -15,6 +16,7 @@ export const adminRoutes = {
         { index: true, element: <Dashboard /> },
         { path: "readers", element: <Readers /> },
         { path: "librarians", element: <Librarians /> },
+        {path: "documents/books", element: <Book /> },
         { path: "borrow", element: <Borrow /> },
       ],
     },
