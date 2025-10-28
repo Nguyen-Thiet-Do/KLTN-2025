@@ -55,6 +55,16 @@ routeApi.get('/', (req, res) => {
           },
           {
             method: 'POST',
+            path: '/api/auth/login/reader',
+            description: 'Đăng nhập vào hệ thống cho độc giả',
+            auth: false,
+            body: {
+              email: 'string (required)',
+              password: 'string (required)'
+            } 
+          },
+          {
+            method: 'POST',
             path: '/api/auth/refresh-token',
             description: 'Làm mới access token',
             auth: false,
@@ -321,6 +331,105 @@ routeApi.get('/', (req, res) => {
             params: {
               id: 'number (required): ID của tài liệu cần lấy bản sao'
             }
+          },
+          {
+            method: 'POST',
+            path: '/api/documents/admin/books',
+            description: 'Tạo mới tài liệu loại Sách (Book) + subtype + copies trong 1 lần',
+            auth: true,
+            role: 'Admin (roleId = 1), Librarian (roleId = 2)',
+            body: {
+              // Gửi 1 trong 2 kiểu:
+              // 1) multipart/form-data: files: cover (required), ebook (optional) + các field text phía dưới
+              // 2) application/json: coverUrl (required), ebookViewUrl (optional) + các field
+              title: 'string (required)',
+              language: 'string (optional)',
+              publicationYear: 'number (optional)',
+              coverPrice: 'number (optional)',
+              description: 'string (optional)',
+              shelfLocation: 'string (optional)',
+              publisherName: 'string (optional, auto-create if not exists)',
+              authors: 'array [{ fullName, role?, ord? }] (optional, auto-create author nếu chưa có)',
+              genres: 'array [name] (optional, auto-create genre nếu chưa có)',
+              coverUrl: 'string (required nếu không gửi file)',
+              ebookViewUrl: 'string (optional)',
+              bookData: '{ isbn?: string, edition?: number, pageCount?: number }',
+              initialCopies: 'array [{ barCode?, status?, conditionNote?, entryDate? }]',
+              initialCopiesCount: 'number (optional, tạo nhanh n bản sao mặc định nếu không đưa initialCopies)'
+            },
+            examples: [
+              'multipart: cover=<file>, ebook=<file>, title=Clean Code, authors=[{"fullName":"Robert C. Martin"}], initialCopiesCount=5',
+              'json: { "title":"Clean Code", "coverUrl":"https://.../covers/abc.webp", "bookData":{"isbn":"978-..."},"initialCopies":[{"status":"available","conditionNote":"100"}]}'
+            ]
+          },
+          {
+            method: 'POST',
+            path: '/api/documents/admin/magazines',
+            description: 'Tạo mới tài liệu loại Tạp chí (Magazine) + subtype + copies trong 1 lần',
+            auth: true,
+            role: 'Admin (roleId = 1), Librarian (roleId = 2)',
+            body: {
+              title: 'string (required)',
+              language: 'string (optional)',
+              publicationYear: 'number (optional)',
+              coverPrice: 'number (optional)',
+              description: 'string (optional)',
+              shelfLocation: 'string (optional)',
+              publisherName: 'string (optional)',
+              authors: 'array [{ fullName, role?, ord? }] (optional)',
+              genres: 'array [name] (optional)',
+              coverUrl: 'string (required nếu không gửi file)',
+              ebookViewUrl: 'string (optional)',
+              magazineData: '{ issn?: string, volume?: number, issue?: number, period?: string, coverDate?: string }',
+              initialCopies: 'array [{ barCode?, status?, conditionNote?, entryDate? }]',
+              initialCopiesCount: 'number (optional)'
+            }
+          },
+          {
+            method: 'POST',
+            path: '/api/documents/admin/newspapers',
+            description: 'Tạo mới tài liệu loại Báo (Newspaper) + subtype + copies trong 1 lần',
+            auth: true,
+            role: 'Admin (roleId = 1), Librarian (roleId = 2)',
+            body: {
+              title: 'string (required)',
+              language: 'string (optional)',
+              publicationYear: 'number (optional)',
+              coverPrice: 'number (optional)',
+              description: 'string (optional)',
+              shelfLocation: 'string (optional)',
+              publisherName: 'string (optional)',
+              authors: 'array [{ fullName, role?, ord? }] (optional)',
+              genres: 'array [name] (optional)',
+              coverUrl: 'string (required nếu không gửi file)',
+              ebookViewUrl: 'string (optional)',
+              newspaperData: '{ issn?: string, issueDate?: string (YYYY-MM-DD), issueNumber?: number }',
+              initialCopies: 'array [{ barCode?, status?, conditionNote?, entryDate? }]',
+              initialCopiesCount: 'number (optional)'
+            }
+          },
+          {
+            method: 'POST',
+            path: '/api/documents/admin/:id/copies',
+            description: 'Nhập thêm bản sao (copies) cho tài liệu đã tồn tại',
+            auth: true,
+            role: 'Admin (roleId = 1), Librarian (roleId = 2)',
+            params: {
+              id: 'number (required): ID tài liệu'
+            },
+            // ✨ CHỈNH Ở ĐÂY: body là OBJECT, không phải string
+            body: {
+              '__type': 'array of copies',
+              '[].barCode': 'string (optional)',
+              '[].status': 'string (default="available")',
+              '[].conditionNote': 'string (ví dụ "100")',
+              '[].entryDate': 'string (ISO date, optional)'
+            },
+            // (không bắt buộc) mẫu để phần Test API điền sẵn
+            sampleBody: [
+              { "barCode": "BK-0101", "status": "available", "conditionNote": "100" },
+              { "status": "available", "conditionNote": "98" }
+            ]
           }
         ]
       },

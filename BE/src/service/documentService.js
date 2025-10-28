@@ -229,6 +229,7 @@ function mapListItem(d) {
     coverPhoto: o.coverPhoto,
     coverPrice,
     categoryName: o.Category?.name,
+    shelfLocation: o.shelfLocation,
     depositRate,
     minDeposit,
     maxDeposit,
@@ -267,7 +268,7 @@ async function findDocuments(whereDoc, whereCat, { limit, offset }) {
   return Document.findAll({
     where: whereDoc,
     include: listIncludeForDocuments(whereCat),
-    attributes: ['documentId', 'title', 'coverPhoto', 'coverPrice', 'categoryId'],
+    attributes: ['documentId', 'title', 'coverPhoto', 'coverPrice', 'categoryId', 'shelfLocation'],
     limit,
     offset,
     order: [['documentId', 'DESC']],
@@ -462,7 +463,7 @@ async function getDocumentsByGenre({
           required: false
         }
       ],
-      attributes: ['documentId', 'title', 'coverPhoto', 'coverPrice', 'categoryId'],
+      attributes: ['documentId', 'title', 'coverPhoto', 'coverPrice', 'categoryId', 'shelfLocation'],
       order: [['documentId', 'DESC']],
       distinct: true,
       subQuery: false
@@ -515,7 +516,7 @@ async function getDocumentsByGenre({
         required: false
       }
     ],
-    attributes: ['documentId', 'title', 'coverPhoto', 'coverPrice', 'categoryId'],
+    attributes: ['documentId', 'title', 'coverPhoto', 'coverPrice', 'categoryId', 'shelfLocation'],
     order: [['documentId', 'DESC']],
     distinct: true,
     subQuery: false
@@ -684,7 +685,7 @@ async function searchDocumentsUniversal({
       { model: Publisher, attributes: ['publisherId', 'name'], required: false, where: { deleted: false } },
       { model: Genre, as: 'genres', attributes: ['genreId', 'name'], required: false, through: { attributes: [], where: { deleted: false } }, where: { deleted: false } }
     ],
-    attributes: ['documentId', 'title', 'coverPhoto', 'coverPrice', 'categoryId'],
+    attributes: ['documentId', 'title', 'coverPhoto', 'coverPrice', 'categoryId', 'shelfLocation'],
     order: [['documentId', 'DESC']],
     distinct: true,
     subQuery: false
@@ -717,7 +718,7 @@ async function searchDocumentsUniversal({
 async function getSimilarSeed(documentId) {
   const doc = await Document.findOne({
     where: { documentId, deleted: false },
-    attributes: ['documentId', 'categoryId', 'publisherId', 'language'],
+    attributes: ['documentId', 'categoryId', 'publisherId', 'language', 'shelfLocation'],
     include: [
       { model: Category, attributes: ['categoryId', 'name', 'deposit_rate'], where: { deleted: false }, required: true },
       { model: Author, as: 'authors', attributes: ['authorId'], through: { attributes: [], where: { deleted: false } }, where: { deleted: false }, required: false },
@@ -884,7 +885,7 @@ async function getSimilarDocumentsForReader(documentId, {
   const rows = await Document.findAll({
     where: whereDoc,
     include: listIncludeForDocuments(whereCat),
-    attributes: ['documentId', 'title', 'coverPhoto', 'coverPrice', 'categoryId'],
+    attributes: ['documentId', 'title', 'coverPhoto', 'coverPrice', 'categoryId', 'shelfLocation'],
     order: [['documentId', 'DESC']],
     distinct: true,
     subQuery: false
@@ -974,6 +975,7 @@ const getDocumentDetailWithDeposit = async (documentId) => {
       language: o.language,
       publicationYear: o.publicationYear,
       coverPrice: o.coverPrice,
+      shelfLocation: o.shelfLocation,
       description: o.description,
       coverPhoto: o.coverPhoto,
       ebookUrl: o.ebookUrl,

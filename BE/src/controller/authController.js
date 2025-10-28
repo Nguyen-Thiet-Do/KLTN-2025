@@ -196,10 +196,54 @@ const registerReader = async (req, res) => {
   }
 };
 
+const loginReader = async (req, res, next) => {
+  passport.authenticate('local', { session: false }, async (err, account, info) => {
+    try {
+      if (err) {
+        return res.status(500).json({
+          success: false,
+          message: 'Đã có lỗi xảy ra',
+          error: err.message
+        });
+      }
+
+      if (!account) {
+        return res.status(401).json({
+          success: false,
+          message: info?.message || 'Đăng nhập thất bại'
+        });
+      }
+
+      // Chỉ cho phép Reader
+      if (account.roleId !== 3) {
+        return res.status(403).json({
+          success: false,
+          message: 'Chỉ tài khoản độc giả (roleId = 3) được phép đăng nhập tại endpoint này'
+        });
+      }
+
+      const data = await authService.loginService(account);
+
+      return res.json({
+        success: true,
+        message: 'Đăng nhập thành công (Reader)',
+        data
+      });
+    } catch (error) {
+      return res.status(500).json({
+        success: false,
+        message: 'Đã có lỗi xảy ra',
+        error: error.message
+      });
+    }
+  })(req, res, next);
+};
+
 module.exports = {
   login,
   refreshToken,
   logout,
   getProfile,
-  registerReader
+  registerReader,
+  loginReader
 };

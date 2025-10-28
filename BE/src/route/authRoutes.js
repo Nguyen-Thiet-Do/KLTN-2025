@@ -20,39 +20,39 @@ router.get('/', (req, res) => {
 });
 
 // Registration with validation
-router.post('/register', 
+router.post('/register',
   validateRegister,
   authController.registerReader
 );
 
 // Login with validation and rate limiting
-router.post('/login', 
+router.post('/login',
   validateLogin,
   checkRateLimit,
   authController.login
 );
 
 // Refresh token with validation
-router.post('/refresh-token', 
+router.post('/refresh-token',
   validateRefreshToken,
   authController.refreshToken
 );
 
 // Protected routes
-router.post('/logout', 
-  requireAuth, 
+router.post('/logout',
+  requireAuth,
   authController.logout
 );
 
-router.get('/profile', 
-  requireAuth, 
+router.get('/profile',
+  requireAuth,
   authController.getProfile
 );
 
 // Example: Admin only route
-router.get('/admin', 
-  requireAuth, 
-  requireRole([1]), 
+router.get('/admin',
+  requireAuth,
+  requireRole([1]),
   (req, res) => {
     res.json({
       success: true,
@@ -60,6 +60,13 @@ router.get('/admin',
       user: req.user
     });
   }
+);
+
+router.post(
+  '/login/reader',
+  validateLogin,
+  checkRateLimit,
+  authController.loginReader
 );
 
 module.exports = router;

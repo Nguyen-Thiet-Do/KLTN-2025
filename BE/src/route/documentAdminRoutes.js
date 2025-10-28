@@ -3,7 +3,7 @@ const router = express.Router();
 const { requireAuth, requireRole } = require("../middleware/auth");
 
 const documentAdminController = require("../controller/documentAdminController");
-
+const { upload } = require("../middleware/upload");
 // ======================= ROUTES DÀNH CHO QUẢN TRỊ VIÊN VÀ THỦ THƯ (roleId = 1, 2) =======================
 
 /**
@@ -78,6 +78,68 @@ router.get('/:id/copies',
     requireAuth,
     requireRole([1, 2]),
     documentAdminController.getCopiesWithDeposit
+);
+
+/* ======================= ROUTES TẠO MỚI (BOOK/MAGAZINE/NEWSPAPER) ======================= */
+/**
+ * @route   POST /api/documents/admin/books
+ * @desc    Tạo mới tài liệu loại Sách + subtype Book + copies (1 lần)
+ * @body    (multipart: files: cover[bắt buộc], ebook[tuỳ] + fields JSON) hoặc (application/json: coverUrl bắt buộc)
+ * @access  Admin (roleId=1), Librarian (roleId=2)
+ * @example POST /api/documents/admin/books
+ */
+router.post(
+    "/books",
+    requireAuth,
+    requireRole([1, 2]),
+    upload.fields([{ name: "cover", maxCount: 1 }, { name: "ebook", maxCount: 1 }]),
+    documentAdminController.createBookCtrl
+);
+
+/**
+ * @route   POST /api/documents/admin/magazines
+ * @desc    Tạo mới tài liệu loại Tạp chí + subtype Magazine + copies (1 lần)
+ * @body    (multipart hoặc json — giống route /books)
+ * @access  Admin (roleId=1), Librarian (roleId=2)
+ * @example POST /api/documents/admin/magazines
+ */
+router.post(
+    "/magazines",
+    requireAuth,
+    requireRole([1, 2]),
+    upload.fields([{ name: "cover", maxCount: 1 }, { name: "ebook", maxCount: 1 }]),
+    documentAdminController.createMagazineCtrl
+);
+
+/**
+ * @route   POST /api/documents/admin/newspapers
+ * @desc    Tạo mới tài liệu loại Báo + subtype Newspaper + copies (1 lần)
+ * @body    (multipart hoặc json — giống route /books)
+ * @access  Admin (roleId=1), Librarian (roleId=2)
+ * @example POST /api/documents/admin/newspapers
+ */
+router.post(
+    "/newspapers",
+    requireAuth,
+    requireRole([1, 2]),
+    upload.fields([{ name: "cover", maxCount: 1 }, { name: "ebook", maxCount: 1 }]),
+    documentAdminController.createNewspaperCtrl
+);
+
+/* ======================= ROUTE NHẬP THÊM BẢN SAO ======================= */
+/**
+ * @route   POST /api/documents/admin/:id/copies
+ * @desc    Nhập thêm bản sao cho 1 tài liệu đã tồn tại
+ * @body    JSON array [{ barCode?, status?, conditionNote?, entryDate? }, ...]
+ * @access  Admin (roleId=1), Librarian (roleId=2)
+ * @example POST /api/documents/admin/15/copies
+ */
+router.post(
+    "/:id/copies",
+    requireAuth,
+    requireRole([1, 2]),
+    express.json(), // đảm bảo parse JSON body cho mảng copies
+    documentAdminController.addCopiesCtrl
 );
 
 module.exports = router;
