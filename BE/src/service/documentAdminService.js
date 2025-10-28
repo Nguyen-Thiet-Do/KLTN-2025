@@ -1,12 +1,15 @@
-// src/service/documentBasicByCategoryService.js
+// ================================
+// File: /service/documentAdminService.js (Optimized - fixed Author include + faster listing)
+// ================================
+
 const {
-    Document, Category, Publisher,
-    Author, DocumentAuthorMap,
-    Book, Magazine, Newspaper, DocumentCopy,
-    Genre, DocumentGenreMap
+  Document, Category, Publisher,
+  Author, DocumentAuthorMap,
+  Book, Magazine, Newspaper, DocumentCopy,
+  Genre, DocumentGenreMap
 } = require('../model');
 const sequelize = require('../config/database');
-const { Op, UniqueConstraintError } = require('sequelize');
+const { Op, UniqueConstraintError, QueryTypes } = require('sequelize');
 
 // Nếu dùng upload file: service R2 (đã có trong dự án của bạn)
 const { uploadCover, uploadEbook } = require('./r2Service');
@@ -14,699 +17,863 @@ const { uploadCover, uploadEbook } = require('./r2Service');
 // ========= Cấu hình URL public cho proxy stream (sửa theo domain của bạn) =========
 const PUBLIC_FILES_BASE = process.env.PUBLIC_FILES_BASE || 'https://kltn-2025-ehsx.onrender.com/api/files';
 function keyToPublicUrl(key) {
-    // key: "covers/xxx.webp" | "ebooks/yyy.pdf"
-    const [folder, file] = String(key || '').split('/');
-    if (!folder || !file) return null;
-    if (folder === 'covers') return `${PUBLIC_FILES_BASE}/covers/${file}`;
-    if (folder === 'ebooks') return `${PUBLIC_FILES_BASE}/ebooks/${file}`;
-    return null;
+  // key: "covers/xxx.webp" | "ebooks/yyy.pdf"
+  const [folder, file] = String(key || '').split('/');
+  if (!folder || !file) return null;
+  if (folder === 'covers') return `${PUBLIC_FILES_BASE}/covers/${file}`;
+  if (folder === 'ebooks') return `${PUBLIC_FILES_BASE}/ebooks/${file}`;
+  return null;
 }
 
-// Nhãn category để map sang type (có đa ngôn ngữ)
+// Nhãn category để map sang type (đa ngôn ngữ)
 const TYPE_LABELS = {
-    book: ['Sách', 'Sach', 'book'],
-    magazine: ['Tạp chí', 'Tap chí', 'Tap chi', 'magazine'],
-    newspaper: ['Báo', 'Bao', 'newspaper']
+  book: ['Sách', 'Sach', 'book'],
+  magazine: ['Tạp chí', 'Tap chí', 'Tap chi', 'magazine'],
+  newspaper: ['Báo', 'Bao', 'newspaper']
 };
 
-function buildCategoryWhere(documentType = 'all') {
-    const where = { deleted: false };
-    if (documentType !== 'all') where.name = { [Op.in]: TYPE_LABELS[documentType] || [] };
-    return where;
-}
-
-function buildDocumentWhere(search = '') {
-    const where = { deleted: false };
-    if (search) where.title = { [Op.like]: `%${search}%` };
-    return where;
-}
-
-function normalizeAuthors(authors = []) {
-    // Sắp xếp theo ord trong DocumentAuthorMap
-    const arr = [...authors].sort(
-        (a, b) => (a.DocumentAuthorMap?.ord ?? 1) - (b.DocumentAuthorMap?.ord ?? 1)
-    );
-    return arr.map(a => ({
-        authorId: a.authorId,
-        fullName: a.fullName,
-        role: a.DocumentAuthorMap?.role ?? 'main',
-        ord: a.DocumentAuthorMap?.ord ?? 1
-    }));
-}
-
-function extractSubtype(o) {
-    const book = o.book ? {
-        isbn: o.book.isbn ?? null,
-        edition: o.book.edition ?? null,
-        pageCount: o.book.pageCount ?? null
-    } : null;
-
-    const magazine = o.magazine ? {
-        issn: o.magazine.issn ?? null,
-        volume: o.magazine.volume ?? null,
-        issue: o.magazine.issue ?? null,
-        period: o.magazine.period ?? null,
-        coverDate: o.magazine.coverDate ?? null
-    } : null;
-
-    const newspaper = o.newspaper ? {
-        issn: o.newspaper.issn ?? null,
-        issueDate: o.newspaper.issueDate ?? null,
-        issueNumber: o.newspaper.issueNumber ?? null
-    } : null;
-
-    return { book, magazine, newspaper };
-}
-
-function mapItem(row) {
-    const o = row.toJSON();
-    const { book, magazine, newspaper } = extractSubtype(o);
-    return {
-        // From Documents
-        documentId: o.documentId,
-        title: o.title,
-        language: o.language,
-        publicationYear: o.publicationYear,
-        coverPrice: o.coverPrice,
-        coverPhoto: o.coverPhoto,
-        ebookUrl: o.ebookUrl,
-        numberOfCopy: o.numberOfCopy,
-
-        // Category & Publisher
-        category: o.Category ? { categoryId: o.Category.categoryId, name: o.Category.name } : null,
-        publisher: o.Publisher ? { publisherId: o.Publisher.publisherId, name: o.Publisher.name } : null,
-
-        // Authors (đã chuẩn hoá)
-        authors: normalizeAuthors(o.authors || []),
-
-        // Subtype
-        book,
-        magazine,
-        newspaper
-    };
-}
-
-/* ============================================================
- *                       GET FUNCTIONS
- * ==========================================================*/
-
 /**
- * Lấy danh sách thông tin cơ bản theo category (book/magazine/newspaper/all)
+ * Cache map categoryId cho từng loại để loại bỏ JOIN Category trong truy vấn list.
+ * -> Giảm chi phí COUNT/LIST rất nhiều.
  */
-async function getBasicDocumentsByCategory({
-    documentType = 'all',
-    page = 1,
-    limit = 20,
-    search = ''
-} = {}) {
-    const offset = (page - 1) * limit;
+const CATEGORY_ID_CACHE = { last: 0, map: null };
+async function getCategoryMapCached() {
+  const now = Date.now();
+  if (CATEGORY_ID_CACHE.map && (now - CATEGORY_ID_CACHE.last < 5 * 60 * 1000)) {
+    return CATEGORY_ID_CACHE.map;
+  }
+  const rows = await Category.findAll({ where: { deleted: false }, attributes: ['categoryId', 'name'] });
+  const map = { book: [], magazine: [], newspaper: [], all: [] };
+  for (const r of rows) {
+    map.all.push(r.categoryId);
+    const n = r.name;
+    if (TYPE_LABELS.book.includes(n)) map.book.push(r.categoryId);
+    if (TYPE_LABELS.magazine.includes(n)) map.magazine.push(r.categoryId);
+    if (TYPE_LABELS.newspaper.includes(n)) map.newspaper.push(r.categoryId);
+  }
+  CATEGORY_ID_CACHE.last = now;
+  CATEGORY_ID_CACHE.map = map;
+  return map;
+}
 
-    const whereCat = buildCategoryWhere(documentType);
-    const whereDoc = buildDocumentWhere(search);
-
-    // Đếm tổng
-    const totalItems = await Document.count({
-        where: whereDoc,
-        include: [{ model: Category, attributes: [], where: whereCat, required: true }],
-        distinct: true,
-        col: 'documentId'
-    });
-
-    // Lấy rows
-    const rows = await Document.findAll({
-        where: whereDoc,
-        attributes: [
-            'documentId', 'categoryId', 'publisherId', 'title',
-            'language', 'publicationYear', 'coverPrice',
-            'coverPhoto', 'ebookUrl', 'numberOfCopy'
-        ],
-        include: [
-            // Category (bắt buộc)
-            { model: Category, attributes: ['categoryId', 'name'], where: whereCat, required: true },
-
-            // Publisher (tuỳ chọn)
-            { model: Publisher, attributes: ['publisherId', 'name'], required: false, where: { deleted: false } },
-
-            // Authors (N-N)
-            {
-                model: Author,
-                as: 'authors',
-                attributes: ['authorId', 'fullName'],
-                through: { model: DocumentAuthorMap, attributes: ['role', 'ord'], where: { deleted: false } },
-                where: { deleted: false },
-                required: false
-            },
-
-            // Subtypes (tuỳ chọn)
-            { model: Book, as: 'book', attributes: ['isbn', 'edition', 'pageCount'], where: { deleted: false }, required: false },
-            { model: Magazine, as: 'magazine', attributes: ['issn', 'volume', 'issue', 'period', 'coverDate'], where: { deleted: false }, required: false },
-            { model: Newspaper, as: 'newspaper', attributes: ['issn', 'issueDate', 'issueNumber'], where: { deleted: false }, required: false }
-        ],
-        order: [['documentId', 'DESC']],
-        limit,
-        offset,
-        distinct: true,
-        subQuery: false
-    });
-
-    const items = rows.map(mapItem);
-    const totalPages = Math.ceil(totalItems / limit);
-
-    return {
-        items,
-        currentPage: page,
-        totalPages,
-        totalItems,
-        limit,
-        hasNextPage: page < totalPages,
-        hasPrevPage: page > 1
-    };
+function buildDocumentWhereBase(categoryIds) {
+  return { deleted: false, categoryId: { [Op.in]: categoryIds } };
 }
 
 function toNumberOrNull(x) {
-    const v = parseFloat(x);
-    return Number.isNaN(v) ? null : v;
+  const v = parseFloat(x);
+  return Number.isNaN(v) ? null : v;
 }
 
 function computeDeposit({ coverPrice, depositRate, qualityPercent }) {
-    const cp = Number(coverPrice) || 0;
-    const dr = Number(depositRate) || 0;
-    const q = Number(qualityPercent) || 0;
-    if (!(cp > 0 && dr > 0 && q > 0)) return null;
-    // làm tròn gần nhất để dễ hiển thị/thu tiền
-    return Math.round(cp * dr * (q / 100));
+  const cp = Number(coverPrice) || 0;
+  const dr = Number(depositRate) || 0;
+  const q = Number(qualityPercent) || 0;
+  if (!(cp > 0 && dr > 0 && q > 0)) return null;
+  // làm tròn gần nhất để dễ hiển thị/thu tiền
+  return Math.round(cp * dr * (q / 100));
 }
+
+// Chuẩn hoá authors từ mảng mapping (DocumentAuthorMap + Author đã gắn kèm)
+function normalizeAuthorsFromMaps(maps = []) {
+  const arr = [...maps].sort((a, b) => (a.ord ?? 1) - (b.ord ?? 1));
+  return arr.map(m => ({
+    authorId: m.Author.authorId,
+    fullName: m.Author.fullName,
+    role: m.role ?? 'main',
+    ord: m.ord ?? 1
+  }));
+}
+
+// Chuẩn hoá authors khi include qua many-to-many alias 'authors'
+function normalizeAuthorsFromDocAuthors(authors = []) {
+  const arr = [...authors].sort(
+    (a, b) => (a.DocumentAuthorMap?.ord ?? 1) - (b.DocumentAuthorMap?.ord ?? 1)
+  );
+  return arr.map(a => ({
+    authorId: a.authorId,
+    fullName: a.fullName,
+    role: a.DocumentAuthorMap?.role ?? 'main',
+    ord: a.DocumentAuthorMap?.ord ?? 1
+  }));
+}
+
+function extractSubtype(o) {
+  const book = o.book ? {
+    isbn: o.book.isbn ?? null,
+    edition: o.book.edition ?? null,
+    pageCount: o.book.pageCount ?? null
+  } : null;
+
+  const magazine = o.magazine ? {
+    issn: o.magazine.issn ?? null,
+    volume: o.magazine.volume ?? null,
+    issue: o.magazine.issue ?? null,
+    period: o.magazine.period ?? null,
+    coverDate: o.magazine.coverDate ?? null
+  } : null;
+
+  const newspaper = o.newspaper ? {
+    issn: o.newspaper.issn ?? null,
+    issueDate: o.newspaper.issueDate ?? null,
+    issueNumber: o.newspaper.issueNumber ?? null
+  } : null;
+
+  return { book, magazine, newspaper };
+}
+
+function mapItem(row) {
+  const o = row.toJSON();
+  const { book, magazine, newspaper } = extractSubtype(o);
+  return {
+    // From Documents
+    documentId: o.documentId,
+    title: o.title,
+    language: o.language,
+    publicationYear: o.publicationYear,
+    coverPrice: o.coverPrice,
+    coverPhoto: o.coverPhoto,
+    ebookUrl: o.ebookUrl,
+    numberOfCopy: o.numberOfCopy,
+
+    // Category & Publisher
+    category: o.Category ? { categoryId: o.Category.categoryId, name: o.Category.name } : null,
+    publisher: o.Publisher ? { publisherId: o.Publisher.publisherId, name: o.Publisher.name } : null,
+
+    // Authors: ưu tiên many-to-many alias 'authors', fallback authorsMaps nếu có
+    authors: o.authors
+      ? normalizeAuthorsFromDocAuthors(o.authors)
+      : normalizeAuthorsFromMaps((o.authorsMaps || []).map(m => ({ ...m, Author: m.Author }))),
+
+    // Subtype
+    book,
+    magazine,
+    newspaper
+  };
+}
+
+/* ============================================================
+ *                       GET FUNCTIONS (FAST)
+ *  - Two-step paging (lấy id theo trang → batch load)
+ *  - Không JOIN N-N trong truy vấn phân trang
+ *  - Hỗ trợ FULLTEXT hoặc LIKE fallback
+ * ==========================================================*/
+
+/**
+ * @param {Object} opts
+ * @param {'all'|'book'|'magazine'|'newspaper'} opts.documentType
+ * @param {number} opts.page
+ * @param {number} opts.limit
+ * @param {string} opts.search
+ * @param {'auto'|'fulltext'|'like'} opts.searchMode
+ * @param {boolean} opts.withAuthors
+ * @param {boolean} opts.withSubtype
+ */
+async function getBasicDocumentsByCategoryFast({
+  documentType = 'all',
+  page = 1,
+  limit = 20,
+  search = '',
+  searchMode = 'auto',
+  withAuthors = true,
+  withSubtype = true
+} = {}) {
+  const offset = (page - 1) * limit;
+  const catMap = await getCategoryMapCached();
+  const categoryIds = catMap[documentType] || catMap.all;
+  const whereBase = buildDocumentWhereBase(categoryIds);
+
+  const useFulltextAuto = search && search.trim().length >= 2;
+  const useFulltext = (searchMode === 'fulltext') || (searchMode === 'auto' && useFulltextAuto);
+
+  let ids = [], totalItems = 0;
+
+  if (useFulltext) {
+    // Dùng FULLTEXT: tận dụng index ft_documents_title_desc_lang
+    const q = search.trim().split(/\s+/).map(w => `+${w}*`).join(' ');
+    const list = await sequelize.query(
+      `SELECT d.documentId
+       FROM Documents d
+       WHERE d.deleted = 0
+         AND d.categoryId IN (:catIds)
+         AND MATCH(d.title, d.description, d.language) AGAINST (:q IN BOOLEAN MODE)
+       ORDER BY d.documentId DESC
+       LIMIT :limit OFFSET :offset`,
+      { replacements: { catIds: categoryIds, q, limit, offset }, type: QueryTypes.SELECT }
+    );
+
+    const countRows = await sequelize.query(
+      `SELECT COUNT(*) AS total
+         FROM Documents d
+        WHERE d.deleted = 0
+          AND d.categoryId IN (:catIds)
+          AND MATCH(d.title, d.description, d.language) AGAINST (:q IN BOOLEAN MODE)`,
+      { replacements: { catIds: categoryIds, q }, type: QueryTypes.SELECT }
+    );
+
+    ids = list.map(r => r.documentId);
+    totalItems = Number((countRows?.[0]?.total) || 0);
+  } else {
+    // LIKE fallback (sử dụng index BTREE trên title nếu có; với %...% sẽ kém hơn)
+    const where = search
+      ? { ...whereBase, title: { [Op.like]: `%${search}%` } }
+      : whereBase;
+
+    totalItems = await Document.count({ where });
+
+    const docs = await Document.findAll({
+      where,
+      attributes: [
+        'documentId', 'categoryId', 'publisherId', 'title',
+        'language', 'publicationYear', 'coverPrice',
+        'coverPhoto', 'ebookUrl', 'numberOfCopy'
+      ],
+      include: [
+        // Publisher không nở dòng → có thể include ngay ở pha 1
+        { model: Publisher, attributes: ['publisherId', 'name'], required: false, where: { deleted: false } }
+      ],
+      order: [['documentId', 'DESC']],
+      limit, offset
+    });
+    ids = docs.map(d => d.documentId);
+  }
+
+  if (ids.length === 0) {
+    return {
+      items: [], currentPage: page, totalPages: 0, totalItems: 0,
+      limit, hasNextPage: false, hasPrevPage: false
+    };
+  }
+
+  // === Pha 2: batch load các phần còn lại để ghép dữ liệu trả về ===
+  const promises = [
+    Document.findAll({
+      where: { documentId: { [Op.in]: ids } },
+      attributes: [
+        'documentId', 'categoryId', 'publisherId', 'title', 'language',
+        'publicationYear', 'coverPrice', 'coverPhoto', 'ebookUrl', 'numberOfCopy'
+      ],
+      include: [
+        { model: Category, attributes: ['categoryId', 'name'], required: false },
+        { model: Publisher, attributes: ['publisherId', 'name'], required: false }
+      ]
+    })
+  ];
+
+  // LẤY AUTHORS 2 BƯỚC (không eager load Author từ DocumentAuthorMap để tránh lỗi association)
+  if (withAuthors) {
+    promises.push(
+      DocumentAuthorMap.findAll({
+        where: { documentId: { [Op.in]: ids }, deleted: false },
+        attributes: ['documentId', 'authorId', 'role', 'ord']
+      })
+    );
+    // Giữ chỗ cho destructuring đồng nhất
+    promises.push(Promise.resolve([]));
+  } else {
+    promises.push(Promise.resolve([]), Promise.resolve([]));
+  }
+
+  if (withSubtype) {
+    promises.push(
+      Book.findAll({ where: { documentId: { [Op.in]: ids }, deleted: false }, attributes: ['documentId', 'isbn', 'edition', 'pageCount'] }),
+      Magazine.findAll({ where: { documentId: { [Op.in]: ids }, deleted: false }, attributes: ['documentId', 'issn', 'volume', 'issue', 'period', 'coverDate'] }),
+      Newspaper.findAll({ where: { documentId: { [Op.in]: ids }, deleted: false }, attributes: ['documentId', 'issn', 'issueDate', 'issueNumber'] })
+    );
+  } else {
+    promises.push(Promise.resolve([]), Promise.resolve([]), Promise.resolve([]));
+  }
+
+  const [docsFull, authorMapsOnly, _authorRowsPlaceholder, books, magazines, newspapers] = await Promise.all(promises);
+
+  // Gắn Author vào map theo documentId (truy vấn Author 1 lần)
+  let authorsByDoc = {};
+  if (withAuthors) {
+    const authorIds = [...new Set(authorMapsOnly.map(m => m.authorId))];
+    const authorRows = authorIds.length
+      ? await Author.findAll({
+          where: { authorId: { [Op.in]: authorIds }, deleted: false },
+          attributes: ['authorId', 'fullName']
+        })
+      : [];
+    const authorById = new Map(authorRows.map(a => [a.authorId, a]));
+    for (const m of authorMapsOnly) {
+      const a = authorById.get(m.authorId);
+      if (!a) continue;
+      (authorsByDoc[m.documentId] ||= []).push({ Author: a, role: m.role, ord: m.ord });
+    }
+  }
+
+  const byId = new Map(docsFull.map(d => [d.documentId, d.toJSON()]));
+
+  const bookByDoc = withSubtype ? Object.fromEntries(books.map(x => [x.documentId, { isbn: x.isbn, edition: x.edition, pageCount: x.pageCount }])) : {};
+  const magByDoc  = withSubtype ? Object.fromEntries(magazines.map(x => [x.documentId, { issn: x.issn, volume: x.volume, issue: x.issue, period: x.period, coverDate: x.coverDate }])) : {};
+  const newsByDoc = withSubtype ? Object.fromEntries(newspapers.map(x => [x.documentId, { issn: x.issn, issueDate: x.issueDate, issueNumber: x.issueNumber }])) : {};
+
+  const items = ids.map(id => {
+    const o = byId.get(id); if (!o) return null;
+    const authors = withAuthors ? normalizeAuthorsFromMaps(authorsByDoc[id] || []) : [];
+    return {
+      documentId: o.documentId,
+      title: o.title,
+      language: o.language,
+      publicationYear: o.publicationYear,
+      coverPrice: o.coverPrice,
+      coverPhoto: o.coverPhoto,
+      ebookUrl: o.ebookUrl,
+      numberOfCopy: o.numberOfCopy,
+      category: o.Category ? { categoryId: o.Category.categoryId, name: o.Category.name } : null,
+      publisher: o.Publisher ? { publisherId: o.Publisher.publisherId, name: o.Publisher.name } : null,
+      authors,
+      book: withSubtype ? (bookByDoc[id] || null) : null,
+      magazine: withSubtype ? (magByDoc[id] || null) : null,
+      newspaper: withSubtype ? (newsByDoc[id] || null) : null
+    };
+  }).filter(Boolean);
+
+  const totalPages = Math.ceil(totalItems / limit);
+
+  return {
+    items,
+    currentPage: page,
+    totalPages,
+    totalItems,
+    limit,
+    hasNextPage: page < totalPages,
+    hasPrevPage: page > 1
+  };
+}
+
+/** Shortcut helpers (FAST) */
+const getBooksBasic = (opts = {}) => getBasicDocumentsByCategoryFast({ ...opts, documentType: 'book' });
+const getMagazinesBasic = (opts = {}) => getBasicDocumentsByCategoryFast({ ...opts, documentType: 'magazine' });
+const getNewspapersBasic = (opts = {}) => getBasicDocumentsByCategoryFast({ ...opts, documentType: 'newspaper' });
+
+/* ============================================================
+ *                       COPIES + DEPOSIT
+ * ==========================================================*/
 
 /**
  * Lấy toàn bộ copies của một document và tính tiền cọc cho từng copy
+ * - Giữ nguyên logic, chỉ truy xuất các cột cần thiết
+ * - Có thể mở rộng filter theo status khi cần
  */
-async function getDocumentCopiesWithDeposit(documentId) {
-    // 1) Lấy Document + Category (để có coverPrice, deposit_rate)
-    const doc = await Document.findOne({
-        where: { documentId, deleted: false },
-        attributes: ['documentId', 'categoryId', 'coverPrice'],
-        include: [{
-            model: Category,
-            attributes: ['categoryId', 'name', 'deposit_rate'],
-            where: { deleted: false },
-            required: true
-        }]
-    });
-    if (!doc) return null;
+async function getDocumentCopiesWithDeposit(documentId, { status } = {}) {
+  // 1) Lấy Document + Category (để có coverPrice, deposit_rate)
+  const doc = await Document.findOne({
+    where: { documentId, deleted: false },
+    attributes: ['documentId', 'categoryId', 'coverPrice'],
+    include: [{
+      model: Category,
+      attributes: ['categoryId', 'name', 'deposit_rate'],
+      where: { deleted: false },
+      required: true
+    }]
+  });
+  if (!doc) return null;
 
-    const coverPrice = Number(doc.coverPrice) || 0;
-    const depositRate = Number(doc.Category?.deposit_rate) || 0;
+  const coverPrice = Number(doc.coverPrice) || 0;
+  const depositRate = Number(doc.Category?.deposit_rate) || 0;
 
-    // 2) Lấy tất cả copies (không phân trang theo yêu cầu)
-    const copies = await DocumentCopy.findAll({
-        where: { deleted: false, documentId },
-        attributes: ['documentCopyId', 'barCode', 'status', 'conditionNote', 'entryDate'],
-        order: [['documentCopyId', 'ASC']]
-    });
+  // 2) Lấy tất cả copies (không phân trang theo yêu cầu)
+  const whereCopies = { deleted: false, documentId };
+  if (status) whereCopies.status = status;
 
-    // 3) Tính cọc cho từng copy
-    const mapped = copies.map(c => {
-        const quality = toNumberOrNull(c.conditionNote); // “chất lượng” %
-        const deposit = computeDeposit({ coverPrice, depositRate, qualityPercent: quality });
-        return {
-            documentCopyId: c.documentCopyId,
-            barCode: c.barCode,
-            status: c.status,
-            conditionNote: c.conditionNote,
-            entryDate: c.entryDate,
-            deposit
-        };
-    });
+  const copies = await DocumentCopy.findAll({
+    where: whereCopies,
+    attributes: ['documentCopyId', 'barCode', 'status', 'conditionNote', 'entryDate'],
+    order: [['documentCopyId', 'ASC']]
+  });
 
-    // 4) Tổng hợp nhanh min/max/avg (chỉ tính các copy có deposit hợp lệ)
-    const deposits = mapped.map(x => x.deposit).filter(v => typeof v === 'number' && v >= 0);
-    const summary = deposits.length
-        ? {
-            minDeposit: Math.min(...deposits),
-            maxDeposit: Math.max(...deposits),
-            avgDeposit: Math.round(deposits.reduce((a, b) => a + b, 0) / deposits.length)
-        }
-        : { minDeposit: null, maxDeposit: null, avgDeposit: null };
-
+  // 3) Tính cọc cho từng copy
+  const mapped = copies.map(c => {
+    const quality = toNumberOrNull(c.conditionNote); // “chất lượng” %
+    const deposit = computeDeposit({ coverPrice, depositRate, qualityPercent: quality });
     return {
-        documentId: doc.documentId,
-        coverPrice,
-        depositRate,
-        copies: mapped,
-        summary
+      documentCopyId: c.documentCopyId,
+      barCode: c.barCode,
+      status: c.status,
+      conditionNote: c.conditionNote,
+      entryDate: c.entryDate,
+      deposit
     };
-}
+  });
 
-/** Shortcut helpers */
-const getBooksBasic = (opts = {}) => getBasicDocumentsByCategory({ ...opts, documentType: 'book' });
-const getMagazinesBasic = (opts = {}) => getBasicDocumentsByCategory({ ...opts, documentType: 'magazine' });
-const getNewspapersBasic = (opts = {}) => getBasicDocumentsByCategory({ ...opts, documentType: 'newspaper' });
+  // 4) Tổng hợp nhanh min/max/avg (chỉ tính các copy có deposit hợp lệ)
+  const deposits = mapped.map(x => x.deposit).filter(v => typeof v === 'number' && v >= 0);
+  const summary = deposits.length
+    ? {
+        minDeposit: Math.min(...deposits),
+        maxDeposit: Math.max(...deposits),
+        avgDeposit: Math.round(deposits.reduce((a, b) => a + b, 0) / deposits.length)
+      }
+    : { minDeposit: null, maxDeposit: null, avgDeposit: null };
+
+  return {
+    documentId: doc.documentId,
+    coverPrice,
+    depositRate,
+    copies: mapped,
+    summary
+  };
+}
 
 /* ============================================================
- *                       CREATE HELPERS
+ *                       CREATE HELPERS (BULK)
+ *  - Giảm round-trip bằng findAll IN-list + bulkCreate
+ *  - Upsert N-N bằng bulkCreate(updateOnDuplicate)
  * ==========================================================*/
 
-// Chuẩn hoá type -> where của Category (không thêm/sửa/xoá Category)
+// Chuẩn hoá type -> lấy categoryId (không JOIN trong truy vấn list, chỉ cần 1 lần ở create)
 async function resolveCategoryIdOrThrow(documentType) {
-    const whereCat = buildCategoryWhere(documentType);
-    const cat = await Category.findOne({ where: whereCat, attributes: ['categoryId'] });
-    if (!cat) {
-        throw new Error(`Category cho loại "${documentType}" chưa tồn tại trong DB`);
-    }
-    return cat.categoryId;
-}
-
-// Tìm/khôi phục soft-delete hoặc tạo mới (Publisher/Author/Genre)
-async function findOrCreateUndelete(Model, where, defaults = {}, t) {
-    const found = await Model.findOne({ where, transaction: t, lock: t.LOCK.UPDATE });
-    if (found) {
-        if (found.deleted) {
-            await found.update({ deleted: false }, { transaction: t });
-        }
-        return found;
-    }
-    return await Model.create({ ...where, ...defaults, deleted: false }, { transaction: t });
-}
-
-async function ensureGenres(genreNames = [], t) {
-    if (!Array.isArray(genreNames) || genreNames.length === 0) return [];
-    const names = [...new Set(genreNames.map(s => String(s).trim()).filter(Boolean))];
-    const out = [];
-    for (const name of names) {
-        const g = await findOrCreateUndelete(Genre, { name }, {}, t);
-        out.push(g);
-    }
-    return out;
-}
-
-async function ensureAuthors(authorInputs = [], t) {
-    if (!Array.isArray(authorInputs) || authorInputs.length === 0) return [];
-    const uniq = [];
-    const seen = new Set();
-    for (const a of authorInputs) {
-        const fullName = String(a.fullName || '').trim();
-        if (!fullName) continue;
-        const role = a.role || 'main';
-        const ord = Number.isFinite(+a.ord) ? +a.ord : 1;
-        const key = `${fullName}::${role}::${ord}`;
-        if (!seen.has(key)) {
-            seen.add(key);
-            uniq.push({ fullName, role, ord });
-        }
-    }
-    const out = [];
-    for (const u of uniq) {
-        const rec = await findOrCreateUndelete(Author, { fullName: u.fullName }, {}, t);
-        out.push({ author: rec, role: u.role, ord: u.ord });
-    }
-    return out;
+  const catMap = await getCategoryMapCached();
+  theIds = catMap[documentType];
+  const ids = theIds; // giữ tên biến cũ cho dễ đọc
+  if (!ids || ids.length === 0) throw new Error(`Category cho loại "${documentType}" chưa tồn tại trong DB`);
+  // Nếu có nhiều id khớp nhãn, ưu tiên id nhỏ nhất
+  return Math.min(...ids);
 }
 
 async function ensurePublisher(publisherName, t) {
-    if (!publisherName) return null;
-    const name = String(publisherName).trim();
-    if (!name) return null;
-    return await findOrCreateUndelete(Publisher, { name }, {}, t);
+  if (!publisherName) return null;
+  const name = String(publisherName).trim();
+  if (!name) return null;
+
+  // Tìm theo tên 1 lần
+  const found = await Publisher.findOne({ where: { name }, transaction: t, lock: t.LOCK.UPDATE });
+  if (found) {
+    if (found.deleted) await found.update({ deleted: false }, { transaction: t });
+    return found;
+  }
+  return await Publisher.create({ name, deleted: false }, { transaction: t });
 }
 
-async function upsertDocAuthorMap(documentId, authorId, role = 'main', ord = 1, t) {
-    const where = { documentId, authorId };
-    const ex = await DocumentAuthorMap.findOne({ where, transaction: t, lock: t.LOCK.UPDATE });
-    if (ex) {
-        await ex.update({ deleted: false, role, ord }, { transaction: t });
-    } else {
-        await DocumentAuthorMap.create({ ...where, role, ord, deleted: false }, { transaction: t });
-    }
+async function ensureGenres(genreNames = [], t) {
+  if (!Array.isArray(genreNames) || genreNames.length === 0) return [];
+  const names = [...new Set(genreNames.map(s => String(s).trim()).filter(Boolean))];
+
+  // Tìm tất cả 1 lần
+  const existed = await Genre.findAll({ where: { name: { [Op.in]: names } }, transaction: t, lock: t.LOCK.UPDATE });
+  const existedByName = new Map(existed.map(g => [g.name, g]));
+
+  const toCreate = names.filter(n => !existedByName.has(n)).map(n => ({ name: n, deleted: false }));
+  if (toCreate.length) {
+    await Genre.bulkCreate(toCreate, { transaction: t, ignoreDuplicates: true });
+  }
+
+  // Mở khoá soft-delete cho các genre tồn tại nhưng bị xoá mềm
+  const allAfter = await Genre.findAll({ where: { name: { [Op.in]: names } }, transaction: t });
+  const toUndeleteIds = allAfter.filter(g => g.deleted).map(g => g.genreId);
+  if (toUndeleteIds.length) {
+    await Genre.update({ deleted: false }, { where: { genreId: { [Op.in]: toUndeleteIds } }, transaction: t });
+  }
+
+  return await Genre.findAll({ where: { name: { [Op.in]: names } }, transaction: t });
 }
-async function upsertDocGenreMap(documentId, genreId, t) {
-    const where = { documentId, genreId };
-    const ex = await DocumentGenreMap.findOne({ where, transaction: t, lock: t.LOCK.UPDATE });
-    if (ex) {
-        await ex.update({ deleted: false }, { transaction: t });
-    } else {
-        await DocumentGenreMap.create({ ...where, deleted: false }, { transaction: t });
-    }
+
+async function ensureAuthors(authorInputs = [], t) {
+  if (!Array.isArray(authorInputs) || authorInputs.length === 0) return [];
+  // Chuẩn hóa input + dedupe theo (fullName, role, ord) để giữ ord/role
+  const uniq = [];
+  const seen = new Set();
+  for (const a of authorInputs) {
+    const fullName = String(a.fullName || '').trim();
+    if (!fullName) continue;
+    const role = a.role || 'main';
+    const ord = Number.isFinite(+a.ord) ? +a.ord : 1;
+    const key = `${fullName}::${role}::${ord}`;
+    if (!seen.has(key)) { seen.add(key); uniq.push({ fullName, role, ord }); }
+  }
+
+  // Tìm tất cả tác giả theo tên 1 lần
+  const names = [...new Set(uniq.map(u => u.fullName))];
+  const existed = await Author.findAll({ where: { fullName: { [Op.in]: names } }, transaction: t, lock: t.LOCK.UPDATE });
+  const existedByName = new Map(existed.map(a => [a.fullName, a]));
+
+  const toCreate = names.filter(n => !existedByName.has(n)).map(n => ({ fullName: n, deleted: false }));
+  if (toCreate.length) {
+    await Author.bulkCreate(toCreate, { transaction: t, ignoreDuplicates: true });
+  }
+
+  // Undelete nếu cần
+  const allAfter = await Author.findAll({ where: { fullName: { [Op.in]: names } }, transaction: t });
+  const toUndeleteIds = allAfter.filter(a => a.deleted).map(a => a.authorId);
+  if (toUndeleteIds.length) {
+    await Author.update({ deleted: false }, { where: { authorId: { [Op.in]: toUndeleteIds } }, transaction: t });
+  }
+
+  // Trả về mapping giữ role/ord
+  const finalAuthors = await Author.findAll({ where: { fullName: { [Op.in]: names } }, transaction: t });
+  const byName = new Map(finalAuthors.map(a => [a.fullName, a]));
+  return uniq.map(u => ({ author: byName.get(u.fullName), role: u.role, ord: u.ord }));
+}
+
+async function bulkUpsertDocAuthorMap(documentId, authorTriples, t) {
+  if (!authorTriples.length) return;
+  const rows = authorTriples.map(a => ({ documentId, authorId: a.author.authorId, role: a.role || 'main', ord: a.ord || 1, deleted: false }));
+  await DocumentAuthorMap.bulkCreate(rows, {
+    updateOnDuplicate: ['deleted', 'role', 'ord'],
+    transaction: t
+  });
+}
+
+async function bulkUpsertDocGenreMap(documentId, genres, t) {
+  if (!genres.length) return;
+  const rows = genres.map(g => ({ documentId, genreId: g.genreId, deleted: false }));
+  await DocumentGenreMap.bulkCreate(rows, {
+    updateOnDuplicate: ['deleted'],
+    transaction: t
+  });
 }
 
 /** ===== File hoặc URL -> ra URL để lưu DB ===== */
 async function ensureCoverAndEbookUrls({ coverFile, ebookFile, coverUrl, ebookViewUrl }) {
-    let cover = (coverUrl || '').trim();
-    let ebook = (ebookViewUrl || '').trim();
+  let cover = (coverUrl || '').trim();
+  let ebook = (ebookViewUrl || '').trim();
 
-    if (!cover && coverFile) {
-        const { key } = await uploadCover(coverFile);
-        cover = keyToPublicUrl(key);
-    }
-    if (!ebook && ebookFile) {
-        const { key } = await uploadEbook(ebookFile);
-        ebook = keyToPublicUrl(key);
-    }
+  if (!cover && coverFile) {
+    const { key } = await uploadCover(coverFile);
+    cover = keyToPublicUrl(key);
+  }
+  if (!ebook && ebookFile) {
+    const { key } = await uploadEbook(ebookFile);
+    ebook = keyToPublicUrl(key);
+  }
 
-    if (!cover) {
-        const err = new Error('Ảnh bìa (cover) là bắt buộc: gửi file "cover" hoặc trường "coverUrl".');
-        err.status = 400;
-        throw err;
-    }
-    return { coverUrl: cover, ebookViewUrl: ebook || null };
+  if (!cover) {
+    const err = new Error('Ảnh bìa (cover) là bắt buộc: gửi file "cover" hoặc trường "coverUrl".');
+    err.status = 400;
+    throw err;
+  }
+  return { coverUrl: cover, ebookViewUrl: ebook || null };
 }
 
 /** ===== Copies helpers ===== */
 function normalizeCopyInput(x = {}, idx = 0) {
-    const status = (x.status || 'available').trim();
-    const conditionNote = x.conditionNote != null ? String(x.conditionNote).trim() : null; // ví dụ "100"
-    const entryDate = x.entryDate ? new Date(x.entryDate) : new Date();
-    const barCode = x.barCode ? String(x.barCode).trim() : null;
-    return { barCode, status, conditionNote, entryDate, _idx: idx };
+  const status = (x.status || 'available').trim();
+  const conditionNote = x.conditionNote != null ? String(x.conditionNote).trim() : null; // ví dụ "100"
+  const entryDate = x.entryDate ? new Date(x.entryDate) : new Date();
+  const barCode = x.barCode ? String(x.barCode).trim() : null;
+  return { barCode, status, conditionNote, entryDate, _idx: idx };
 }
+
 async function generateBarcodesIfMissing(documentId, items, t) {
-    const countExisting = await DocumentCopy.count({
-        where: { deleted: false, documentId }, transaction: t, lock: t.LOCK.UPDATE
-    });
-    let seq = countExisting + 1;
-    return items.map(it => it.barCode ? it : {
-        ...it, barCode: `DOC${documentId}-${String(seq++).padStart(4, '0')}`
-    });
+  const countExisting = await DocumentCopy.count({ where: { deleted: false, documentId }, transaction: t, lock: t.LOCK.UPDATE });
+  let seq = countExisting + 1;
+  return items.map(it => it.barCode ? it : {
+    ...it, barCode: `DOC${documentId}-${String(seq++).padStart(4, '0')}`
+  });
 }
-async function createDocumentCopies(documentId, copies = [], t) {
-    if (!Array.isArray(copies) || copies.length === 0) return [];
 
-    const inputs = copies.map((x, i) => normalizeCopyInput(x, i));
-    const withCodes = await generateBarcodesIfMissing(documentId, inputs, t);
+async function createDocumentCopiesBulk(documentId, copies = [], t) {
+  if (!Array.isArray(copies) || copies.length === 0) return [];
 
-    const seen = new Set();
-    const unique = [];
-    for (const c of withCodes) {
-        if (seen.has(c.barCode)) continue;
-        seen.add(c.barCode);
-        unique.push(c);
-    }
+  const inputs = copies.map((x, i) => normalizeCopyInput(x, i));
+  const withCodes = await generateBarcodesIfMissing(documentId, inputs, t);
 
-    const created = [];
-    for (const c of unique) {
-        try {
-            const row = await DocumentCopy.create({
-                documentId,
-                barCode: c.barCode,
-                status: c.status,
-                conditionNote: c.conditionNote,
-                entryDate: c.entryDate,
-                deleted: false
-            }, { transaction: t });
-            created.push(row);
-        } catch (e) {
-            if (e instanceof UniqueConstraintError) {
-                const err = new Error(`Barcode đã tồn tại: ${c.barCode}`);
-                err.status = 409;
-                throw err;
-            }
-            throw e;
-        }
-    }
+  // Dedupe theo barCode trước khi insert
+  const seen = new Set();
+  const unique = [];
+  for (const c of withCodes) {
+    if (seen.has(c.barCode)) continue;
+    seen.add(c.barCode);
+    unique.push(c);
+  }
 
-    const total = await DocumentCopy.count({
-        where: { deleted: false, documentId }, transaction: t, lock: t.LOCK.UPDATE
-    });
-    await Document.update({ numberOfCopy: total }, { where: { documentId }, transaction: t });
+  // Kiểm tra trùng barcode đã tồn tại để báo lỗi rõ ràng (thay vì ignore)
+  const exists = await DocumentCopy.findAll({
+    where: { barCode: { [Op.in]: unique.map(c => c.barCode) } },
+    transaction: t
+  });
+  if (exists.length) {
+    const codes = exists.map(e => e.barCode).join(', ');
+    const err = new Error(`Barcode đã tồn tại: ${codes}`);
+    err.status = 409;
+    throw err;
+  }
 
-    return created;
+  // Bulk insert
+  const payload = unique.map(c => ({
+    documentId,
+    barCode: c.barCode,
+    status: c.status,
+    conditionNote: c.conditionNote,
+    entryDate: c.entryDate,
+    deleted: false
+  }));
+  const created = await DocumentCopy.bulkCreate(payload, { transaction: t });
+
+  // Cập nhật numberOfCopy không cần COUNT lại
+  await Document.update(
+    { numberOfCopy: sequelize.literal(`numberOfCopy + ${created.length}`) },
+    { where: { documentId }, transaction: t }
+  );
+
+  return created;
 }
 
 /* ============================================================
- *                     CREATE * FUNCTIONS
+ *                     CREATE * FUNCTIONS (Optimized)
  * ==========================================================*/
 
 async function createBook({
-    title, language, publicationYear, coverPrice, description, shelfLocation,
-    publisherName, authors, genres,
-    // CHẤP NHẬN: multipart (coverFile, ebookFile) HOẶC url (coverUrl, ebookViewUrl)
-    coverFile, ebookFile, coverUrl, ebookViewUrl,
-    bookData = {},
-    initialCopies = [],
-    initialCopiesCount = 0
+  title, language, publicationYear, coverPrice, description, shelfLocation,
+  publisherName, authors, genres,
+  // CHẤP NHẬN: multipart (coverFile, ebookFile) HOẶC url (coverUrl, ebookViewUrl)
+  coverFile, ebookFile, coverUrl, ebookViewUrl,
+  bookData = {},
+  initialCopies = [],
+  initialCopiesCount = 0
 }) {
-    return await sequelize.transaction(async (tOuter) => {
-        const { coverUrl: coverFinal, ebookViewUrl: ebookFinal } =
-            await ensureCoverAndEbookUrls({ coverFile, ebookFile, coverUrl, ebookViewUrl });
+  return await sequelize.transaction(async (t) => {
+    const { coverUrl: coverFinal, ebookViewUrl: ebookFinal } =
+      await ensureCoverAndEbookUrls({ coverFile, ebookFile, coverUrl, ebookViewUrl });
 
-        const categoryId = await resolveCategoryIdOrThrow('book');
-        const pub = await ensurePublisher(publisherName, tOuter);
+    const categoryId = await resolveCategoryIdOrThrow('book');
+    const pub = await ensurePublisher(publisherName, t);
 
-        const doc = await Document.create({
-            categoryId,
-            publisherId: pub ? pub.publisherId : null,
-            title, shelfLocation: shelfLocation || null,
-            language: language || null,
-            publicationYear: Number.isFinite(+publicationYear) ? +publicationYear : null,
-            coverPrice: Number.isFinite(+coverPrice) ? +coverPrice : null,
-            description: description || null,
-            coverPhoto: coverFinal,
-            ebookUrl: ebookFinal,
-            numberOfCopy: 0,
-            deleted: false
-        }, { transaction: tOuter });
+    const doc = await Document.create({
+      categoryId,
+      publisherId: pub ? pub.publisherId : null,
+      title, shelfLocation: shelfLocation || null,
+      language: language || null,
+      publicationYear: Number.isFinite(+publicationYear) ? +publicationYear : null,
+      coverPrice: Number.isFinite(+coverPrice) ? +coverPrice : null,
+      description: description || null,
+      coverPhoto: coverFinal,
+      ebookUrl: ebookFinal,
+      numberOfCopy: 0,
+      deleted: false
+    }, { transaction: t });
 
-        const ensuredAuthors = await ensureAuthors(authors, tOuter);
-        for (const a of ensuredAuthors) {
-            await upsertDocAuthorMap(doc.documentId, a.author.authorId, a.role, a.ord, tOuter);
-        }
-        const ensuredGenres = await ensureGenres(genres, tOuter);
-        for (const g of ensuredGenres) {
-            await upsertDocGenreMap(doc.documentId, g.genreId, tOuter);
-        }
+    const ensuredAuthors = await ensureAuthors(authors, t);
+    await bulkUpsertDocAuthorMap(doc.documentId, ensuredAuthors, t);
 
-        await Book.create({
-            documentId: doc.documentId,
-            isbn: bookData.isbn || null,
-            edition: Number.isFinite(+bookData.edition) ? +bookData.edition : null,
-            pageCount: Number.isFinite(+bookData.pageCount) ? +bookData.pageCount : null,
-            deleted: false
-        }, { transaction: tOuter });
+    const ensuredGenres = await ensureGenres(genres, t);
+    await bulkUpsertDocGenreMap(doc.documentId, ensuredGenres, t);
 
-        const copiesPayload =
-            Array.isArray(initialCopies) && initialCopies.length > 0
-                ? initialCopies
-                : (Number.isFinite(+initialCopiesCount) && +initialCopiesCount > 0
-                    ? Array.from({ length: +initialCopiesCount }, () => ({ status: 'available', conditionNote: '100' }))
-                    : []);
-        await createDocumentCopies(doc.documentId, copiesPayload, tOuter);
+    await Book.create({
+      documentId: doc.documentId,
+      isbn: bookData.isbn || null,
+      edition: Number.isFinite(+bookData.edition) ? +bookData.edition : null,
+      pageCount: Number.isFinite(+bookData.pageCount) ? +bookData.pageCount : null,
+      deleted: false
+    }, { transaction: t });
 
-        const full = await Document.findOne({
-            where: { documentId: doc.documentId },
-            include: [
-                { model: Category, attributes: ['categoryId', 'name'] },
-                { model: Publisher, attributes: ['publisherId', 'name'], required: false },
-                {
-                    model: Author,
-                    as: 'authors',
-                    attributes: ['authorId', 'fullName'],
-                    through: { model: DocumentAuthorMap, attributes: ['role', 'ord'], where: { deleted: false } },
-                    where: { deleted: false },
-                    required: false
-                },
-                { model: Book, as: 'book', attributes: ['isbn', 'edition', 'pageCount'] },
-                { model: Magazine, as: 'magazine', attributes: ['issn', 'volume', 'issue', 'period', 'coverDate'], required: false },
-                { model: Newspaper, as: 'newspaper', attributes: ['issn', 'issueDate', 'issueNumber'], required: false }
-            ],
-            transaction: tOuter
-        });
-        return mapItem(full);
+    const copiesPayload =
+      Array.isArray(initialCopies) && initialCopies.length > 0
+        ? initialCopies
+        : (Number.isFinite(+initialCopiesCount) && +initialCopiesCount > 0
+          ? Array.from({ length: +initialCopiesCount }, () => ({ status: 'available', conditionNote: '100' }))
+          : []);
+
+    await createDocumentCopiesBulk(doc.documentId, copiesPayload, t);
+
+    // Trả kết quả đầy đủ: include authors qua many-to-many alias 'authors'
+    const full = await Document.findOne({
+      where: { documentId: doc.documentId },
+      include: [
+        { model: Category, attributes: ['categoryId', 'name'] },
+        { model: Publisher, attributes: ['publisherId', 'name'], required: false },
+        {
+          model: Author,
+          as: 'authors',
+          attributes: ['authorId', 'fullName'],
+          through: { model: DocumentAuthorMap, attributes: ['role', 'ord'], where: { deleted: false } },
+          where: { deleted: false },
+          required: false
+        },
+        { model: Book, as: 'book', attributes: ['isbn', 'edition', 'pageCount'] }
+      ],
+      transaction: t
     });
+
+    return mapItem(full);
+  });
 }
 
 async function createMagazine({
-    title, language, publicationYear, coverPrice, description, shelfLocation,
-    publisherName, authors, genres,
-    coverFile, ebookFile, coverUrl, ebookViewUrl,
-    magazineData = {},
-    initialCopies = [],
-    initialCopiesCount = 0
+  title, language, publicationYear, coverPrice, description, shelfLocation,
+  publisherName, authors, genres,
+  coverFile, ebookFile, coverUrl, ebookViewUrl,
+  magazineData = {},
+  initialCopies = [],
+  initialCopiesCount = 0
 }) {
-    return await sequelize.transaction(async (t) => {
-        const { coverUrl: coverFinal, ebookViewUrl: ebookFinal } =
-            await ensureCoverAndEbookUrls({ coverFile, ebookFile, coverUrl, ebookViewUrl });
+  return await sequelize.transaction(async (t) => {
+    const { coverUrl: coverFinal, ebookViewUrl: ebookFinal } =
+      await ensureCoverAndEbookUrls({ coverFile, ebookFile, coverUrl, ebookViewUrl });
 
-        const categoryId = await resolveCategoryIdOrThrow('magazine');
-        const pub = await ensurePublisher(publisherName, t);
+    const categoryId = await resolveCategoryIdOrThrow('magazine');
+    const pub = await ensurePublisher(publisherName, t);
 
-        const doc = await Document.create({
-            categoryId,
-            publisherId: pub ? pub.publisherId : null,
-            title, shelfLocation: shelfLocation || null,
-            language: language || null,
-            publicationYear: Number.isFinite(+publicationYear) ? +publicationYear : null,
-            coverPrice: Number.isFinite(+coverPrice) ? +coverPrice : null,
-            description: description || null,
-            coverPhoto: coverFinal,
-            ebookUrl: ebookFinal,
-            numberOfCopy: 0,
-            deleted: false
-        }, { transaction: t });
+    const doc = await Document.create({
+      categoryId,
+      publisherId: pub ? pub.publisherId : null,
+      title, shelfLocation: shelfLocation || null,
+      language: language || null,
+      publicationYear: Number.isFinite(+publicationYear) ? +publicationYear : null,
+      coverPrice: Number.isFinite(+coverPrice) ? +coverPrice : null,
+      description: description || null,
+      coverPhoto: coverFinal,
+      ebookUrl: ebookFinal,
+      numberOfCopy: 0,
+      deleted: false
+    }, { transaction: t });
 
-        const ensuredAuthors = await ensureAuthors(authors, t);
-        for (const a of ensuredAuthors) {
-            await upsertDocAuthorMap(doc.documentId, a.author.authorId, a.role, a.ord, t);
-        }
-        const ensuredGenres = await ensureGenres(genres, t);
-        for (const g of ensuredGenres) {
-            await upsertDocGenreMap(doc.documentId, g.genreId, t);
-        }
+    const ensuredAuthors = await ensureAuthors(authors, t);
+    await bulkUpsertDocAuthorMap(doc.documentId, ensuredAuthors, t);
 
-        await Magazine.create({
-            documentId: doc.documentId,
-            issn: magazineData.issn || null,
-            volume: Number.isFinite(+magazineData.volume) ? +magazineData.volume : null,
-            issue: Number.isFinite(+magazineData.issue) ? +magazineData.issue : null,
-            period: magazineData.period || null,
-            coverDate: magazineData.coverDate || null,
-            deleted: false
-        }, { transaction: t });
+    const ensuredGenres = await ensureGenres(genres, t);
+    await bulkUpsertDocGenreMap(doc.documentId, ensuredGenres, t);
 
-        const copiesPayload =
-            Array.isArray(initialCopies) && initialCopies.length > 0
-                ? initialCopies
-                : (Number.isFinite(+initialCopiesCount) && +initialCopiesCount > 0
-                    ? Array.from({ length: +initialCopiesCount }, () => ({ status: 'available', conditionNote: '100' }))
-                    : []);
-        await createDocumentCopies(doc.documentId, copiesPayload, t);
+    await Magazine.create({
+      documentId: doc.documentId,
+      issn: magazineData.issn || null,
+      volume: Number.isFinite(+magazineData.volume) ? +magazineData.volume : null,
+      issue: Number.isFinite(+magazineData.issue) ? +magazineData.issue : null,
+      period: magazineData.period || null,
+      coverDate: magazineData.coverDate || null,
+      deleted: false
+    }, { transaction: t });
 
-        const full = await Document.findOne({
-            where: { documentId: doc.documentId },
-            include: [
-                { model: Category, attributes: ['categoryId', 'name'] },
-                { model: Publisher, attributes: ['publisherId', 'name'], required: false },
-                {
-                    model: Author,
-                    as: 'authors',
-                    attributes: ['authorId', 'fullName'],
-                    through: { model: DocumentAuthorMap, attributes: ['role', 'ord'], where: { deleted: false } },
-                    where: { deleted: false },
-                    required: false
-                },
-                { model: Book, as: 'book', attributes: ['isbn', 'edition', 'pageCount'], required: false },
-                { model: Magazine, as: 'magazine', attributes: ['issn', 'volume', 'issue', 'period', 'coverDate'] },
-                { model: Newspaper, as: 'newspaper', attributes: ['issn', 'issueDate', 'issueNumber'], required: false }
-            ],
-            transaction: t
-        });
-        return mapItem(full);
+    const copiesPayload =
+      Array.isArray(initialCopies) && initialCopies.length > 0
+        ? initialCopies
+        : (Number.isFinite(+initialCopiesCount) && +initialCopiesCount > 0
+          ? Array.from({ length: +initialCopiesCount }, () => ({ status: 'available', conditionNote: '100' }))
+          : []);
+
+    await createDocumentCopiesBulk(doc.documentId, copiesPayload, t);
+
+    const full = await Document.findOne({
+      where: { documentId: doc.documentId },
+      include: [
+        { model: Category, attributes: ['categoryId', 'name'] },
+        { model: Publisher, attributes: ['publisherId', 'name'], required: false },
+        {
+          model: Author,
+          as: 'authors',
+          attributes: ['authorId', 'fullName'],
+          through: { model: DocumentAuthorMap, attributes: ['role', 'ord'], where: { deleted: false } },
+          where: { deleted: false },
+          required: false
+        },
+        { model: Magazine, as: 'magazine', attributes: ['issn', 'volume', 'issue', 'period', 'coverDate'] }
+      ],
+      transaction: t
     });
+
+    return mapItem(full);
+  });
 }
 
 async function createNewspaper({
-    title, language, publicationYear, coverPrice, description, shelfLocation,
-    publisherName, authors, genres,
-    coverFile, ebookFile, coverUrl, ebookViewUrl,
-    newspaperData = {},
-    initialCopies = [],
-    initialCopiesCount = 0
+  title, language, publicationYear, coverPrice, description, shelfLocation,
+  publisherName, authors, genres,
+  coverFile, ebookFile, coverUrl, ebookViewUrl,
+  newspaperData = {},
+  initialCopies = [],
+  initialCopiesCount = 0
 }) {
-    return await sequelize.transaction(async (t) => {
-        const { coverUrl: coverFinal, ebookViewUrl: ebookFinal } =
-            await ensureCoverAndEbookUrls({ coverFile, ebookFile, coverUrl, ebookViewUrl });
+  return await sequelize.transaction(async (t) => {
+    const { coverUrl: coverFinal, ebookViewUrl: ebookFinal } =
+      await ensureCoverAndEbookUrls({ coverFile, ebookFile, coverUrl, ebookViewUrl });
 
-        const categoryId = await resolveCategoryIdOrThrow('newspaper');
-        const pub = await ensurePublisher(publisherName, t);
+    const categoryId = await resolveCategoryIdOrThrow('newspaper');
+    const pub = await ensurePublisher(publisherName, t);
 
-        const doc = await Document.create({
-            categoryId,
-            publisherId: pub ? pub.publisherId : null,
-            title, shelfLocation: shelfLocation || null,
-            language: language || null,
-            publicationYear: Number.isFinite(+publicationYear) ? +publicationYear : null,
-            coverPrice: Number.isFinite(+coverPrice) ? +coverPrice : null,
-            description: description || null,
-            coverPhoto: coverFinal,
-            ebookUrl: ebookFinal,
-            numberOfCopy: 0,
-            deleted: false
-        }, { transaction: t });
+    const doc = await Document.create({
+      categoryId,
+      publisherId: pub ? pub.publisherId : null,
+      title, shelfLocation: shelfLocation || null,
+      language: language || null,
+      publicationYear: Number.isFinite(+publicationYear) ? +publicationYear : null,
+      coverPrice: Number.isFinite(+coverPrice) ? +coverPrice : null,
+      description: description || null,
+      coverPhoto: coverFinal,
+      ebookUrl: ebookFinal,
+      numberOfCopy: 0,
+      deleted: false
+    }, { transaction: t });
 
-        const ensuredAuthors = await ensureAuthors(authors, t);
-        for (const a of ensuredAuthors) {
-            await upsertDocAuthorMap(doc.documentId, a.author.authorId, a.role, a.ord, t);
-        }
-        const ensuredGenres = await ensureGenres(genres, t);
-        for (const g of ensuredGenres) {
-            await upsertDocGenreMap(doc.documentId, g.genreId, t);
-        }
+    const ensuredAuthors = await ensureAuthors(authors, t);
+    await bulkUpsertDocAuthorMap(doc.documentId, ensuredAuthors, t);
 
-        await Newspaper.create({
-            documentId: doc.documentId,
-            issn: newspaperData.issn || null,
-            issueDate: newspaperData.issueDate || null,
-            issueNumber: Number.isFinite(+newspaperData.issueNumber) ? +newspaperData.issueNumber : null,
-            deleted: false
-        }, { transaction: t });
+    const ensuredGenres = await ensureGenres(genres, t);
+    await bulkUpsertDocGenreMap(doc.documentId, ensuredGenres, t);
 
-        const copiesPayload =
-            Array.isArray(initialCopies) && initialCopies.length > 0
-                ? initialCopies
-                : (Number.isFinite(+initialCopiesCount) && +initialCopiesCount > 0
-                    ? Array.from({ length: +initialCopiesCount }, () => ({ status: 'available', conditionNote: '100' }))
-                    : []);
-        await createDocumentCopies(doc.documentId, copiesPayload, t);
+    await Newspaper.create({
+      documentId: doc.documentId,
+      issn: newspaperData.issn || null,
+      issueDate: newspaperData.issueDate || null,
+      issueNumber: Number.isFinite(+newspaperData.issueNumber) ? +newspaperData.issueNumber : null,
+      deleted: false
+    }, { transaction: t });
 
-        const full = await Document.findOne({
-            where: { documentId: doc.documentId },
-            include: [
-                { model: Category, attributes: ['categoryId', 'name'] },
-                { model: Publisher, attributes: ['publisherId', 'name'], required: false },
-                {
-                    model: Author,
-                    as: 'authors',
-                    attributes: ['authorId', 'fullName'],
-                    through: { model: DocumentAuthorMap, attributes: ['role', 'ord'], where: { deleted: false } },
-                    where: { deleted: false },
-                    required: false
-                },
-                { model: Book, as: 'book', attributes: ['isbn', 'edition', 'pageCount'], required: false },
-                { model: Magazine, as: 'magazine', attributes: ['issn', 'volume', 'issue', 'period', 'coverDate'], required: false },
-                { model: Newspaper, as: 'newspaper', attributes: ['issn', 'issueDate', 'issueNumber'] }
-            ],
-            transaction: t
-        });
-        return mapItem(full);
+    const copiesPayload =
+      Array.isArray(initialCopies) && initialCopies.length > 0
+        ? initialCopies
+        : (Number.isFinite(+initialCopiesCount) && +initialCopiesCount > 0
+          ? Array.from({ length: +initialCopiesCount }, () => ({ status: 'available', conditionNote: '100' }))
+          : []);
+
+    await createDocumentCopiesBulk(doc.documentId, copiesPayload, t);
+
+    const full = await Document.findOne({
+      where: { documentId: doc.documentId },
+      include: [
+        { model: Category, attributes: ['categoryId', 'name'] },
+        { model: Publisher, attributes: ['publisherId', 'name'], required: false },
+        {
+          model: Author,
+          as: 'authors',
+          attributes: ['authorId', 'fullName'],
+          through: { model: DocumentAuthorMap, attributes: ['role', 'ord'], where: { deleted: false } },
+          where: { deleted: false },
+          required: false
+        },
+        { model: Newspaper, as: 'newspaper', attributes: ['issn', 'issueDate', 'issueNumber'] }
+      ],
+      transaction: t
     });
+
+    return mapItem(full);
+  });
 }
 
 /** Nhập thêm bản sao sau này */
 async function addCopies(documentId, copies = []) {
-    return await sequelize.transaction(async (t) => {
-        // kiểm tra document còn tồn tại & chưa xoá
-        const doc = await Document.findOne({
-            where: { documentId, deleted: false },
-            attributes: ['documentId'],
-            transaction: t,
-            lock: t.LOCK.UPDATE
-        });
-        if (!doc) {
-            const err = new Error('Document không tồn tại');
-            err.status = 404;
-            throw err;
-        }
-
-        const created = await createDocumentCopies(documentId, copies, t);
-        // lấy summary mới
-        const total = await DocumentCopy.count({ where: { deleted: false, documentId }, transaction: t });
-        return { createdCount: created.length, numberOfCopy: total };
+  return await sequelize.transaction(async (t) => {
+    // kiểm tra document còn tồn tại & chưa xoá
+    const doc = await Document.findOne({
+      where: { documentId, deleted: false },
+      attributes: ['documentId'],
+      transaction: t, lock: t.LOCK.UPDATE
     });
+    if (!doc) {
+      const err = new Error('Document không tồn tại');
+      err.status = 404;
+      throw err;
+    }
+
+    const created = await createDocumentCopiesBulk(documentId, copies, t);
+    const numberOfCopy = (await Document.findOne({ where: { documentId }, attributes: ['numberOfCopy'], transaction: t })).numberOfCopy;
+    return { createdCount: created.length, numberOfCopy };
+  });
 }
 
-const getBooksBasicFn = (opts = {}) => getBasicDocumentsByCategory({ ...opts, documentType: 'book' });
-const getMagazinesBasicFn = (opts = {}) => getBasicDocumentsByCategory({ ...opts, documentType: 'magazine' });
-const getNewspapersBasicFn = (opts = {}) => getBasicDocumentsByCategory({ ...opts, documentType: 'newspaper' });
-
 module.exports = {
-    // list & deposit
-    getBasicDocumentsByCategory,
-    getBooksBasic: getBooksBasicFn,
-    getMagazinesBasic: getMagazinesBasicFn,
-    getNewspapersBasic: getNewspapersBasicFn,
-    getDocumentCopiesWithDeposit,
+  // list & deposit
+  getBasicDocumentsByCategoryFast,
+  getBooksBasic,
+  getMagazinesBasic,
+  getNewspapersBasic,
+  getDocumentCopiesWithDeposit,
 
-    // create & copies
-    createBook,
-    createMagazine,
-    createNewspaper,
-    addCopies
+  // create & copies
+  createBook,
+  createMagazine,
+  createNewspaper,
+  addCopies
 };

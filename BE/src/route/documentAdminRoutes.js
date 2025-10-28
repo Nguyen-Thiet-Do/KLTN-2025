@@ -1,86 +1,91 @@
-const express = require("express");
-const router = express.Router();
-const { requireAuth, requireRole } = require("../middleware/auth");
+// ================================
+// File: /routes/documentAdminRoutes.js (Optimized)
+// ================================
 
-const documentAdminController = require("../controller/documentAdminController");
-const { upload } = require("../middleware/upload");
+const express = require('express');
+const router = express.Router();
+const { requireAuth, requireRole } = require('../middleware/auth');
+
+const documentAdminController = require('../controller/documentAdminController');
+const { upload } = require('../middleware/upload');
+
 // ======================= ROUTES DÀNH CHO QUẢN TRỊ VIÊN VÀ THỦ THƯ (roleId = 1, 2) =======================
 
 /**
  * @route   GET /api/documents/admin/books/basic
  * @desc    Lấy danh sách tài liệu cơ bản loại Sách (Book) - Dành cho Admin và Librarian
- * @query   page   - Số trang (mặc định: 1)
- * @query   limit  - Số mục mỗi trang (mặc định: 20, tối đa: 100)
- * @query   search - Tìm theo tiêu đề (LIKE)
+ * @query   page        - Số trang (mặc định: 1)
+ * @query   limit       - Số mục mỗi trang (mặc định: 20, tối đa: 100)
+ * @query   search      - Tìm theo tiêu đề
+ * @query   searchMode  - auto | fulltext | like (mặc định: auto)
+ * @query   withAuthors - 0|1 (mặc định: 1)
+ * @query   withSubtype - 0|1 (mặc định: 1)
  * @access  Admin (roleId=1), Librarian (roleId=2)
- * @example GET /api/documents/admin/books/basic?page=1&limit=20&search=data
- * */
-router.get('/books/basic',
-    requireAuth,
-    requireRole([1, 2]),
-    documentAdminController.getBooks
+ * @example GET /api/documents/admin/books/basic?page=1&limit=20&search=data&searchMode=fulltext&withAuthors=0
+ */
+router.get(
+  '/books/basic',
+  requireAuth,
+  requireRole([1, 2]),
+  documentAdminController.getBooks
 );
-/** 
- *  
- *  
- *  
- *  @route   GET /api/documents/admin/magazines/basic
+
+/**
+ * @route   GET /api/documents/admin/magazines/basic
  * @desc    Lấy danh sách tài liệu cơ bản loại Tạp chí (Magazine) - Dành cho Admin và Librarian
- * @query   page   - Số trang (mặc định: 1)
- * @query   limit  - Số mục mỗi trang (mặc định: 20, tối đa: 100)
- * @query   search - Tìm theo tiêu đề (LIKE)
+ * @query   page/limit/search/searchMode/withAuthors/withSubtype
  * @access  Admin (roleId=1), Librarian (roleId=2)
- * @example GET /api/documents/admin/magazines/basic?page=1&limit=20&search=data
- * */
-router.get('/magazines/basic',
-    requireAuth,
-    requireRole([1, 2]),
-    documentAdminController.getMagazines
+ */
+router.get(
+  '/magazines/basic',
+  requireAuth,
+  requireRole([1, 2]),
+  documentAdminController.getMagazines
 );
+
 /**
  * @route   GET /api/documents/admin/newspapers/basic
  * @desc    Lấy danh sách tài liệu cơ bản loại Báo (Newspaper) - Dành cho Admin và Librarian
- *  @query   page   - Số trang (mặc định: 1)
- * @query   limit  - Số mục mỗi trang (mặc định: 20, tối đa: 100)
- * @query   search - Tìm theo tiêu đề (LIKE)
+ * @query   page/limit/search/searchMode/withAuthors/withSubtype
  * @access  Admin (roleId=1), Librarian (roleId=2)
- * @example GET /api/documents/admin/newspapers/basic?page=1&limit=20&search=data
- * */
-router.get('/newspapers/basic',
-    requireAuth,
-    requireRole([1, 2]),
-    documentAdminController.getNewspapers
+ */
+router.get(
+  '/newspapers/basic',
+  requireAuth,
+  requireRole([1, 2]),
+  documentAdminController.getNewspapers
 );
+
 /**
  * @route   GET /api/documents/admin/basic
  * @desc    Lấy danh sách tài liệu cơ bản theo loại (Book, Magazine, Newspaper, All) - Dành cho Admin và Librarian
- *  @query   page   - Số trang (mặc định: 1)
- * @query   limit  - Số mục mỗi trang (mặc định: 20, tối đa: 100)
- * @query   search - Tìm theo tiêu đề (LIKE)
  * @query   documentType - 'book' | 'magazine' | 'newspaper' | 'all' (mặc định: 'all')
+ * @query   page/limit/search/searchMode/withAuthors/withSubtype
  * @access  Admin (roleId=1), Librarian (roleId=2)
- * @example GET /api/documents/admin/basic?documentType=book&page=1&limit=20&search=data
- * */
-router.get('/basic',
-    requireAuth,
-    requireRole([1, 2]),
-    documentAdminController.getBasicList
+ */
+router.get(
+  '/basic',
+  requireAuth,
+  requireRole([1, 2]),
+  documentAdminController.getBasicList
 );
 
 /**
  * @route   GET /api/documents/admin/:id/copies
  * @desc    Lấy danh sách các bản sao của tài liệu theo ID tài liệu - Dành cho Admin và Librarian
  * @param   id - ID của tài liệu
+ * @query   status - optional (lọc theo trạng thái copy)
  * @access  Admin (roleId=1), Librarian (roleId=2)
- * @example GET /api/documents/admin/15/copies
- * */
-router.get('/:id/copies',
-    requireAuth,
-    requireRole([1, 2]),
-    documentAdminController.getCopiesWithDeposit
+ */
+router.get(
+  '/:id/copies',
+  requireAuth,
+  requireRole([1, 2]),
+  documentAdminController.getCopiesWithDeposit
 );
 
 /* ======================= ROUTES TẠO MỚI (BOOK/MAGAZINE/NEWSPAPER) ======================= */
+
 /**
  * @route   POST /api/documents/admin/books
  * @desc    Tạo mới tài liệu loại Sách + subtype Book + copies (1 lần)
@@ -89,11 +94,11 @@ router.get('/:id/copies',
  * @example POST /api/documents/admin/books
  */
 router.post(
-    "/books",
-    requireAuth,
-    requireRole([1, 2]),
-    upload.fields([{ name: "cover", maxCount: 1 }, { name: "ebook", maxCount: 1 }]),
-    documentAdminController.createBookCtrl
+  '/books',
+  requireAuth,
+  requireRole([1, 2]),
+  upload.fields([{ name: 'cover', maxCount: 1 }, { name: 'ebook', maxCount: 1 }]),
+  documentAdminController.createBookCtrl
 );
 
 /**
@@ -101,14 +106,13 @@ router.post(
  * @desc    Tạo mới tài liệu loại Tạp chí + subtype Magazine + copies (1 lần)
  * @body    (multipart hoặc json — giống route /books)
  * @access  Admin (roleId=1), Librarian (roleId=2)
- * @example POST /api/documents/admin/magazines
  */
 router.post(
-    "/magazines",
-    requireAuth,
-    requireRole([1, 2]),
-    upload.fields([{ name: "cover", maxCount: 1 }, { name: "ebook", maxCount: 1 }]),
-    documentAdminController.createMagazineCtrl
+  '/magazines',
+  requireAuth,
+  requireRole([1, 2]),
+  upload.fields([{ name: 'cover', maxCount: 1 }, { name: 'ebook', maxCount: 1 }]),
+  documentAdminController.createMagazineCtrl
 );
 
 /**
@@ -116,30 +120,26 @@ router.post(
  * @desc    Tạo mới tài liệu loại Báo + subtype Newspaper + copies (1 lần)
  * @body    (multipart hoặc json — giống route /books)
  * @access  Admin (roleId=1), Librarian (roleId=2)
- * @example POST /api/documents/admin/newspapers
  */
 router.post(
-    "/newspapers",
-    requireAuth,
-    requireRole([1, 2]),
-    upload.fields([{ name: "cover", maxCount: 1 }, { name: "ebook", maxCount: 1 }]),
-    documentAdminController.createNewspaperCtrl
+  '/newspapers',
+  requireAuth,
+  requireRole([1, 2]),
+  upload.fields([{ name: 'cover', maxCount: 1 }, { name: 'ebook', maxCount: 1 }]),
+  documentAdminController.createNewspaperCtrl
 );
 
-/* ======================= ROUTE NHẬP THÊM BẢN SAO ======================= */
 /**
  * @route   POST /api/documents/admin/:id/copies
- * @desc    Nhập thêm bản sao cho 1 tài liệu đã tồn tại
- * @body    JSON array [{ barCode?, status?, conditionNote?, entryDate? }, ...]
+ * @desc    Thêm bản sao cho tài liệu đã có
+ * @body    JSON Array: [{ barCode?, status?, conditionNote?, entryDate? }, ...]
  * @access  Admin (roleId=1), Librarian (roleId=2)
- * @example POST /api/documents/admin/15/copies
  */
 router.post(
-    "/:id/copies",
-    requireAuth,
-    requireRole([1, 2]),
-    express.json(), // đảm bảo parse JSON body cho mảng copies
-    documentAdminController.addCopiesCtrl
+  '/:id/copies',
+  requireAuth,
+  requireRole([1, 2]),
+  documentAdminController.addCopiesCtrl
 );
 
 module.exports = router;
