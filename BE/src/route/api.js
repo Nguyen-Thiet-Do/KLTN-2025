@@ -546,6 +546,64 @@ routeApi.get('/', (req, res) => {
         ]
       },
       {
+        group: 'Loan Slips Admin',
+        icon: '📄',
+        routes: [
+          {
+            method: 'GET',
+            path: '/api/loans/admin/loans',
+            description: 'Xem tất cả phiếu mượn (dành cho Admin/Thủ thư)',
+            auth: true,
+            role: 'Admin (roleId = 1), Librarian (roleId = 2)',
+            query: {
+              page: 'number (optional, default=1)',
+              limit: 'number (optional, default=10)',
+              status: 'string (optional, lọc theo trạng thái)',
+              fromDate: 'date (optional, lọc từ ngày)',
+              toDate: 'date (optional, lọc đến ngày)',
+              sortBy: 'string (optional, default="loanDate")',
+              sortDir: 'string (optional, "ASC" | "DESC", default="DESC")'
+            }
+          }
+        ]
+
+      },
+      {
+        group: 'Loan Slips Reader',
+        icon: '📄',
+        routes: [
+          {
+            method: 'GET',
+            path: '/api/loans/reader/loans/my',
+            description: 'Xem lịch sử mượn trả của chính mình (dành cho Độc giả)',
+            auth: true,
+            role: 'Reader (roleId = 3)',
+            query: {
+              page: 'number (optional, default=1)',
+              limit: 'number (optional, default=10)',
+              status: 'string (optional, lọc theo trạng thái)',
+              fromDate: 'date (optional, lọc từ ngày)',
+              toDate: 'date (optional, lọc đến ngày)',
+              sortBy: 'string (optional, default="loanDate")',
+              sortDir: 'string (optional, "ASC" | "DESC", default="DESC")'
+            }
+          },
+          {
+            method: 'POST',
+            path: '/api/loans/reader/loans/reserve',
+            description: 'Độc giả đăng ký đặt mượn trước (PENDING, chưa chọn bản sao)',
+            auth: true,
+            role: 'Reader (roleId = 3)',
+            body: {
+              items: 'array [{ documentId:number, quantity?:number>=1 }] (required)',
+              note: 'string (optional)'
+            }
+          }
+
+
+        ]
+      },
+      {
         group: 'Test',
         icon: '🧪',
         routes: [

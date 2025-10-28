@@ -5,7 +5,7 @@ const sequelize = require('../config/database');
 const LoanDetail = sequelize.define('LoanDetail', {
   loanDetailId: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true, field: 'loanDetailId' },
   loanSlipId: { type: DataTypes.INTEGER, allowNull: false, field: 'loanSlipId' },
-  documentCopyId: { type: DataTypes.INTEGER, allowNull: false, field: 'documentCopyId' },
+  documentCopyId: { type: DataTypes.INTEGER, allowNull: true, field: 'documentCopyId' },
   returnDate: { type: DataTypes.DATEONLY, allowNull: true, field: 'returnDate' },
   conditionBorrow: { type: DataTypes.STRING(100), allowNull: true, field: 'conditionBorrow' },
   conditionReturn: { type: DataTypes.STRING(100), allowNull: true, field: 'conditionReturn' },

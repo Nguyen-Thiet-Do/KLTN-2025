@@ -6,7 +6,7 @@
 require('dotenv').config();
 
 const express = require('express');
-const  httpsRedirect  = require('./middleware/httpsRedirect');
+const httpsRedirect = require('./middleware/httpsRedirect');
 const cors = require('cors');
 const sequelize = require('./config/database');
 const passport = require('./config/passport'); // passport sử dụng JWT_SECRET từ .env
@@ -19,6 +19,8 @@ const fileRoute = require('./route/fileRoutes');
 const profileRoutes = require("./route/profileRoutes");
 const metadataRoutes = require("./route/metadataRoutes");
 const documentAdminRoutes = require('./route/documentAdminRoutes');
+const adminLoanSlipRoutes = require('./route/adminLoanSlip.routes');
+const readerLoanSlipRoutes = require('./route/readerLoanSlip.routes');
 
 const app = express();
 const port = process.env.PORT || 8080;
@@ -74,8 +76,10 @@ app.use('/api/files', fileRoute);
 app.use('/api/profile', profileRoutes);
 app.use('/api/metadata', metadataRoutes);
 app.use('/api/documents/admin', documentAdminRoutes);
+app.use('/api/loans/admin', adminLoanSlipRoutes);
+app.use('/api/loans/reader', readerLoanSlipRoutes);
 
-// app.use('/api', routeApi);
+
 
 
 // ============================================================

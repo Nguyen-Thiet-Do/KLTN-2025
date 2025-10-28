@@ -5,9 +5,9 @@ const sequelize = require('../config/database');
 const LoanSlip = sequelize.define('LoanSlip', {
   loanSlipId: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true, field: 'loanSlipId' },
   readerId: { type: DataTypes.INTEGER, allowNull: false, field: 'readerId' },
-  librarianId: { type: DataTypes.INTEGER, allowNull: false, field: 'librarianId' },
+  librarianId: { type: DataTypes.INTEGER, allowNull: true, field: 'librarianId' },
   loanDate: { type: DataTypes.DATEONLY, allowNull: false, field: 'loanDate' },
-  dueDate: { type: DataTypes.DATEONLY, allowNull: false, field: 'dueDate' },
+  dueDate: { type: DataTypes.DATEONLY, allowNull: true, field: 'dueDate' },
   status: { type: DataTypes.STRING(50), allowNull: true, defaultValue: 'OPEN', field: 'status' },
   receiveAddress: { type: DataTypes.STRING(255), allowNull: true, field: 'receiveAddress' },
   borrowForm: { type: DataTypes.STRING(100), allowNull: true, field: 'borrowForm' },
