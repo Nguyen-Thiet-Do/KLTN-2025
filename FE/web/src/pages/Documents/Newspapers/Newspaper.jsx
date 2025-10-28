@@ -3,7 +3,7 @@ import {
   Box, Typography, Button, TextField, InputAdornment,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
   Card, CardContent, Paper, IconButton, Alert, Pagination, Stack, Tooltip,
-  Link as MuiLink, Chip, Collapse, LinearProgress,
+  Link as MuiLink, Chip, Collapse, LinearProgress, Menu, MenuItem, Divider
 } from "@mui/material";
 import {
   Add as AddIcon, Search as SearchIcon, FilterList as FilterIcon,
@@ -11,12 +11,16 @@ import {
   KeyboardArrowDown as ArrowDownIcon, KeyboardArrowUp as ArrowUpIcon,
   MoreVert as MoreVertIcon,
 } from "@mui/icons-material";
+import { useSnackbar } from "notistack";
 import ButtonLoader from "../../../components/Loading/ButtonLoader";
 import NewspaperDetailPanel from "./NewspaperDetailPanel";
 import {
   getAllNewspapers,
   getNewspaperCopies,
+  addNewspaperCopies,
 } from "../../../services/newpaperService";
+import NewspaperCreateDialog from "./NewspaperCreateDialog";
+import NewspaperAddCopyDialog from "./NewspaperAddCopyDialog";
 
 const ITEMS_PER_PAGE = 5;
 
@@ -38,12 +42,13 @@ function statusColor(s) {
 
 const toDateVN = (s) => {
   if (!s) return "—";
-  // "2025-10-24 00:00:00" → "2025-10-24T00:00:00"
   const d = new Date(s.replace(" ", "T"));
   return isNaN(d) ? s : d.toLocaleDateString("vi-VN");
 };
 
 export default function Newspaper() {
+  const { enqueueSnackbar } = useSnackbar();
+
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -61,6 +66,14 @@ export default function Newspaper() {
   const [expanded, setExpanded] = useState({});
   const [copiesMap, setCopiesMap] = useState({});
 
+  // Create dialog
+  const [openAdd, setOpenAdd] = useState(false);
+
+  // Row menu + AddCopy dialog
+  const [menuAnchor, setMenuAnchor] = useState(null);
+  const [menuRow, setMenuRow] = useState(null);
+  const [addCopyOpen, setAddCopyOpen] = useState(false);
+
   const fetchAll = async () => {
     try {
       setLoading(true);
@@ -77,7 +90,7 @@ export default function Newspaper() {
 
   useEffect(() => { fetchAll(); }, []);
 
-  // Lọc theo tiêu đề / số phát hành / NXB
+  // Lọc theo tiêu đề / số phát hành / NXB / ISSN
   const filtered = useMemo(() => {
     const kw = searchQuery.trim().toLowerCase();
     if (!kw) return items;
@@ -119,6 +132,88 @@ export default function Newspaper() {
     }
   };
 
+  // ===== Row menu =====
+  const openMenu = (event, row) => { setMenuAnchor(event.currentTarget); setMenuRow(row); };
+  const closeMenu = () => { setMenuAnchor(null); /* giữ menuRow cho dialog AddCopy */ };
+
+  const onMenuViewEbook = () => {
+    closeMenu();
+    if (!menuRow?.ebookUrl) { enqueueSnackbar("Chưa có eBook.", { variant: "info" }); return; }
+    window.open(menuRow.ebookUrl, "_blank", "noopener");
+  };
+  const onMenuAddCopy = () => { setAddCopyOpen(true); closeMenu(); };
+
+  // ===== Optimistic add copies =====
+  const handleAddCopiesSubmit = async (copies) => {
+    if (!menuRow?.documentId) return;
+    const id = menuRow.documentId;
+
+    // 1) Optimistic: cập nhật số bản ngay
+    setItems(prev =>
+      prev.map(x => x.documentId === id
+        ? { ...x, numberOfCopy: (x.numberOfCopy ?? 0) + copies.length }
+        : x
+      )
+    );
+
+    // 2) Nếu đang mở phần copies, chèn tạm
+    setCopiesMap(p => {
+      const cur = p[id] || { loading: false, error: '', data: { copies: [] } };
+      const now = new Date().toISOString();
+      const tempCopies = copies.map((c, idx) => ({
+        documentCopyId: `temp-${Date.now()}-${idx}`,
+        barCode: c.barCode || '',
+        status: (c.status || 'AVAILABLE').toUpperCase(),
+        conditionNote: String(c.conditionNote ?? '100'),
+        entryDate: c.entryDate || now,
+        deposit: null,
+        __optimistic: true,
+      }));
+      return {
+        ...p,
+        [id]: { ...cur, data: { copies: [...(cur.data?.copies || []), ...tempCopies] } }
+      };
+    });
+
+    try {
+      await addNewspaperCopies(id, copies);
+      setAddCopyOpen(false);
+      setMenuRow(null);
+
+      // 3) Đồng bộ lại chỉ phần copies của báo này
+      if (expanded[id]) {
+        setCopiesMap(p => ({ ...p, [id]: { loading: true, error: "", data: null } }));
+        try {
+          const fresh = await getNewspaperCopies(id);
+          setCopiesMap(p => ({ ...p, [id]: { loading: false, error: "", data: fresh } }));
+        } catch (e) {
+          setCopiesMap(p => ({ ...p, [id]: { loading: false, error: e.message || "Lỗi tải copies", data: null } }));
+        }
+      }
+
+      enqueueSnackbar('Thêm bản sao báo thành công!', { variant: 'success' });
+    } catch (e) {
+      // rollback số bản
+      setItems(prev =>
+        prev.map(x => x.documentId === id
+          ? { ...x, numberOfCopy: Math.max(0, (x.numberOfCopy ?? 0) - copies.length) }
+          : x
+        )
+      );
+      // rollback bản tạm
+      setCopiesMap(p => {
+        const cur = p[id];
+        if (!cur?.data?.copies?.length) return p;
+        return {
+          ...p,
+          [id]: { ...cur, data: { copies: cur.data.copies.filter(x => !x.__optimistic) } }
+        };
+      });
+
+      enqueueSnackbar(e?.response?.data?.message || e.message || 'Thêm bản sao thất bại', { variant: 'error' });
+    }
+  };
+
   return (
     <Box sx={{ p: 3 }}>
       {/* Header */}
@@ -143,15 +238,29 @@ export default function Newspaper() {
         <CardContent>
           <Stack direction={{ xs: "column", md: "row" }} spacing={2} alignItems="center" justifyContent="space-between">
             <Stack direction="row" spacing={2}>
-              <Button variant="outlined" startIcon={<RefreshIcon />} onClick={fetchAll}
-                sx={{ borderRadius: 2, borderColor: "#667EEA", color: "#667EEA", fontWeight: 600,
-                  "&:hover": { borderColor: "#5A67D8", backgroundColor: "rgba(102,126,234,0.04)" }, }}>
+              <Button
+                variant="outlined"
+                startIcon={<RefreshIcon />}
+                onClick={fetchAll}
+                sx={{
+                  borderRadius: 2, borderColor: "#667EEA", color: "#667EEA", fontWeight: 600,
+                  "&:hover": { borderColor: "#5A67D8", backgroundColor: "rgba(102,126,234,0.04)" },
+                }}
+              >
                 Làm mới
               </Button>
-              <Button variant="contained" startIcon={<AddIcon />} disabled
-                sx={{ borderRadius: 2, background: "linear-gradient(135deg, #667EEA 0%, #764BA2 100%)",
-                  fontWeight: 600, boxShadow: "0 4px 12px rgba(102,126,234,0.3)" }}>
-                Thêm Báo (ẩn)
+              <Button
+                variant="contained"
+                startIcon={<AddIcon />}
+                onClick={() => setOpenAdd(true)}
+                sx={{
+                  borderRadius: 2,
+                  background: "linear-gradient(135deg, #667EEA 0%, #764BA2 100%)",
+                  fontWeight: 600,
+                  boxShadow: "0 4px 12px rgba(102,126,234,0.3)",
+                }}
+              >
+                Thêm Báo
               </Button>
             </Stack>
 
@@ -202,9 +311,11 @@ export default function Newspaper() {
               </TableHead>
               <TableBody>
                 {pageItems.length === 0 ? (
-                  <TableRow><TableCell colSpan={8} sx={{ textAlign: "center", py: 4 }}>
-                    <Typography color="text.secondary">Không có dữ liệu báo</Typography>
-                  </TableCell></TableRow>
+                  <TableRow>
+                    <TableCell colSpan={8} sx={{ textAlign: "center", py: 4 }}>
+                      <Typography color="text.secondary">Không có dữ liệu báo</Typography>
+                    </TableCell>
+                  </TableRow>
                 ) : (
                   pageItems.map((n) => {
                     const id = n.documentId;
@@ -218,6 +329,7 @@ export default function Newspaper() {
                         onToggle={() => toggleExpand(n)}
                         onOpenDetail={() => openDetail(n)}
                         copiesState={copiesState}
+                        onOpenMenu={(e) => openMenu(e, n)}
                       />
                     );
                   })
@@ -236,10 +348,13 @@ export default function Newspaper() {
               <Stack direction="row" spacing={2} alignItems="center">
                 <Stack direction="row" spacing={1}>
                   {[5, 10, 20].map((n) => (
-                    <Button key={n} size="small"
+                    <Button
+                      key={n}
+                      size="small"
                       variant={itemsPerPage === n ? "contained" : "outlined"}
                       onClick={() => { setItemsPerPage(n); setCurrentPage(1); }}
-                      sx={{ borderRadius: 2 }}>
+                      sx={{ borderRadius: 2 }}
+                    >
                       {n}/trang
                     </Button>
                   ))}
@@ -257,14 +372,46 @@ export default function Newspaper() {
         </Card>
       )}
 
+      {/* Menu ba chấm */}
+      <Menu anchorEl={menuAnchor} open={!!menuAnchor} onClose={closeMenu}>
+        <MenuItem onClick={onMenuAddCopy}>Thêm bản sao</MenuItem>
+        <Divider />
+        <MenuItem onClick={onMenuViewEbook} disabled={!menuRow?.ebookUrl}>Xem eBook</MenuItem>
+      </Menu>
+
       {/* Panel chi tiết */}
-      <NewspaperDetailPanel open={detailOpen} onClose={() => setDetailOpen(false)} id={selectedId} initialItem={selectedItem} />
+      <NewspaperDetailPanel
+        open={detailOpen}
+        onClose={() => setDetailOpen(false)}
+        id={selectedId}
+        initialItem={selectedItem}
+      />
+
+      {/* Dialog thêm báo */}
+      <NewspaperCreateDialog
+        open={openAdd}
+        onClose={() => setOpenAdd(false)}
+        onCreated={(data) => {
+          setOpenAdd(false);
+          // không reload: thêm ngay vào đầu danh sách
+          setItems(prev => [data, ...prev]);
+          enqueueSnackbar('Tạo báo thành công!', { variant: 'success' });
+        }}
+      />
+
+      {/* Dialog thêm bản sao */}
+      <NewspaperAddCopyDialog
+        key={menuRow?.documentId || "addcopy-newspaper"}
+        open={addCopyOpen}
+        onClose={() => setAddCopyOpen(false)}
+        onSubmit={handleAddCopiesSubmit}
+      />
     </Box>
   );
 }
 
 /** -------- Hàng + Collapse -------- */
-function FragmentRow({ item, isOpen, onToggle, onOpenDetail, copiesState }) {
+function FragmentRow({ item, isOpen, onToggle, onOpenDetail, copiesState, onOpenMenu }) {
   const id = item.documentId;
   return (
     <>
@@ -276,8 +423,14 @@ function FragmentRow({ item, isOpen, onToggle, onOpenDetail, copiesState }) {
         </TableCell>
 
         <TableCell width={240}>
-          <MuiLink component="button" type="button" onClick={onOpenDetail} underline="hover"
-            sx={{ fontFamily: "monospace", fontSize: 13, cursor: "pointer" }} title="Xem chi tiết">
+          <MuiLink
+            component="button"
+            type="button"
+            onClick={onOpenDetail}
+            underline="hover"
+            sx={{ fontFamily: "monospace", fontSize: 13, cursor: "pointer" }}
+            title="Xem chi tiết"
+          >
             {id}
           </MuiLink>
         </TableCell>
@@ -298,15 +451,29 @@ function FragmentRow({ item, isOpen, onToggle, onOpenDetail, copiesState }) {
         <TableCell align="center" width={120}>{toDateVN(item.newspaper?.issueDate)}</TableCell>
         <TableCell align="center" width={90}>{item.numberOfCopy ?? 0}</TableCell>
 
-        <TableCell align="center" width={100}>
-          <Tooltip title={item.ebookUrl ? "Mở eBook" : "Chưa có eBook"}>
-            <span>
-              <IconButton size="small" href={item.ebookUrl || undefined} target="_blank" rel="noopener"
-                disabled={!item.ebookUrl} sx={{ color: "#667EEA" }}>
-                <OpenInNewIcon fontSize="small" />
+        <TableCell align="center" width={120}>
+          <Stack direction="row" justifyContent="center" spacing={0.5}>
+            <Tooltip title={item.ebookUrl ? "Mở eBook" : "Chưa có eBook"}>
+              <span>
+                <IconButton
+                  size="small"
+                  href={item.ebookUrl || undefined}
+                  target="_blank"
+                  rel="noopener"
+                  disabled={!item.ebookUrl}
+                  sx={{ color: "#667EEA" }}
+                >
+                  <OpenInNewIcon fontSize="small" />
+                </IconButton>
+              </span>
+            </Tooltip>
+
+            <Tooltip title="Tùy chọn">
+              <IconButton size="small" onClick={(e) => onOpenMenu?.(e)}>
+                <MoreVertIcon fontSize="small" />
               </IconButton>
-            </span>
-          </Tooltip>
+            </Tooltip>
+          </Stack>
         </TableCell>
       </TableRow>
 
@@ -353,26 +520,25 @@ function FragmentRow({ item, isOpen, onToggle, onOpenDetail, copiesState }) {
                       copiesState.data.copies.map((c) => {
                         const percent = Number(c.conditionNote) || 0;
                         const d = c.entryDate ? new Date(c.entryDate).toLocaleDateString("vi-VN") : "—";
+                        const statusLabel = String(c.status || '').toUpperCase();
                         return (
                           <TableRow key={c.documentCopyId} hover>
                             <TableCell>{c.documentCopyId}</TableCell>
                             <TableCell><Typography fontFamily="monospace">{c.barCode}</Typography></TableCell>
-                            <TableCell><Chip size="small" color={statusColor(c.status)} label={c.status} /></TableCell>
+                            <TableCell><Chip size="small" color={statusColor(statusLabel)} label={statusLabel} /></TableCell>
                             <TableCell sx={{ minWidth: 160 }}>
                               <Stack spacing={0.5}>
                                 <Typography variant="body2">{percent}%</Typography>
-                                <LinearProgress variant="determinate" value={Math.max(0, Math.min(100, percent))} sx={{ height: 6, borderRadius: 1.5 }} />
+                                <LinearProgress
+                                  variant="determinate"
+                                  value={Math.max(0, Math.min(100, percent))}
+                                  sx={{ height: 6, borderRadius: 1.5 }}
+                                />
                               </Stack>
                             </TableCell>
                             <TableCell>{d}</TableCell>
                             <TableCell align="right">{formatVND(c.deposit)}</TableCell>
-                            <TableCell align="center" width={64}>
-                              <Tooltip title="Tùy chọn">
-                                <IconButton size="small" onClick={() => console.log("More actions for copy:", c.documentCopyId)}>
-                                  <MoreVertIcon fontSize="small" />
-                                </IconButton>
-                              </Tooltip>
-                            </TableCell>
+                            <TableCell align="center" width={64}>—</TableCell>
                           </TableRow>
                         );
                       })

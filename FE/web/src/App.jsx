@@ -1,15 +1,17 @@
+// App.jsx
 import { RouterProvider } from "react-router-dom";
 import { AuthProvider } from "./contexts/AuthContext";
 import { router } from "./routes";
-import ButtonLoader from './components/Loading/ButtonLoader.jsx';
+import NotificationsProvider from "./notifications/NotificationsProvider"; // <— file đã tạo
+
 function App() {
   return (
-    <AuthProvider>
-      <RouterProvider router={router} />
-    </AuthProvider>
+    <NotificationsProvider>
+      <AuthProvider>
+        <RouterProvider router={router} />
+      </AuthProvider>
+    </NotificationsProvider>
   );
 }
 
 export default App;
-
-// test
