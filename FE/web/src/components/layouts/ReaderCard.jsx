@@ -108,7 +108,7 @@ export default function ReaderCard({ doc = {} }) {
               </Typography>
               <Chip
                 size="small"
-                label={inStock ? "Có sẵn" : "Hết / Chờ"}
+                label={inStock ? "Có sẵn" : "Hết"}
                 color={inStock ? "success" : "default"}
               />
             </Stack>

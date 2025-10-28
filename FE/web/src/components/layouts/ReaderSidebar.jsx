@@ -12,6 +12,9 @@ import {
   Divider,
 } from "@mui/material";
 
+import ButtonLoader from "../../components/Loading/ButtonLoader";
+
+
 export default function ReaderSidebar({
   selected,
   onSelect,
@@ -46,7 +49,7 @@ export default function ReaderSidebar({
 
       {loading ? (
         <Box sx={{ display: "flex", justifyContent: "center", py: 2 }}>
-          <CircularProgress size={24} />
+          <ButtonLoader size={80} />
         </Box>
       ) : genres.length === 0 ? (
         <Alert severity="info">Chưa có thể loại.</Alert>

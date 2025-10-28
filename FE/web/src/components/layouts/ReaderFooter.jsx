@@ -50,7 +50,7 @@ export default function ReaderFooter({
                 </Typography>
 
                 <Stack direction="row" spacing={1} sx={{ mt: 1 }}>
-                  <IconButton aria-label="Facebook" size="small">
+                  <IconButton aria-label="Facebook" size="small" LinkComponent={MLink} href="https://www.facebook.com/TiDii.Tw1/" target="_blank" rel="noopener">
                     <FacebookIcon fontSize="small" />
                   </IconButton>
                   <IconButton aria-label="YouTube" size="small">

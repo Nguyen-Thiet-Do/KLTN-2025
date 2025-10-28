@@ -1,52 +1,72 @@
 // services/documentApi.js
 import api from "./api";
 
-// Helper gọn để truyền params
-const withParams = (params) => ({ params });
+// Gom params + hỗ trợ AbortController signal
+const withParams = (params, extra = {}) => ({ params, ...extra });
+
+// Chuẩn hoá dữ liệu danh sách
+const normalizeList = (res) => ({
+  items: res?.data?.data ?? [],
+  pagination: res?.data?.pagination ?? null,
+});
 
 /**
- * Document API (chuẩn hoá, dùng chung instance `api`)
- * - Tự kế thừa interceptor gắn Authorization + refresh token từ services/api.js
- * - Không tạo thêm axios instance
- * - Thống nhất tham số & mặc định
+ * API tổng hợp cho Reader:
+ * - Nếu có genreId => gọi /documents/reader/by-genre
+ * - Không có => gọi /documents/reader
+ * - Tự join genreIds & map dữ liệu trả về
  */
 export const documentApi = {
-  // 📘 Danh sách tài liệu (trang chủ)
-  list: ({ page = 1, limit = 12, search = "", type = "all" } = {}) =>
-    api.get("/documents/reader", withParams({ page, limit, search, type })),
+  async fetchDocuments({
+    type = "all",
+    page = 1,
+    limit,            // optional; nếu không truyền sẽ auto chọn theo ngữ cảnh
+    search = "",
+    genreId = null,   // số | chuỗi | mảng
+    match = "any",
+    signal,
+  } = {}) {
+    const finalLimit = limit ?? (genreId ? 12 : 12000);
 
-  // 🎯 Lọc theo thể loại (sidebar)
+    if (genreId) {
+      const genreParam = Array.isArray(genreId) ? genreId.join(",") : (genreId ?? "");
+      const res = await api.get(
+        "/documents/reader/by-genre",
+        withParams({ page, limit: finalLimit, search, type, genreIds: genreParam, match }, { signal })
+      );
+      return normalizeList(res);
+    }
+
+    const res = await api.get(
+      "/documents/reader",
+      withParams({ page, limit: finalLimit, search, type }, { signal })
+    );
+    return normalizeList(res);
+  },
+
+  // (Raw) nếu muốn dùng riêng
+  list: ({ page = 1, limit = 12000, search = "", type = "all", signal } = {}) =>
+    api.get("/documents/reader", withParams({ page, limit, search, type }, { signal })),
+
   byGenre: ({
     page = 1,
-    limit = 12,
+    limit = 120000,
     search = "",
     type = "all",
     genreIds = [],
     match = "any",
+    signal,
   } = {}) => {
     const genreParam = Array.isArray(genreIds) ? genreIds.join(",") : (genreIds ?? "");
-    return api.get("/documents/reader/by-genre", withParams({
-      page,
-      limit,
-      search,
-      type,
-      genreIds: genreParam,
-      match,
-    }));
+    return api.get(
+      "/documents/reader/by-genre",
+      withParams({ page, limit, search, type, genreIds: genreParam, match }, { signal })
+    );
   },
 
-  // 🔍 Tìm kiếm tài liệu
-  search: ({ page = 1, limit = 12, q = "", type = "all" } = {}) =>
-    api.get("/documents/reader/search", withParams({ page, limit, q, type })),
-
-  // 📄 Chi tiết 1 tài liệu
-  detail: (id) => api.get(`/documents/reader/${id}`),
-
-  // 🗂️ Danh mục thể loại
-  genres: () => api.get("/documents/genres"),
-
-  // 📖 Lấy URL ebook
-  ebookUrl: (id) => api.get(`/documents/ebook/${id}`),
+  detail: (id, { signal } = {}) => api.get(`/documents/reader/${id}`, { signal }),
+  genres: ({ signal } = {}) => api.get("/documents/genres", { signal }),
+  ebookUrl: (id, { signal } = {}) => api.get(`/documents/ebook/${id}`, { signal }),
 };
 
 export default documentApi;

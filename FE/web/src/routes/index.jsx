@@ -8,7 +8,6 @@ import NotFound from "../pages/NotFound";
 
 // === Import thêm các trang Reader (FE cho độc giả) ===
 import ReaderHome from "../pages/ReaderHome/ReaderHome";
-import ReaderSearch from "../pages/ReaderHome/ReaderSearch"; 
 import LibraryHome from "../pages/LibraryHome";
 
 // === Định nghĩa router chính ===
