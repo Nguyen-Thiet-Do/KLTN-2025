@@ -5,7 +5,9 @@
 const {
   Document, Book, Magazine, Newspaper,
   Category, DocumentCopy, Author, DocumentAuthorMap,
-  Publisher, Genre, DocumentGenreMap
+  Publisher, Genre, DocumentGenreMap,
+  // thêm để tính "giữ chỗ mềm"
+  LoanSlip, LoanDetail
 } = require('../model');
 const { Op, col, fn, where } = require('sequelize');
 
@@ -21,6 +23,13 @@ const TYPE_LABELS = {
   magazine: ['Tạp chí', 'Tap chí', 'Tap chi', 'magazine'],
   newspaper: ['Báo', 'Bao', 'newspaper']
 };
+
+/**
+ * Chuẩn hoá chuỗi -> UPPER (để so sánh case-insensitive an toàn)
+ */
+function toUPPER(x) {
+  return String(x || '').trim().toUpperCase();
+}
 
 /**
  * Suy luận loại tài liệu từ tên Category (không phụ thuộc vào bảng subtype)
@@ -44,9 +53,9 @@ function inferTypeFromCategoryName(name = '') {
  * @returns {object} - Sequelize where cho Document
  */
 function buildDocumentWhere(search = '') {
-  const where = { deleted: false };
-  if (search) where.title = { [Op.like]: `%${search}%` };
-  return where;
+  const whereDoc = { deleted: false };
+  if (search) whereDoc.title = { [Op.like]: `%${search}%` };
+  return whereDoc;
 }
 
 /**
@@ -57,11 +66,11 @@ function buildDocumentWhere(search = '') {
  * @returns {object} - Sequelize where cho Category
  */
 function buildCategoryWhere(documentType = 'all') {
-  const where = { deleted: false };
+  const whereCat = { deleted: false };
   if (documentType !== 'all') {
-    where.name = { [Op.in]: TYPE_LABELS[documentType] || [] };
+    whereCat.name = { [Op.in]: TYPE_LABELS[documentType] || [] };
   }
-  return where;
+  return whereCat;
 }
 
 /**
@@ -215,12 +224,24 @@ function extractSubtypeInfo(o) {
   return { book, magazine, newspaper };
 }
 
+/**
+ * Đếm AVAILABLE theo case-insensitive
+ */
+function countAvailableCopiesCaseInsensitive(copies = []) {
+  let n = 0;
+  for (const c of copies) {
+    if (toUPPER(c.status) === 'AVAILABLE') n += 1;
+  }
+  return n;
+}
+
 function mapListItem(d) {
   const o = d.toJSON();
   const coverPrice = o.coverPrice || 0;
   const depositRate = o.Category?.deposit_rate || 0;
   const copies = Array.isArray(o.copies) ? o.copies : [];
-  const availableCopies = copies.filter(c => c.status === 'AVAILABLE').length;
+  // dùng case-insensitive
+  const availableCopies = countAvailableCopiesCaseInsensitive(copies);
   const { minDeposit, maxDeposit } = computeDepositStats(coverPrice, depositRate, copies);
 
   return {
@@ -239,12 +260,81 @@ function mapListItem(d) {
   };
 }
 
+/**
+ * Bản mở rộng của mapListItem để thêm availableCopiesEffective
+ */
+function mapListItemWithEffective(d, effectiveAvailable = null) {
+  const base = mapListItem(d);
+  return {
+    ...base,
+    availableCopiesEffective: effectiveAvailable !== null ? Math.max(0, effectiveAvailable) : base.availableCopies
+  };
+}
+
 // ===== Helper: chuẩn hoá từ khoá tìm kiếm
 function buildLikePattern(q) {
   const s = String(q || '').trim();
   if (!s) return null;
-  // có thể thêm escape % _ nếu cần
   return `%${s}%`;
+}
+
+/* =============================================================================
+ *                       HOLDS (PENDING) HELPERS
+ * ========================================================================== */
+/**
+ * Đếm số lượng LoanDetail đang "giữ chỗ mềm" (PENDING, chưa gán copy) theo documentId.
+ * So sánh PENDING theo case-insensitive bằng UPPER(LoanSlip.status) = 'PENDING'
+ * Hiện tại dựa trên tag trong note: REQUEST_DOCUMENT_ID=<documentId>
+ * @param {number[]} documentIds
+ * @param {object} [tx]
+ * @returns {Promise<Map<number, number>>}
+ */
+async function getPendingHoldsByDocumentIds(documentIds = [], tx = undefined) {
+  if (!Array.isArray(documentIds) || documentIds.length === 0) {
+    return new Map();
+  }
+
+  const notePatterns = documentIds.map(id => `REQUEST_DOCUMENT_ID=${id}`);
+
+  const rows = await LoanDetail.findAll({
+    include: [{
+      model: LoanSlip,
+      required: true,
+      where: {
+        deleted: false,
+        // CASE-INSENSITIVE: UPPER(status) = 'PENDING'
+        [Op.and]: [ where(fn('upper', col('LoanSlip.status')), 'PENDING') ]
+      },
+      attributes: []
+    }],
+    where: {
+      documentCopyId: { [Op.is]: null },
+      note: { [Op.in]: notePatterns }
+    },
+    attributes: ['note', [fn('COUNT', col('LoanDetail.loanDetailId')), 'cnt']],
+    group: ['note'],
+    transaction: tx
+  });
+
+  const map = new Map(documentIds.map(id => [id, 0]));
+  for (const r of rows) {
+    const note = r.get('note');
+    const cnt = Number(r.get('cnt')) || 0;
+    const m = /REQUEST_DOCUMENT_ID=(\d+)/.exec(String(note || ''));
+    const docId = m ? Number(m[1]) : null;
+    if (docId && map.has(docId)) {
+      map.set(docId, (map.get(docId) || 0) + cnt);
+    }
+  }
+  return map;
+}
+
+/**
+ * Đếm pending holds cho 1 documentId
+ */
+async function getPendingHoldsByDocumentId(documentId, tx = undefined) {
+  const map = await getPendingHoldsByDocumentIds([documentId], tx);
+  return map.get(documentId) || 0;
 }
 
 /* =============================================================================
@@ -272,7 +362,6 @@ async function findDocuments(whereDoc, whereCat, { limit, offset }) {
     limit,
     offset,
     order: [['documentId', 'DESC']],
-    
   });
 }
 
@@ -300,10 +389,6 @@ async function findDocumentDetail(documentId, whereCat) {
 /* =============================================================================
  *                       GENRE FILTERING (ANY / ALL) — PAGINATION-FIXED
  * ========================================================================== */
-/**
- * Lấy danh sách documentId cho match 'any' (ít nhất 1 genre)
- * Áp limit/offset trên ID duy nhất để phân trang ổn.
- */
 async function findDocumentIdsMatchAny(whereDoc, whereCat, genreIds = [], { limit, offset }) {
   const rows = await Document.findAll({
     where: whereDoc,
@@ -328,9 +413,6 @@ async function findDocumentIdsMatchAny(whereDoc, whereCat, genreIds = [], { limi
   return rows.map(r => r.documentId);
 }
 
-/**
- * Lấy danh sách documentId cho match 'all' (đủ tất cả genre)
- */
 async function findDocumentIdsMatchAll(whereDoc, whereCat, genreIds = [], { limit, offset }) {
   const rows = await Document.findAll({
     where: whereDoc,
@@ -360,9 +442,6 @@ async function findDocumentIdsMatchAll(whereDoc, whereCat, genreIds = [], { limi
   return rows.map(r => r.documentId);
 }
 
-/**
- * Đếm tổng số Document cho match 'all'
- */
 async function countDocumentsMatchAll(whereDoc, whereCat, genreIds = []) {
   const rows = await Document.findAll({
     where: whereDoc,
@@ -388,10 +467,6 @@ async function countDocumentsMatchAll(whereDoc, whereCat, genreIds = []) {
   return rows.length;
 }
 
-/**
- * Lọc theo Genre, hỗ trợ match 'any' | 'all'
- * ĐÃ FIX phân trang cho nhánh 'any' bằng cách phân trang theo ID trước.
- */
 async function getDocumentsByGenre({
   page = 1,
   limit = 10,
@@ -417,7 +492,6 @@ async function getDocumentsByGenre({
   const whereCat = buildCategoryWhere(documentType);
 
   if (match === 'any') {
-    // 1) Đếm tổng distinct documentId
     const totalItems = await Document.count({
       where: whereDoc,
       include: [
@@ -435,7 +509,6 @@ async function getDocumentsByGenre({
       col: 'documentId'
     });
 
-    // 2) Lấy trang ID trước
     const ids = await findDocumentIdsMatchAny(whereDoc, whereCat, genreIds, { limit, offset });
     if (ids.length === 0) {
       return {
@@ -449,7 +522,6 @@ async function getDocumentsByGenre({
       };
     }
 
-    // 3) Lấy chi tiết theo ID (đính kèm genres & copies)
     const rows = await Document.findAll({
       where: { ...whereDoc, documentId: { [Op.in]: ids } },
       include: [
@@ -469,11 +541,21 @@ async function getDocumentsByGenre({
       subQuery: false
     });
 
-    // Giữ đúng thứ tự theo ids
     const mapById = new Map(rows.map(r => [r.documentId, r]));
     const ordered = ids.map(id => mapById.get(id)).filter(Boolean);
 
-    const items = ordered.map(mapListItem);
+    // Tính effective cho list
+    const docIds = ordered.map(r => r.documentId);
+    const pendingMap = await getPendingHoldsByDocumentIds(docIds);
+    const items = ordered.map(d => {
+      const o = d.toJSON();
+      const copies = Array.isArray(o.copies) ? o.copies : [];
+      const available = countAvailableCopiesCaseInsensitive(copies);
+      const holds = pendingMap.get(o.documentId) || 0;
+      const effective = available - holds;
+      return mapListItemWithEffective(d, effective);
+    });
+
     const totalPages = Math.ceil(totalItems / limit);
 
     return {
@@ -525,7 +607,17 @@ async function getDocumentsByGenre({
   const mapById = new Map(rows.map(r => [r.documentId, r]));
   const ordered = ids.map(id => mapById.get(id)).filter(Boolean);
 
-  const items = ordered.map(mapListItem);
+  const docIds = ordered.map(r => r.documentId);
+  const pendingMap = await getPendingHoldsByDocumentIds(docIds);
+  const items = ordered.map(d => {
+    const o = d.toJSON();
+    const copies = Array.isArray(o.copies) ? o.copies : [];
+    const available = countAvailableCopiesCaseInsensitive(copies);
+    const holds = pendingMap.get(o.documentId) || 0;
+    const effective = available - holds;
+    return mapListItemWithEffective(d, effective);
+  });
+
   const totalPages = Math.ceil(totalItems / limit);
 
   return {
@@ -542,16 +634,9 @@ async function getDocumentsByGenre({
 /* =============================================================================
  *                         UNIVERSAL SEARCH (NHIỀU TRƯỜNG)
  * ========================================================================== */
-/**
- * Truy vấn ra danh sách documentId thỏa tìm kiếm tổng quát.
- * Tìm theo: title, Category.name, Publisher.name, authors.fullName, genres.name,
- * book.isbn, magazine.issn, newspaper.issn.
- * - includes để enable các path $...$ nhưng đều required:false
- * - group theo documentId để phân trang ổn định
- */
 async function findDocumentIdsByUniversalSearch({ q, documentType = 'all', limit = 10, offset = 0 }) {
   const like = buildLikePattern(q);
-  if (!like) return []; // không có từ khoá -> trả rỗng; UI có thể fallback sang list
+  if (!like) return []; // không có từ khoá -> trả rỗng
 
   const whereCat = buildCategoryWhere(documentType);
 
@@ -571,10 +656,7 @@ async function findDocumentIdsByUniversalSearch({ q, documentType = 'all', limit
     },
     attributes: ['documentId'],
     include: [
-      // Category (lọc loại nếu có)
       { model: Category, attributes: [], where: whereCat, required: true },
-
-      // Các bảng khác để mở đường cho $alias.field$ (required:false)
       { model: Publisher, attributes: [], required: false, where: { deleted: false } },
       { model: Author, as: 'authors', attributes: [], required: false, through: { attributes: [], where: { deleted: false } }, where: { deleted: false } },
       { model: Genre, as: 'genres', attributes: [], required: false, through: { attributes: [], where: { deleted: false } }, where: { deleted: false } },
@@ -592,10 +674,6 @@ async function findDocumentIdsByUniversalSearch({ q, documentType = 'all', limit
   return rows.map(r => r.documentId);
 }
 
-/**
- * Đếm tổng distinct documentId cho tìm kiếm tổng quát.
- * Dùng Document.count(distinct) + cùng where/include (required như trên).
- */
 async function countDocumentsUniversalSearch({ q, documentType = 'all' }) {
   const like = buildLikePattern(q);
   if (!like) return 0;
@@ -632,10 +710,6 @@ async function countDocumentsUniversalSearch({ q, documentType = 'all' }) {
   return total;
 }
 
-/**
- * PUBLIC: Universal search — tìm theo nhiều trường & bảng liên quan.
- * Giữ kiểu trả về giống list: items + pagination.
- */
 async function searchDocumentsUniversal({
   page = 1,
   limit = 10,
@@ -644,7 +718,6 @@ async function searchDocumentsUniversal({
 } = {}) {
   const offset = (page - 1) * limit;
 
-  // 1) Đếm tổng
   const totalItems = await countDocumentsUniversalSearch({ q, documentType });
 
   if (totalItems === 0) {
@@ -659,7 +732,6 @@ async function searchDocumentsUniversal({
     };
   }
 
-  // 2) Lấy ID trang hiện tại
   const ids = await findDocumentIdsByUniversalSearch({ q, documentType, limit, offset });
   if (ids.length === 0) {
     return {
@@ -673,7 +745,6 @@ async function searchDocumentsUniversal({
     };
   }
 
-  // 3) Lấy chi tiết theo ID (đính kèm Category + Copies để tính cọc)
   const whereDoc = { deleted: false, documentId: { [Op.in]: ids } };
   const whereCat = buildCategoryWhere(documentType);
 
@@ -681,7 +752,6 @@ async function searchDocumentsUniversal({
     where: whereDoc,
     include: [
       ...listIncludeForDocuments(whereCat),
-      // (không bắt buộc, chỉ để hiển thị nếu bạn muốn)
       { model: Publisher, attributes: ['publisherId', 'name'], required: false, where: { deleted: false } },
       { model: Genre, as: 'genres', attributes: ['genreId', 'name'], required: false, through: { attributes: [], where: { deleted: false } }, where: { deleted: false } }
     ],
@@ -691,11 +761,21 @@ async function searchDocumentsUniversal({
     subQuery: false
   });
 
-  // giữ thứ tự theo ids
   const mapById = new Map(rows.map(r => [r.documentId, r]));
   const ordered = ids.map(id => mapById.get(id)).filter(Boolean);
 
-  const items = ordered.map(mapListItem);
+  // Tính effective cho list
+  const docIds = ordered.map(r => r.documentId);
+  const pendingMap = await getPendingHoldsByDocumentIds(docIds);
+  const items = ordered.map(d => {
+    const o = d.toJSON();
+    const copies = Array.isArray(o.copies) ? o.copies : [];
+    const available = countAvailableCopiesCaseInsensitive(copies);
+    const holds = pendingMap.get(o.documentId) || 0;
+    const effective = available - holds;
+    return mapListItemWithEffective(d, effective);
+  });
+
   const totalPages = Math.ceil(totalItems / limit);
 
   return {
@@ -712,9 +792,6 @@ async function searchDocumentsUniversal({
 /* =============================================================================
  *                      SIMILAR DOCS (RECOMMENDER FOR READERS)
  * ========================================================================== */
-/**
- * Lấy thông tin tối thiểu cho 1 document phục vụ gợi ý
- */
 async function getSimilarSeed(documentId) {
   const doc = await Document.findOne({
     where: { documentId, deleted: false },
@@ -736,9 +813,6 @@ async function getSimilarSeed(documentId) {
   };
 }
 
-/**
- * Tìm theo giao genres -> trả Map(id => sharedGenreCount)
- */
 async function findBySharedGenres(genreIds = [], excludeId, limit = 200) {
   if (!genreIds.length) return new Map();
   const rows = await Document.findAll({
@@ -765,9 +839,6 @@ async function findBySharedGenres(genreIds = [], excludeId, limit = 200) {
   return map;
 }
 
-/**
- * Tìm theo giao authors -> trả Map(id => sharedAuthorCount)
- */
 async function findBySharedAuthors(authorIds = [], excludeId, limit = 200) {
   if (!authorIds.length) return new Map();
   const rows = await Document.findAll({
@@ -794,9 +865,6 @@ async function findBySharedAuthors(authorIds = [], excludeId, limit = 200) {
   return map;
 }
 
-/**
- * Lấy danh sách id cùng publisher
- */
 async function findByPublisher(publisherId, excludeId, limit = 200) {
   if (!publisherId) return new Set();
   const rows = await Document.findAll({
@@ -808,9 +876,6 @@ async function findByPublisher(publisherId, excludeId, limit = 200) {
   return new Set(rows.map(r => r.documentId));
 }
 
-/**
- * Lấy danh sách id cùng category
- */
 async function findByCategory(categoryId, excludeId, limit = 200) {
   if (!categoryId) return new Set();
   const rows = await Document.findAll({
@@ -822,11 +887,6 @@ async function findByCategory(categoryId, excludeId, limit = 200) {
   return new Set(rows.map(r => r.documentId));
 }
 
-/**
- * Gợi ý tài liệu tương tự (Reader)
- * - Tính điểm theo trọng số: genre, author, publisher, category
- * - Trả về items dạng list (mapListItem), kèm score và matchedBy
- */
 async function getSimilarDocumentsForReader(documentId, {
   limit = 10,
   weights = { genre: 2, author: 3, publisher: 1, category: 1 }
@@ -834,7 +894,6 @@ async function getSimilarDocumentsForReader(documentId, {
   const seed = await getSimilarSeed(documentId);
   if (!seed) return { items: [] };
 
-  // 1) Thu thập ứng viên
   const [byGenres, byAuthors, setPub, setCat] = await Promise.all([
     findBySharedGenres(seed.genreIds, documentId, 300),
     findBySharedAuthors(seed.authorIds, documentId, 300),
@@ -842,7 +901,6 @@ async function getSimilarDocumentsForReader(documentId, {
     findByCategory(seed.categoryId, documentId, 200)
   ]);
 
-  // 2) Gộp & chấm điểm
   const candidateIds = new Set([
     ...byGenres.keys(),
     ...byAuthors.keys(),
@@ -874,10 +932,8 @@ async function getSimilarDocumentsForReader(documentId, {
     scored.push({ id, score, matchedBy, sharedGenre, sharedAuthor, pubMatch, catMatch });
   }
 
-  // 3) Sắp xếp theo điểm (desc), rồi id desc
   scored.sort((a, b) => (b.score - a.score) || (b.id - a.id));
 
-  // 4) Lấy chi tiết top N (để tính min/max cọc & copies)
   const topIds = scored.slice(0, limit).map(x => x.id);
   const whereDoc = { deleted: false, documentId: { [Op.in]: topIds } };
   const whereCat = { deleted: false };
@@ -891,7 +947,6 @@ async function getSimilarDocumentsForReader(documentId, {
     subQuery: false
   });
 
-  // map giữ thứ tự theo scoring
   const byId = new Map(rows.map(r => [r.documentId, r]));
   const items = [];
   for (const s of scored) {
@@ -927,7 +982,19 @@ const getAllDocumentsWithDepositInfo = async (
     const totalItems = await countDocuments(whereDoc, whereCat);
     const rows = await findDocuments(whereDoc, whereCat, { limit, offset });
 
-    const items = rows.map(mapListItem);
+    // TÍNH availableCopiesEffective
+    const ids = rows.map(r => r.documentId);
+    const pendingMap = await getPendingHoldsByDocumentIds(ids);
+
+    const items = rows.map(d => {
+      const o = d.toJSON();
+      const copies = Array.isArray(o.copies) ? o.copies : [];
+      const available = countAvailableCopiesCaseInsensitive(copies);
+      const holds = pendingMap.get(o.documentId) || 0;
+      const effective = available - holds;
+      return mapListItemWithEffective(d, effective);
+    });
+
     const totalPages = Math.ceil(totalItems / limit);
 
     return {
@@ -957,8 +1024,12 @@ const getDocumentDetailWithDeposit = async (documentId) => {
     const coverPrice = o.coverPrice || 0;
     const depositRate = o.Category?.deposit_rate || 0;
     const copies = Array.isArray(o.copies) ? o.copies : [];
-    const availableCopies = copies.filter(c => c.status === 'AVAILABLE').length;
+    const availableCopies = countAvailableCopiesCaseInsensitive(copies);
     const { minDeposit, maxDeposit } = computeDepositStats(coverPrice, depositRate, copies);
+
+    // TÍNH availableCopiesEffective cho detail
+    const pendingHolds = await getPendingHoldsByDocumentId(o.documentId);
+    const availableCopiesEffective = Math.max(0, availableCopies - pendingHolds);
 
     const { book, magazine, newspaper } = extractSubtypeInfo(o);
 
@@ -997,7 +1068,10 @@ const getDocumentDetailWithDeposit = async (documentId) => {
       genres: normalizeGenres(o.genres || []),
       copies: normalizeCopies(copies),
       totalCopies: copies.length,
-      availableCopies
+
+      // Số liệu kho
+      availableCopies,               // AVAILABLE (case-insensitive)
+      availableCopiesEffective       // AVAILABLE - pending holds
     };
   } catch (error) {
     console.error('Error in getDocumentDetailWithDeposit:', error);
