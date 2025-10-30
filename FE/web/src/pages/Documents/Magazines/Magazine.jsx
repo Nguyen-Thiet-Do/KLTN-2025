@@ -1,5 +1,4 @@
 export default function Magazine() {
-    return
-    <div>Magazine Page</div>;
+    return <div>Magazine Page</div>;
     
 }
