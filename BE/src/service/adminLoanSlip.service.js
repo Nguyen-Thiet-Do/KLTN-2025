@@ -52,17 +52,19 @@ async function getAllLoanSlipsService(query) {
           'status',
           'fineAmount',
           'depositAmount',
+          'conditionBorrow',
+          'conditionReturn',
           'renewalCount',
           'note',
         ],
         include: [
           {
             model: DocumentCopy,
-            attributes: ['documentCopyId', 'barCode', 'status'],
+            attributes: ['documentCopyId', 'barCode'],
             include: [
               {
                 model: Document,
-                attributes: ['documentId', 'title', 'shelfLocation'],
+                attributes: ['documentId', 'title', 'coverPhoto'],
               },
             ],
           },
