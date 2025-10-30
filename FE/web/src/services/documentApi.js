@@ -1,28 +1,19 @@
-// services/documentApi.js
+// src/services/documentApi.js
 import api from "./api";
 
-// Gom params + hỗ trợ AbortController signal
 const withParams = (params, extra = {}) => ({ params, ...extra });
-
-// Chuẩn hoá dữ liệu danh sách
 const normalizeList = (res) => ({
   items: res?.data?.data ?? [],
   pagination: res?.data?.pagination ?? null,
 });
 
-/**
- * API tổng hợp cho Reader:
- * - Nếu có genreId => gọi /documents/reader/by-genre
- * - Không có => gọi /documents/reader
- * - Tự join genreIds & map dữ liệu trả về
- */
 export const documentApi = {
   async fetchDocuments({
     type = "all",
     page = 1,
-    limit,            // optional; nếu không truyền sẽ auto chọn theo ngữ cảnh
+    limit,
     search = "",
-    genreId = null,   // số | chuỗi | mảng
+    genreId = null,
     match = "any",
     signal,
   } = {}) {
@@ -44,19 +35,11 @@ export const documentApi = {
     return normalizeList(res);
   },
 
-  // (Raw) nếu muốn dùng riêng
+  // Raw helpers
   list: ({ page = 1, limit = 12000, search = "", type = "all", signal } = {}) =>
     api.get("/documents/reader", withParams({ page, limit, search, type }, { signal })),
 
-  byGenre: ({
-    page = 1,
-    limit = 120000,
-    search = "",
-    type = "all",
-    genreIds = [],
-    match = "any",
-    signal,
-  } = {}) => {
+  byGenre: ({ page = 1, limit = 120000, search = "", type = "all", genreIds = [], match = "any", signal } = {}) => {
     const genreParam = Array.isArray(genreIds) ? genreIds.join(",") : (genreIds ?? "");
     return api.get(
       "/documents/reader/by-genre",
@@ -64,9 +47,31 @@ export const documentApi = {
     );
   },
 
-  detail: (id, { signal } = {}) => api.get(`/documents/reader/${id}`, { signal }),
+  // Genres
   genres: ({ signal } = {}) => api.get("/documents/genres", { signal }),
-  ebookUrl: (id, { signal } = {}) => api.get(`/documents/ebook/${id}`, { signal }),
+
+  // Detail / Similar / Ebook
+  detail: (id, { signal } = {}) => api.get(`/documents/reader/${id}`, { signal }),
+  similar: (id, { limit = 8, signal } = {}) =>
+    api.get(`/documents/reader/${id}/similar`, withParams({ limit }, { signal })),
+
+  // ⚠️ Thêm cache-buster để tránh 304 Not Modified làm rỗng body:
+  ebookUrl: (id, { signal } = {}) =>
+    api.get(`/documents/ebook/${id}`, { params: { t: Date.now() }, signal }),
+
+  // Aliases
+  async getDocumentDetail(id, { signal } = {}) {
+    const res = await this.detail(id, { signal });
+    return res?.data?.data;
+  },
+  async getSimilarDocuments(id, { limit = 8, signal } = {}) {
+    const res = await this.similar(id, { limit, signal });
+    return { items: res?.data?.data ?? [] };
+  },
+  async getEbookUrl(id, { signal } = {}) {
+    const res = await this.ebookUrl(id, { signal });
+    return res?.data?.data ?? {};
+  },
 };
 
 export default documentApi;

@@ -7,23 +7,31 @@ import {
   List,
   ListItemButton,
   ListItemText,
-  CircularProgress,
   Alert,
   Divider,
+  Chip,
+  Stack,
+  Collapse,
+  IconButton,
 } from "@mui/material";
-
+import {
+  ExpandLess,
+  ExpandMore,
+  FilterList,
+  Category,
+} from "@mui/icons-material";
 import ButtonLoader from "../../components/Loading/ButtonLoader";
-
 
 export default function ReaderSidebar({
   selected,
   onSelect,
-  title = "Danh mục",
+  title = "Lọc theo thể loại",
   showAllOption = true,
-  elevation = 2,
+  elevation = 1,
 }) {
   const [genres, setGenres] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [expanded, setExpanded] = useState(true);
 
   useEffect(() => {
     let ignore = false;
@@ -40,43 +48,130 @@ export default function ReaderSidebar({
     return () => { ignore = true; };
   }, []);
 
+  const handleToggle = () => {
+    setExpanded(!expanded);
+  };
+
   return (
-    <Paper elevation={elevation} sx={{ p: 2, borderRadius: 2 }}>
-      <Typography variant="h6" fontWeight={700} gutterBottom>
-        {title}
-      </Typography>
-      <Divider sx={{ mb: 1 }} />
+    <Paper 
+      elevation={elevation} 
+      sx={{ 
+        borderRadius: 3,
+        overflow: "hidden",
+        border: (t) => `1px solid ${t.palette.divider}`,
+      }}
+    >
+      {/* Header */}
+      <Box 
+        sx={{ 
+          p: 2, 
+          backgroundColor: (t) => t.palette.background.default,
+          borderBottom: (t) => `1px solid ${t.palette.divider}`,
+        }}
+      >
+        <Stack 
+          direction="row" 
+          alignItems="center" 
+          justifyContent="space-between"
+          sx={{ cursor: "pointer" }}
+          onClick={handleToggle}
+        >
+          <Stack direction="row" alignItems="center" spacing={1.5}>
+            <FilterList color="primary" />
+            <Typography variant="h6" fontWeight={700}>
+              {title}
+            </Typography>
+            <Chip 
+              label={genres.length} 
+              size="small" 
+              color="primary" 
+              variant="outlined"
+            />
+          </Stack>
+          <IconButton size="small">
+            {expanded ? <ExpandLess /> : <ExpandMore />}
+          </IconButton>
+        </Stack>
+      </Box>
 
-      {loading ? (
-        <Box sx={{ display: "flex", justifyContent: "center", py: 2 }}>
-          <ButtonLoader size={80} />
-        </Box>
-      ) : genres.length === 0 ? (
-        <Alert severity="info">Chưa có thể loại.</Alert>
-      ) : (
-        <List dense disablePadding>
-          {showAllOption && (
-            <ListItemButton
-              selected={!selected}
-              onClick={() => onSelect?.(null)}
-              sx={{ borderRadius: 1, mb: 0.5 }}
+      {/* Content */}
+      <Collapse in={expanded}>
+        <Box sx={{ p: 2 }}>
+          {loading ? (
+            <Box sx={{ display: "flex", justifyContent: "center", py: 4 }}>
+              <ButtonLoader size={60} />
+            </Box>
+          ) : genres.length === 0 ? (
+            <Alert 
+              severity="info" 
+              sx={{ 
+                borderRadius: 2,
+                "& .MuiAlert-message": { width: "100%" }
+              }}
             >
-              <ListItemText primary="Tất cả" />
-            </ListItemButton>
+              Chưa có thể loại nào.
+            </Alert>
+          ) : (
+            <List dense disablePadding>
+              {showAllOption && (
+                <ListItemButton
+                  selected={!selected}
+                  onClick={() => onSelect?.(null)}
+                  sx={{ 
+                    borderRadius: 2, 
+                    mb: 1,
+                    border: (t) => !selected ? `2px solid ${t.palette.primary.main}` : "2px solid transparent",
+                    backgroundColor: !selected ? "action.selected" : "transparent",
+                    "&:hover": {
+                      backgroundColor: "action.hover",
+                    },
+                  }}
+                >
+                  <ListItemText 
+                    primary={
+                      <Typography fontWeight={!selected ? 700 : 500}>
+                        Tất cả thể loại
+                      </Typography>
+                    } 
+                  />
+                  <Chip 
+                    label={genres.length} 
+                    size="small" 
+                    variant="outlined"
+                  />
+                </ListItemButton>
+              )}
+
+              <Divider sx={{ my: 1 }} />
+
+              {genres.map((g) => (
+                <ListItemButton
+                  key={g.genreId}
+                  selected={selected === g.genreId}
+                  onClick={() => onSelect?.(g.genreId)}
+                  sx={{ 
+                    borderRadius: 2, 
+                    mb: 1,
+                    border: (t) => selected === g.genreId ? `2px solid ${t.palette.primary.main}` : "2px solid transparent",
+                    backgroundColor: selected === g.genreId ? "action.selected" : "transparent",
+                    "&:hover": {
+                      backgroundColor: "action.hover",
+                    },
+                  }}
+                >
+                  <ListItemText 
+                    primary={
+                      <Typography fontWeight={selected === g.genreId ? 700 : 500}>
+                        {g.name}
+                      </Typography>
+                    } 
+                  />
+                </ListItemButton>
+              ))}
+            </List>
           )}
-
-          {genres.map((g) => (
-            <ListItemButton
-              key={g.genreId}
-              selected={selected === g.genreId}
-              onClick={() => onSelect?.(g.genreId)}
-              sx={{ borderRadius: 1, mb: 0.5 }}
-            >
-              <ListItemText primary={g.name} />
-            </ListItemButton>
-          ))}
-        </List>
-      )}
+        </Box>
+      </Collapse>
     </Paper>
   );
 }
