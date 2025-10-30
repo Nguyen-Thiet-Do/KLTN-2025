@@ -564,10 +564,117 @@ routeApi.get('/', (req, res) => {
               sortBy: 'string (optional, default="loanDate")',
               sortDir: 'string (optional, "ASC" | "DESC", default="DESC")'
             }
+          },
+          {
+            method: 'POST',
+            path: '/api/loans/admin/loans',
+            description: 'Tạo phiếu mượn ở trạng thái chờ thanh toán (PENDING_PAYMENT)',
+            auth: true,
+            role: 'Admin (roleId = 1), Librarian (roleId = 2)',
+            body: {
+              readerId: 'number (required)',
+              librarianId: 'number (required)',
+              loanDate: "date (optional, 'YYYY-MM-DD')",
+              dueDate: "date (optional, 'YYYY-MM-DD')",
+              items: 'array (required) — [{ documentCopyId:number, depositAmount?:number, note?:string }]',
+              totalAmount: 'number (optional) — nếu không gửi sẽ = tổng depositAmount',
+            },
+            examples: [
+              '{ "readerId": 10, "librarianId": 2, "items":[{"documentCopyId":101,"depositAmount":50000}], "totalAmount":50000 }'
+            ]
+          },
+          {
+            method: 'POST',
+            path: '/api/loans/admin/loans/:loanSlipId/payment/qr',
+            description: 'Tạo QR thanh toán cho 1 phiếu mượn đang PENDING_PAYMENT',
+            auth: true,
+            role: 'Admin (roleId = 1), Librarian (roleId = 2)',
+            params: {
+              loanSlipId: 'number (required)',
+            },
+            body: {
+              amount: 'number (required)',
+              description: 'string (optional)'
+            },
+            response: {
+              success: 'boolean',
+              paymentId: 'number (id của payment vừa tạo)',
+              amount: 'number',
+              status: 'string (PENDING)',
+              transactionCode: 'string',
+              qr: '{ type: "data-url", content: "data:image/png;base64,..." }'
+            }
+          },
+
+          // ================== MỚI: XÁC NHẬN THANH TOÁN ==================
+          {
+            method: 'PATCH',
+            path: '/api/loans/admin/loans/:loanSlipId/payment/confirm',
+            description: 'Xác nhận thanh toán theo loanSlipId (coi như đã thanh toán)',
+            auth: true,
+            role: 'Admin (roleId = 1), Librarian (roleId = 2)',
+            params: {
+              loanSlipId: 'number (required)'
+            },
+            body: {
+              transactionCode: 'string (optional) — mã đối soát (nếu có)'
+            },
+            response: {
+              success: 'boolean',
+              message: 'string',
+              loanSlipId: 'number',
+              // Hiệu ứng: LoanSlip: PENDING_PAYMENT -> OPEN; LoanDetail: PENDING_PAYMENT -> BORROWED; DocumentCopy: ON_HOLD -> BORROWED
+            }
+          },
+          {
+            method: 'PATCH',
+            path: '/api/loans/admin/payments/:paymentId/confirm',
+            description: 'Xác nhận thanh toán theo paymentId (đối soát qua bảng Payment)',
+            auth: true,
+            role: 'Admin (roleId = 1), Librarian (roleId = 2)',
+            params: {
+              paymentId: 'number (required)'
+            },
+            body: {
+              transactionCode: 'string (optional)'
+            },
+            response: {
+              success: 'boolean',
+              message: 'string',
+              loanSlipId: 'number'
+            }
+          },
+
+          // ================== MỚI: DUYỆT PHIẾU ĐẶT TRƯỚC ==================
+          {
+            method: 'POST',
+            path: '/api/loans/admin/reservations/:loanSlipId/approve',
+            description: 'Duyệt phiếu đặt trước (PENDING, borrowForm=RESERVATION) -> WAITING_FOR_PICKUP; gán bản sao & chốt cọc',
+            auth: true,
+            role: 'Admin (roleId = 1), Librarian (roleId = 2)',
+            params: {
+              loanSlipId: 'number (required)'
+            },
+            body: {
+              librarianId: 'number (required) — người duyệt',
+              dueDate: "date (optional, 'YYYY-MM-DD')",
+              pricingMode: "string (optional, 'AUTO_MIN' | 'AUTO_MAX' | 'MANUAL', default='AUTO_MIN')",
+              deposits: 'array (optional; chỉ cần khi MANUAL hoặc ghi đè) — [{ loanDetailId:number, depositAmount:number }]',
+              assignments: 'array (optional; chỉ định bản sao) — [{ loanDetailId:number, documentCopyId:number }]',
+              createPayment: 'boolean (optional, default=false) — nếu true sẽ tạo Payment PENDING = tổng cọc'
+            },
+            response: {
+              success: 'boolean',
+              message: 'string',
+              loanSlipId: 'number',
+              slipStatus: 'string (WAITING_FOR_PICKUP)',
+              totalDeposit: 'number',
+              payment: '{ paymentId:number, amount:number, status:\'PENDING\', transactionCode:string } | null'
+            }
           }
         ]
-
       },
+
       {
         group: 'Loan Slips Reader',
         icon: '📄',
