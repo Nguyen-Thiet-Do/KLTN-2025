@@ -10,6 +10,23 @@ const documentAdminController = require('../controller/documentAdminController')
 const { upload } = require('../middleware/upload');
 
 // ======================= ROUTES DÀNH CHO QUẢN TRỊ VIÊN VÀ THỦ THƯ (roleId = 1, 2) =======================
+// NEW: Lấy 1 bản sao + tiền cọc
+/**
+ * @route   GET /api/documents/admin/copies/:copyId
+ * @desc    Lấy thông tin 1 bản sao kèm tiền cọc; có thể lấy kèm thông tin cơ bản của tài liệu
+ * @param   copyId (path)  - ID bản sao
+ * @query   withDoc=0|1     (mặc định 1)  — trả kèm thông tin document
+ * @query   withAuthors=0|1 (mặc định 1)  — kèm danh sách tác giả (khi withDoc=1)
+ * @query   withSubtype=0|1 (mặc định 1)  — kèm thông tin subtype: book/magazine/newspaper (khi withDoc=1)
+ * @access  Admin (roleId=1), Librarian (roleId=2)
+ */
+router.get(
+  '/copies/:copyId',
+  requireAuth,
+  requireRole([1, 2]),
+  documentAdminController.getCopyWithDepositSingleCtrl
+);
+
 
 /**
  * @route   GET /api/documents/admin/books/basic

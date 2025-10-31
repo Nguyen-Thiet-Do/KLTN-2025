@@ -3,6 +3,9 @@ const router = express.Router();
 const { requireAuth, requireRole } = require("../middleware/auth");
 const readerController = require("../controller/readerController");
 
+// ✅ Lấy độc giả theo ID (Admin + Thủ thư)
+// (Nếu muốn cho Reader xem chính mình thì đổi [1,2] -> [1,2,3] và bật check trong controller)
+router.get("/:id", requireAuth, requireRole([1, 2]), readerController.getReaderById);
 // ✅ Lấy danh sách tất cả độc giả (Admin + Thủ thư)
 router.get("/", requireAuth, requireRole([1, 2]), readerController.getAllReaders);
 

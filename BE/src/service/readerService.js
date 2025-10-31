@@ -125,11 +125,32 @@ const deleteReader = async (readerId) => {
     throw err;
   }
 };
+const getReaderById = async (readerId) => {
+  const r = await Reader.findOne({
+    where: { readerId, deleted: false },
+    include: [{
+      model: Account,
+      attributes: ["email", "phoneNumber", "status"],
+    }],
+  });
+  if (!r) return null;
 
+  return {
+    readerId: r.readerId,
+    fullName: r.fullName,
+    gender: r.gender,
+    dateOfBirth: r.dateOfBirth,
+    address: r.address,
+    email: r.Account?.email || null,
+    phoneNumber: r.Account?.phoneNumber || null,
+    status: r.Account?.status || null,
+  };
+};
 module.exports = {
   getAllReaders,
   getReaderByAccountId,
   createReader,
   updateReader,
   deleteReader,
+  getReaderById,
 };

@@ -8,6 +8,8 @@ const {
   getMagazinesBasic,
   getNewspapersBasic,
   getDocumentCopiesWithDeposit,
+  getDocumentCopyWithDeposit,
+  getDocumentCopyWithDepositAndDoc,
   createBook,
   createMagazine,
   createNewspaper,
@@ -226,6 +228,36 @@ async function addCopiesCtrl(req, res) {
   }
 }
 
+
+async function getCopyWithDepositSingleCtrl(req, res) {
+  try {
+    const copyId = Number(req.params.copyId);
+    if (!Number.isInteger(copyId) || copyId <= 0) {
+      return res.status(400).json({ message: 'documentCopyId không hợp lệ' });
+    }
+
+    // Query flags: ?withDoc=1&withAuthors=1&withSubtype=1
+    const withDoc = req.query.withDoc !== '0';          // mặc định: có document
+    const withAuthors = req.query.withAuthors !== '0';  // mặc định: có authors
+    const withSubtype = req.query.withSubtype !== '0';  // mặc định: có subtype
+
+    if (!withDoc) {
+      // Hành vi cũ: chỉ trả copy + deposit
+      const data = await getDocumentCopyWithDeposit(copyId);
+      if (!data) return res.status(404).json({ message: 'Không tìm thấy bản sao hoặc đã bị xoá' });
+      return res.status(200).json(data);
+    }
+
+    // Hành vi mới: trả cả document cơ bản
+    const data = await getDocumentCopyWithDepositAndDoc(copyId, { withAuthors, withSubtype });
+    if (!data) return res.status(404).json({ message: 'Không tìm thấy bản sao hoặc đã bị xoá' });
+    return res.status(200).json(data);
+  } catch (err) {
+    console.error('getCopyWithDepositSingle error:', err);
+    return res.status(500).json({ message: 'Lỗi máy chủ. Vui lòng thử lại.' });
+  }
+}
+
 module.exports = {
   getBasicList,
   getBooks,
@@ -235,5 +267,6 @@ module.exports = {
   createBookCtrl,
   createMagazineCtrl,
   createNewspaperCtrl,
-  addCopiesCtrl
+  addCopiesCtrl,
+  getCopyWithDepositSingleCtrl
 };

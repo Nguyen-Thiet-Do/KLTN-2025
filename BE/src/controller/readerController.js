@@ -68,11 +68,33 @@ const deleteReader = async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 };
+const getReaderById = async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({ success: false, message: "readerId không hợp lệ" });
+    }
 
+    // (Tuỳ chọn bảo mật) nếu role là Reader (3), chỉ cho xem chính mình
+    // if (req.user.roleId === 3 && req.user.readerId !== id) {
+    //   return res.status(403).json({ success: false, message: "Không có quyền truy cập" });
+    // }
+
+    const reader = await readerService.getReaderById(id);
+    if (!reader) {
+      return res.status(404).json({ success: false, message: "Không tìm thấy độc giả" });
+    }
+    return res.json({ success: true, reader });
+  } catch (err) {
+    console.error("❌ Lỗi khi lấy độc giả theo ID:", err);
+    return res.status(500).json({ success: false, message: err.message });
+  }
+};
 module.exports = {
   getAllReaders,
   getReaderByAccountId,
   createReader,
   updateReader,
   deleteReader,
+  getReaderById,
 };

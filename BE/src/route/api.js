@@ -314,6 +314,17 @@ routeApi.get('/', (req, res) => {
         routes: [
           {
             method: 'GET',
+            path: '/api/documents/admin/copies/:copyId',
+            description: 'Lấy thông tin bản sao kèm thông tin cọc',
+            auth: true,
+            role: 'Admin (roleId = 1), Librarian (roleId = 2)',
+            params: {
+              copyId: 'number (required): ID của bản sao cần lấy thông tin'
+            }
+
+          },
+          {
+            method: 'GET',
             path: '/api/documents/admin/books/basic',
             description: 'Lấy danh sách tài liệu cơ bản loại Sách (Book)',
             auth: true,

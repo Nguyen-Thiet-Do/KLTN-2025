@@ -292,9 +292,9 @@ async function getBasicDocumentsByCategoryFast({
     const authorIds = [...new Set(authorMapsOnly.map(m => m.authorId))];
     const authorRows = authorIds.length
       ? await Author.findAll({
-          where: { authorId: { [Op.in]: authorIds }, deleted: false },
-          attributes: ['authorId', 'fullName']
-        })
+        where: { authorId: { [Op.in]: authorIds }, deleted: false },
+        attributes: ['authorId', 'fullName']
+      })
       : [];
     const authorById = new Map(authorRows.map(a => [a.authorId, a]));
     for (const m of authorMapsOnly) {
@@ -307,7 +307,7 @@ async function getBasicDocumentsByCategoryFast({
   const byId = new Map(docsFull.map(d => [d.documentId, d.toJSON()]));
 
   const bookByDoc = withSubtype ? Object.fromEntries(books.map(x => [x.documentId, { isbn: x.isbn, edition: x.edition, pageCount: x.pageCount }])) : {};
-  const magByDoc  = withSubtype ? Object.fromEntries(magazines.map(x => [x.documentId, { issn: x.issn, volume: x.volume, issue: x.issue, period: x.period, coverDate: x.coverDate }])) : {};
+  const magByDoc = withSubtype ? Object.fromEntries(magazines.map(x => [x.documentId, { issn: x.issn, volume: x.volume, issue: x.issue, period: x.period, coverDate: x.coverDate }])) : {};
   const newsByDoc = withSubtype ? Object.fromEntries(newspapers.map(x => [x.documentId, { issn: x.issn, issueDate: x.issueDate, issueNumber: x.issueNumber }])) : {};
 
   const items = ids.map(id => {
@@ -403,10 +403,10 @@ async function getDocumentCopiesWithDeposit(documentId, { status } = {}) {
   const deposits = mapped.map(x => x.deposit).filter(v => typeof v === 'number' && v >= 0);
   const summary = deposits.length
     ? {
-        minDeposit: Math.min(...deposits),
-        maxDeposit: Math.max(...deposits),
-        avgDeposit: Math.round(deposits.reduce((a, b) => a + b, 0) / deposits.length)
-      }
+      minDeposit: Math.min(...deposits),
+      maxDeposit: Math.max(...deposits),
+      avgDeposit: Math.round(deposits.reduce((a, b) => a + b, 0) / deposits.length)
+    }
     : { minDeposit: null, maxDeposit: null, avgDeposit: null };
 
   return {
@@ -863,6 +863,127 @@ async function addCopies(documentId, copies = []) {
   });
 }
 
+async function getDocumentCopyWithDeposit(documentCopyId) {
+  // Lấy copy + Document + Category để có coverPrice & deposit_rate
+  const copy = await DocumentCopy.findOne({
+    where: { documentCopyId, deleted: false },
+    attributes: ['documentCopyId', 'documentId', 'barCode', 'status', 'conditionNote', 'entryDate'],
+    include: [{
+      model: Document,
+      attributes: ['documentId', 'categoryId', 'coverPrice'],
+      include: [{
+        model: Category,
+        attributes: ['categoryId', 'name', 'deposit_rate'],
+        where: { deleted: false },
+        required: true
+      }],
+      required: true
+    }]
+  });
+
+  if (!copy) return null;
+
+  const coverPrice = Number(copy.Document?.coverPrice) || 0;
+  const depositRate = Number(copy.Document?.Category?.deposit_rate) || 0;
+
+  const quality = toNumberOrNull(copy.conditionNote); // ví dụ “100”
+  const deposit = computeDeposit({ coverPrice, depositRate, qualityPercent: quality });
+
+  return {
+    documentCopyId: copy.documentCopyId,
+    documentId: copy.documentId,
+    barCode: copy.barCode,
+    status: copy.status,
+    conditionNote: copy.conditionNote,
+    entryDate: copy.entryDate,
+    coverPrice,
+    depositRate,
+    category: copy.Document?.Category
+      ? { categoryId: copy.Document.Category.categoryId, name: copy.Document.Category.name }
+      : null,
+    deposit
+  };
+}
+
+async function getDocumentCopyWithDepositAndDoc(documentCopyId, { withAuthors = true, withSubtype = true } = {}) {
+  // 1) Lấy bản sao và documentId
+  const copy = await DocumentCopy.findOne({
+    where: { documentCopyId, deleted: false },
+    attributes: ['documentCopyId', 'documentId', 'barCode', 'status', 'conditionNote', 'entryDate'],
+    include: [{
+      model: Document,
+      attributes: ['documentId', 'categoryId', 'publisherId', 'title', 'language', 'publicationYear', 'coverPrice', 'coverPhoto', 'ebookUrl', 'numberOfCopy'],
+      include: [{
+        model: Category,
+        attributes: ['categoryId', 'name', 'deposit_rate'],
+        where: { deleted: false },
+        required: true
+      }, {
+        model: Publisher,
+        attributes: ['publisherId', 'name'],
+        required: false
+      }],
+      required: true
+    }]
+  });
+  if (!copy) return null;
+
+  // 2) Tính tiền cọc theo công thức hiện có
+  const coverPrice = Number(copy.Document?.coverPrice) || 0;
+  const depositRate = Number(copy.Document?.Category?.deposit_rate) || 0;
+  const quality = toNumberOrNull(copy.conditionNote); // ví dụ "100"
+  const deposit = computeDeposit({ coverPrice, depositRate, qualityPercent: quality });
+
+  // 3) (Tuỳ chọn) lấy thêm authors và subtype để map document cho "đủ bộ"
+  let documentFull = null;
+  if (withAuthors || withSubtype) {
+    documentFull = await Document.findOne({
+      where: { documentId: copy.documentId, deleted: false },
+      attributes: ['documentId', 'categoryId', 'publisherId', 'title', 'language', 'publicationYear', 'coverPrice', 'coverPhoto', 'ebookUrl', 'numberOfCopy'],
+      include: [
+        { model: Category, attributes: ['categoryId', 'name'], required: false },
+        { model: Publisher, attributes: ['publisherId', 'name'], required: false },
+        withAuthors ? {
+          model: Author,
+          as: 'authors',
+          attributes: ['authorId', 'fullName'],
+          through: { model: DocumentAuthorMap, attributes: ['role', 'ord'], where: { deleted: false } },
+          where: { deleted: false },
+          required: false
+        } : null,
+        withSubtype ? { model: Book, as: 'book', attributes: ['isbn', 'edition', 'pageCount'], required: false } : null,
+        withSubtype ? { model: Magazine, as: 'magazine', attributes: ['issn', 'volume', 'issue', 'period', 'coverDate'], required: false } : null,
+        withSubtype ? { model: Newspaper, as: 'newspaper', attributes: ['issn', 'issueDate', 'issueNumber'], required: false } : null
+      ].filter(Boolean)
+    });
+  } else {
+    // Nếu không cần authors/subtype thì tái sử dụng Document đã join ở bước (1)
+    documentFull = copy.Document;
+  }
+
+  // 4) Chuẩn hoá object document theo format list đang trả (dùng mapItem)
+  const documentBasic = mapItem(documentFull);
+
+  // 5) Trả kết quả
+  return {
+    copy: {
+      documentCopyId: copy.documentCopyId,
+      documentId: copy.documentId,
+      barCode: copy.barCode,
+      status: copy.status,
+      conditionNote: copy.conditionNote,
+      entryDate: copy.entryDate,
+      deposit,
+      coverPrice,
+      depositRate,
+      category: copy.Document?.Category
+        ? { categoryId: copy.Document.Category.categoryId, name: copy.Document.Category.name }
+        : null
+    },
+    document: documentBasic
+  };
+}
+
 module.exports = {
   // list & deposit
   getBasicDocumentsByCategoryFast,
@@ -870,7 +991,8 @@ module.exports = {
   getMagazinesBasic,
   getNewspapersBasic,
   getDocumentCopiesWithDeposit,
-
+  getDocumentCopyWithDeposit,
+  getDocumentCopyWithDepositAndDoc,
   // create & copies
   createBook,
   createMagazine,
