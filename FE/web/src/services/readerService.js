@@ -24,3 +24,10 @@ export const updateReader = async (id, data) => {
   const res = await api.put(`/reader/${id}`, data);
   return res.data;
 };
+
+// 🔍 Lấy độc giả theo ID (API trả { success, reader })
+export const getReaderById = async (id) => {
+  const res = await api.get(`/reader/${id}`);
+  // Trả ra đúng object reader để FE dùng trực tiếp
+  return res?.data?.reader ?? null;
+};

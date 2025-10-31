@@ -34,3 +34,37 @@ export async function getDocumentDetail(documentId) {
     const data = res?.data?.data ?? res?.data ?? null;
     return data;
 }
+
+export async function createLoanSlip(payload) {
+    // payload: { readerId, librarianId, loanDate?, dueDate?, items:[{documentCopyId, depositAmount?, note?}], totalAmount? }
+    const res = await api.post("/loans/admin/loans", payload);
+    // BE trả về { loanSlip, items, payment }
+    return res?.data ?? null;
+}
+
+export async function createLoanSlipPaymentQR({ loanSlipId, amount, description }) {
+    const res = await api.post(`/loans/admin/loans/${loanSlipId}/payment/qr`, { amount, description });
+    // BE trả { paymentId, amount, status, transactionCode, qr, qrPayloadExample }
+    return res?.data ?? null;
+}
+
+export async function confirmLoanSlipPaymentBySlip(loanSlipId, transactionCode) {
+    const res = await api.patch(
+        `/loans/admin/loans/${loanSlipId}/payment/confirm`,
+        transactionCode ? { transactionCode } : {}
+    );
+    return res?.data ?? null;
+}
+
+export async function getCopyWithDeposit(copyId, {
+    withDoc = 1,
+    withAuthors = 1,
+    withSubtype = 1,
+} = {}) {
+    const res = await api.get(
+        `/documents/admin/copies/${copyId}`,
+        { params: { withDoc, withAuthors, withSubtype } }
+    );
+    // BE trả { copy: {...}, document: {...} }
+    return res?.data ?? null;
+}

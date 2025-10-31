@@ -34,6 +34,7 @@ import {
   FilterList as FilterIcon,
 } from "@mui/icons-material";
 import { fetchLoanSlips, getDocumentDetail } from "../../services/loanSlips";
+import AddLoanSlipDialog from "../Borrow/AddLoanSlipDialog";
 
 const TABS = [
   { key: "PENDING", label: "Chờ duyệt" },
@@ -340,6 +341,7 @@ function Row({ row, titleCache }) {
 }
 
 export default function Borrow() {
+  const [openCreate, setOpenCreate] = useState(false);
   const [tab, setTab] = useState("PENDING");
   const [page, setPage] = useState(1);
   const [limit] = useState(10);
@@ -499,7 +501,9 @@ export default function Borrow() {
                   <Tab key={t.key} value={t.key} label={t.label} />
                 ))}
               </Tabs>
-
+              <Button variant="contained" onClick={() => setOpenCreate(true)} sx={{ borderRadius: 2, fontWeight: 700 }}>
+                Tạo phiếu mượn
+              </Button>
               <Button
                 variant="outlined"
                 startIcon={<RefreshIcon />}
@@ -679,6 +683,12 @@ export default function Borrow() {
           </Box>
         )}
       </Card>
+      <AddLoanSlipDialog
+        open={openCreate}
+        onClose={() => setOpenCreate(false)}
+        onCreated={() => { setOpenCreate(false); load(); }}
+      />
     </Box>
+
   );
 }
