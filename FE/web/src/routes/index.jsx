@@ -10,8 +10,7 @@ import NotFound from "../pages/NotFound";
 import ReaderHome from "../pages/ReaderHome/ReaderHome";
 import LibraryHome from "../pages/LibraryHome";
 import DocumentDetail from "../pages/ReaderHome/DocumentDetail";
-import PdfJsViewer from "../pages/ReaderHome/PdfJsViewer";
-import FlipBookViewer from "../pages/ReaderHome/FlipBookViewer";
+import EbookReader from "../pages/ReaderHome/EbookReader";
 
 export const router = createBrowserRouter([
   {
@@ -24,8 +23,7 @@ export const router = createBrowserRouter([
 
       // ▼ Trang chi tiết tài liệu
       { path: "reader/documents/:id", element: <DocumentDetail /> },
-      { path: "reader/ebook/:id", element: <PdfJsViewer /> },
-      { path: "reader/flip/:id", element: <FlipBookViewer /> },
+      { path: "/reader/ebook/:id", element: < EbookReader /> },
     ],
   },
 

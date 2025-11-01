@@ -5,6 +5,11 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
   return {
     plugins: [react()],
-    server: { port: Number(env.VITE_PORT) || 5173 },
+    server: {
+      port: Number(env.VITE_PORT) || 5173,
+      hmr: {
+        overlay: false, // ⬅️ tắt hẳn overlay
+      },
+    },
   };
 });

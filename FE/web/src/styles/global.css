@@ -3,3 +3,6 @@ body {
   font-family: Arial, sans-serif;
   background-color: #f0f2f5;
 }
+
+.pdf-flipbook .page { box-shadow: 0 10px 25px rgba(0,0,0,0.12); }
+.pdf-flipbook .page img { -webkit-user-select: none; -moz-user-select: none; user-select: none; -webkit-user-drag: none; -moz-user-select: none; pointer-events: none; }

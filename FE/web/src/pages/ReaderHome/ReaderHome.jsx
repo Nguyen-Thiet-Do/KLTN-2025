@@ -1,13 +1,13 @@
+// src/pages/ReaderHome/ReaderHome.jsx
 import { useEffect, useMemo, useRef, useState } from "react";
 import { documentApi } from "../../services/documentApi";
 import ReaderHeader from "../../components/layouts/ReaderHeader";
 import ReaderSidebar from "../../components/layouts/ReaderSidebar";
 import ReaderCard from "../../components/layouts/ReaderCard";
 import ReaderFooter from "../../components/layouts/ReaderFooter";
-import { Box, Typography, CircularProgress, Alert, Stack, Paper } from "@mui/material";
+import { Box, Typography, Alert, Stack, Paper, Button } from "@mui/material";
 import ButtonLoader from "../../components/Loading/ButtonLoader";
 
-// helper: nhận diện lỗi huỷ request của axios/fetch
 const isAbort = (e) =>
   e?.code === "ERR_CANCELED" ||
   e?.name === "CanceledError" ||
@@ -15,13 +15,19 @@ const isAbort = (e) =>
   e?.message?.includes?.("canceled") ||
   e?.message?.includes?.("aborted");
 
+const PAGE_SIZE = 20;
+
 export default function ReaderHome({ type = "all" }) {
-  const [docs, setDocs] = useState([]);
+  const [items, setItems] = useState([]);
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(true);
+
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState("");
   const [selectedGenre, setSelectedGenre] = useState(null);
 
-  // Điều khiển huỷ request + chống race
+  // abort + chống race
   const abortRef = useRef(null);
   const loadIdRef = useRef(0);
   const newSignal = () => {
@@ -29,6 +35,10 @@ export default function ReaderHome({ type = "all" }) {
     abortRef.current = new AbortController();
     return abortRef.current.signal;
   };
+
+  // sentinel cho lazy load
+  const sentinelRef = useRef(null);
+  const ioRef = useRef(null);
 
   const title = useMemo(() => {
     switch (type) {
@@ -39,43 +49,93 @@ export default function ReaderHome({ type = "all" }) {
     }
   }, [type]);
 
-  const load = async ({ genreId = null } = {}) => {
-    const myLoadId = ++loadIdRef.current;
-    setLoading(true);
+  // reset khi đổi tab/genre
+  useEffect(() => {
+    setItems([]);
+    setPage(1);
+    setHasMore(true);
     setError("");
-    try {
-      const signal = newSignal();
-      const { items } = await documentApi.fetchDocuments({
-        type,
-        page: 1,
-        // limit: để trống -> documentApi tự chọn (12 khi lọc thể loại, 12000 khi không)
-        genreId,
-        match: "any",
-        signal,
-      });
-      // nếu có request mới hơn thì bỏ
-      if (myLoadId !== loadIdRef.current) return;
-      setDocs(items);
-    } catch (e) {
-      if (isAbort(e)) return; // không set lỗi nếu là huỷ
-      const apiMsg = e?.response?.data?.message || e?.message;
-      setError(apiMsg ? `Không tải được danh sách tài liệu: ${apiMsg}` : "Không tải được danh sách tài liệu. Vui lòng thử lại.");
-    } finally {
-      if (myLoadId === loadIdRef.current) setLoading(false);
+    setLoading(true);
+  }, [type, selectedGenre]);
+
+  // load page hiện tại
+  useEffect(() => {
+    let mounted = true;
+    const myId = ++loadIdRef.current;
+
+    const run = async () => {
+      const isFirst = page === 1 && items.length === 0 && loading === true;
+      if (!isFirst) setLoadingMore(true);
+      setError("");
+
+      try {
+        const signal = newSignal();
+        const { items: newItems, pagination } = await documentApi.fetchDocuments({
+          type,
+          page,
+          limit: PAGE_SIZE,
+          genreId: selectedGenre ?? null,
+          match: "any",
+          signal,
+        });
+
+        if (!mounted || myId !== loadIdRef.current) return;
+
+        setItems(prev => page === 1 ? (newItems || []) : [...prev, ...(newItems || [])]);
+
+        // xác định còn nữa không: ưu tiên từ pagination backend
+        let more = true;
+        if (pagination?.totalPages && pagination?.page) {
+          more = pagination.page < pagination.totalPages;
+        } else {
+          more = (newItems?.length || 0) === PAGE_SIZE;
+        }
+        setHasMore(more);
+      } catch (e) {
+        if (isAbort(e)) return;
+        if (mounted && myId === loadIdRef.current) {
+          setError(e?.response?.data?.message || e?.message || "Không tải được danh sách");
+        }
+      } finally {
+        if (mounted && myId === loadIdRef.current) {
+          setLoading(false);
+          setLoadingMore(false);
+        }
+      }
+    };
+
+    run();
+    return () => {
+      mounted = false;
+      abortRef.current?.abort();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, type, selectedGenre]);
+
+  // IntersectionObserver cho lazy load
+  useEffect(() => {
+    if (!sentinelRef.current) return;
+    if (ioRef.current) {
+      ioRef.current.disconnect();
+      ioRef.current = null;
     }
-  };
+    const io = new IntersectionObserver(
+      (entries) => {
+        const e = entries[0];
+        if (e.isIntersecting && hasMore && !loadingMore && !loading) {
+          setPage((p) => p + 1);
+        }
+      },
+      { root: null, rootMargin: "600px 0px", threshold: 0.01 } // nạp sớm 600px trước khi chạm đáy
+    );
+    io.observe(sentinelRef.current);
+    ioRef.current = io;
+    return () => io.disconnect();
+  }, [hasMore, loadingMore, loading]);
 
   const handleGenreSelect = async (genreId) => {
-    setSelectedGenre(genreId || null);
-    await load({ genreId: genreId || null });
+    setSelectedGenre(genreId || null); // trigger reset qua useEffect
   };
-
-  useEffect(() => {
-    setSelectedGenre(null);
-    load({ genreId: null });
-    return () => abortRef.current?.abort();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [type]);
 
   return (
     <>
@@ -101,36 +161,57 @@ export default function ReaderHome({ type = "all" }) {
               </Stack>
             </Paper>
 
-            {/* Chỉ hiển thị lỗi khi không có dữ liệu */}
-            {error && docs.length === 0 && (
+            {/* lỗi chỉ hiện nếu không có cái gì để xem */}
+            {error && items.length === 0 && (
               <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>
             )}
 
-            {loading ? (
+            {loading && items.length === 0 ? (
               <Box sx={{ display: "flex", justifyContent: "center", py: 6 }}>
                 <ButtonLoader />
               </Box>
-            ) : docs.length === 0 ? (
+            ) : items.length === 0 ? (
               <Alert severity="info">Không có tài liệu nào.</Alert>
             ) : (
-              <Box
-                sx={{
-                  display: "grid",
-                  gap: 2,
-                  gridTemplateColumns: {
-                    xs: "1fr",
-                    sm: "repeat(2, minmax(0, 1fr))",
-                    md: "repeat(auto-fill, 260px)", // card rộng 260px
-                  },
-                  justifyContent: { md: "start" },
-                }}
-              >
-                {docs.map((d) => (
-                  <Box key={d.documentId}>
-                    <ReaderCard doc={d} />
+              <>
+                <Box
+                  sx={{
+                    display: "grid",
+                    gap: 2,
+                    gridTemplateColumns: {
+                      xs: "1fr",
+                      sm: "repeat(2, minmax(0, 1fr))",
+                      md: "repeat(auto-fill, 260px)",
+                    },
+                    justifyContent: { md: "start" },
+                  }}
+                >
+                  {items.map((d) => (
+                    <Box key={d.documentId}>
+                      <ReaderCard doc={d} />
+                    </Box>
+                  ))}
+                </Box>
+
+                {/* Loader đáy danh sách (lazy load) */}
+                {loadingMore && (
+                  <Box sx={{ display: "flex", justifyContent: "center", py: 3 }}>
+                    <ButtonLoader />
                   </Box>
-                ))}
-              </Box>
+                )}
+
+                {/* Nút tải thêm (fallback hoặc chủ động) */}
+                {!loadingMore && hasMore && (
+                  <Box sx={{ display: "flex", justifyContent: "center", py: 2 }}>
+                    <Button variant="outlined" onClick={() => setPage(p => p + 1)}>
+                      Tải thêm
+                    </Button>
+                  </Box>
+                )}
+
+                {/* Sentinel để IO bắt sự kiện lăn chuột */}
+                <div ref={sentinelRef} />
+              </>
             )}
           </Box>
         </Box>

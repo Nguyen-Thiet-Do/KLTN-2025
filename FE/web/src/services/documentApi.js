@@ -17,7 +17,8 @@ export const documentApi = {
     match = "any",
     signal,
   } = {}) {
-    const finalLimit = limit ?? (genreId ? 12 : 12000);
+    // ✅ mặc định 20 cho mọi trường hợp
+    const finalLimit = limit ?? 20;
 
     if (genreId) {
       const genreParam = Array.isArray(genreId) ? genreId.join(",") : (genreId ?? "");
@@ -35,11 +36,11 @@ export const documentApi = {
     return normalizeList(res);
   },
 
-  // Raw helpers
-  list: ({ page = 1, limit = 12000, search = "", type = "all", signal } = {}) =>
+  // Raw helpers (cũng set mặc định 20)
+  list: ({ page = 1, limit = 20, search = "", type = "all", signal } = {}) =>
     api.get("/documents/reader", withParams({ page, limit, search, type }, { signal })),
 
-  byGenre: ({ page = 1, limit = 120000, search = "", type = "all", genreIds = [], match = "any", signal } = {}) => {
+  byGenre: ({ page = 1, limit = 20, search = "", type = "all", genreIds = [], match = "any", signal } = {}) => {
     const genreParam = Array.isArray(genreIds) ? genreIds.join(",") : (genreIds ?? "");
     return api.get(
       "/documents/reader/by-genre",
@@ -55,7 +56,7 @@ export const documentApi = {
   similar: (id, { limit = 8, signal } = {}) =>
     api.get(`/documents/reader/${id}/similar`, withParams({ limit }, { signal })),
 
-  // ⚠️ Thêm cache-buster để tránh 304 Not Modified làm rỗng body:
+  // ⚠️ cache-buster tránh 304 rỗng body
   ebookUrl: (id, { signal } = {}) =>
     api.get(`/documents/ebook/${id}`, { params: { t: Date.now() }, signal }),
 
