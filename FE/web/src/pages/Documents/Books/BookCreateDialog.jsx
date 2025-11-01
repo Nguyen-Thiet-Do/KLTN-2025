@@ -1,10 +1,33 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  Dialog, DialogTitle, DialogContent, DialogActions,
-  Box, Grid, Stack, TextField, Button, MenuItem, Chip,
-  IconButton, Tooltip, Divider, InputAdornment, Alert, LinearProgress,
-  Stepper, Step, StepLabel, Card, CardMedia, Typography, Paper,
-  FormControl, InputLabel, Select, Avatar
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Box,
+  Grid,
+  Stack,
+  TextField,
+  Button,
+  MenuItem,
+  Chip,
+  IconButton,
+  Tooltip,
+  Divider,
+  InputAdornment,
+  Alert,
+  LinearProgress,
+  Stepper,
+  Step,
+  StepLabel,
+  Card,
+  CardMedia,
+  Typography,
+  Paper,
+  FormControl,
+  InputLabel,
+  Select,
+  Avatar,
 } from "@mui/material";
 import {
   Add as AddIcon,
@@ -16,31 +39,41 @@ import {
   Person as PersonIcon,
   Category as CategoryIcon,
   LocalLibrary as LocalLibraryIcon,
-  CheckCircle as CheckCircleIcon
+  CheckCircle as CheckCircleIcon,
 } from "@mui/icons-material";
 import Autocomplete from "@mui/material/Autocomplete";
 import { useSnackbar } from "notistack";
 import { createBook } from "../../../services/bookService";
-import { getAllAuthors, getAllGenres, getAllPublishers } from "../../../services/metadataService";
+import {
+  getAllAuthors,
+  getAllGenres,
+  getAllPublishers,
+} from "../../../services/metadataService";
 
 const STATUS_OPTIONS = [
   { value: "AVAILABLE", label: "Sẵn sàng", color: "success" },
   { value: "BORROWED", label: "Đang mượn", color: "warning" },
   { value: "MAINTENANCE", label: "Bảo trì", color: "error" },
-  { value: "LOST", label: "Đã mất", color: "default" }
+  { value: "LOST", label: "Đã mất", color: "default" },
 ];
 
 const STEPS = ["Thông tin cơ bản", "Chi tiết & Tác giả", "Media & Bản sao"];
 
 const init = {
-  title: "", language: "Vietnamese", publicationYear: new Date().getFullYear(), coverPrice: "",
-  description: "", shelfLocation: "",
+  title: "",
+  language: "Vietnamese",
+  publicationYear: new Date().getFullYear(),
+  coverPrice: "",
+  description: "",
+  shelfLocation: "",
   publisherName: "",
   bookData: { isbn: "", edition: "", pageCount: "" },
   authors: [{ fullName: "", role: "main", ord: 1 }],
   genres: [],
-  coverFile: null, ebookFile: null,
-  coverUrl: "", ebookViewUrl: "",
+  coverFile: null,
+  ebookFile: null,
+  coverUrl: "",
+  ebookViewUrl: "",
   initialCopies: [],
   initialCopiesCount: 0,
 };
@@ -50,7 +83,18 @@ const strEqual = (o, v) => String(o || "") === String(v || "");
 const autoSlots = {
   popper: { sx: { minWidth: 360 } },
   paper: { sx: { minWidth: 360 } },
-  listbox: { sx: { "& li": { whiteSpace: "nowrap" } } }
+  listbox: { sx: { "& li": { whiteSpace: "nowrap" } } },
+};
+
+/** Hỗ trợ ebook: PDF/EPUB */
+const SUPPORTED_EBOOK_MIME = ["application/pdf", "application/epub+zip"];
+const SUPPORTED_EBOOK_EXT = [".pdf", ".epub"];
+const isSupportedEbook = (file) => {
+  if (!file) return true;
+  const okMime = SUPPORTED_EBOOK_MIME.includes(file.type);
+  const name = (file.name || "").toLowerCase();
+  const okExt = SUPPORTED_EBOOK_EXT.some((ext) => name.endsWith(ext));
+  return okMime || okExt; // đề phòng browser không set đúng mime
 };
 
 export default function BookCreateDialog({ open, onClose, onCreated }) {
@@ -73,16 +117,28 @@ export default function BookCreateDialog({ open, onClose, onCreated }) {
           getAllAuthors(),
           getAllPublishers(),
         ]);
-        setGenresOpt(g.map(x => (typeof x === "string" ? x : x?.name)).filter(Boolean));
-        setAuthorsOpt(a.map(x => (typeof x === "string" ? x : x?.fullName)).filter(Boolean));
-        setPubsOpt(p.map(x => (typeof x === "string" ? x : x?.name)).filter(Boolean));
+        setGenresOpt(
+          g
+            .map((x) => (typeof x === "string" ? x : x?.name))
+            .filter(Boolean)
+        );
+        setAuthorsOpt(
+          a
+            .map((x) => (typeof x === "string" ? x : x?.fullName))
+            .filter(Boolean)
+        );
+        setPubsOpt(
+          p
+            .map((x) => (typeof x === "string" ? x : x?.name))
+            .filter(Boolean)
+        );
       } catch (e) {
         console.warn("Load metadata lỗi:", e);
       }
     })();
   }, [open]);
 
-  // Reset form when dialog opens/closes
+  // Reset form khi mở/đóng dialog
   useEffect(() => {
     if (open) {
       setForm(init);
@@ -92,34 +148,60 @@ export default function BookCreateDialog({ open, onClose, onCreated }) {
   }, [open]);
 
   const setF = (k, v) => setForm((p) => ({ ...p, [k]: v }));
-  const setBD = (k, v) => setForm((p) => ({ ...p, bookData: { ...p.bookData, [k]: v } }));
+  const setBD = (k, v) =>
+    setForm((p) => ({ ...p, bookData: { ...p.bookData, [k]: v } }));
 
   const addAuthor = () =>
-    setForm((p) => ({ ...p, authors: [...p.authors, { fullName: "", role: "main", ord: p.authors.length + 1 }] }));
+    setForm((p) => ({
+      ...p,
+      authors: [
+        ...p.authors,
+        { fullName: "", role: "main", ord: p.authors.length + 1 },
+      ],
+    }));
 
   const rmAuthor = (i) =>
     setForm((p) => ({ ...p, authors: p.authors.filter((_, idx) => idx !== i) }));
 
   const upAuthor = (i, k, v) =>
-    setForm((p) => ({ ...p, authors: p.authors.map((a, idx) => idx === i ? { ...a, [k]: v } : a) }));
+    setForm((p) => ({
+      ...p,
+      authors: p.authors.map((a, idx) => (idx === i ? { ...a, [k]: v } : a)),
+    }));
 
   const addCopy = () =>
     setForm((p) => ({
       ...p,
       initialCopies: [
         ...(p.initialCopies || []),
-        { barCode: "", status: "AVAILABLE", conditionNote: "100", entryDate: new Date().toISOString().slice(0, 10) }
+        {
+          barCode: "",
+          status: "AVAILABLE",
+          conditionNote: "100",
+          entryDate: new Date().toISOString().slice(0, 10),
+        },
       ],
     }));
 
   const rmCopy = (i) =>
-    setForm((p) => ({ ...p, initialCopies: (p.initialCopies || []).filter((_, idx) => idx !== i) }));
+    setForm((p) => ({
+      ...p,
+      initialCopies: (p.initialCopies || []).filter((_, idx) => idx !== i),
+    }));
 
   const upCopy = (i, k, v) =>
-    setForm((p) => ({ ...p, initialCopies: (p.initialCopies || []).map((c, idx) => idx === i ? { ...c, [k]: v } : c) }));
+    setForm((p) => ({
+      ...p,
+      initialCopies: (p.initialCopies || []).map((c, idx) =>
+        idx === i ? { ...c, [k]: v } : c
+      ),
+    }));
 
   const coverPreview = useMemo(
-    () => form.coverFile ? URL.createObjectURL(form.coverFile) : (form.coverUrl?.trim() || ""),
+    () =>
+      form.coverFile
+        ? URL.createObjectURL(form.coverFile)
+        : form.coverUrl?.trim() || "",
     [form.coverFile, form.coverUrl]
   );
 
@@ -154,14 +236,28 @@ export default function BookCreateDialog({ open, onClose, onCreated }) {
       setSaving(true);
       setError("");
 
+      // Kiểm tra URL ebook nếu không upload file
+      if (!form.ebookFile && form.ebookViewUrl) {
+        const u = form.ebookViewUrl.trim().toLowerCase();
+        if (!(u.endsWith(".pdf") || u.endsWith(".epub"))) {
+          throw new Error("URL ebook phải là PDF hoặc EPUB (.pdf/.epub).");
+        }
+      }
+
       const payload = {
         ...form,
         authors: (form.authors || [])
-          .map(a => ({ fullName: String(a.fullName || "").trim(), role: a.role || "main", ord: Number(a.ord || 1) }))
-          .filter(a => a.fullName),
-        genres: (form.genres || []).map(g => String(g || "").trim()).filter(Boolean),
+          .map((a) => ({
+            fullName: String(a.fullName || "").trim(),
+            role: a.role || "main",
+            ord: Number(a.ord || 1),
+          }))
+          .filter((a) => a.fullName),
+        genres: (form.genres || [])
+          .map((g) => String(g || "").trim())
+          .filter(Boolean),
         initialCopiesCount: 0,
-        initialCopies: (form.initialCopies || []).map(c => ({
+        initialCopies: (form.initialCopies || []).map((c) => ({
           barCode: (c.barCode || "").trim() || undefined,
           status: c.status || "AVAILABLE",
           conditionNote: c.conditionNote ? String(c.conditionNote) : "100",
@@ -175,12 +271,12 @@ export default function BookCreateDialog({ open, onClose, onCreated }) {
       if (!res?.ok) throw new Error(res?.message || "Không tạo được sách.");
 
       onCreated?.(res.data);
-      enqueueSnackbar('Tạo sách thành công!', { variant: 'success' });
+      enqueueSnackbar("Tạo sách thành công!", { variant: "success" });
       handleClose();
       resetAll();
     } catch (e) {
       setError(e.message || "Không tạo được sách.");
-      enqueueSnackbar(e.message || 'Không tạo được sách.', { variant: 'error' });
+      enqueueSnackbar(e.message || "Không tạo được sách.", { variant: "error" });
     } finally {
       setSaving(false);
     }
@@ -195,11 +291,13 @@ export default function BookCreateDialog({ open, onClose, onCreated }) {
     <Dialog open={open} onClose={handleClose} fullWidth maxWidth="lg" scroll="paper">
       <DialogTitle>
         <Stack direction="row" alignItems="center" spacing={2}>
-          <Avatar sx={{ bgcolor: 'primary.main' }}>
+          <Avatar sx={{ bgcolor: "primary.main" }}>
             <LibraryBooksIcon />
           </Avatar>
           <Box>
-            <Typography variant="h6" fontWeight={700}>Thêm Sách Mới</Typography>
+            <Typography variant="h6" fontWeight={700}>
+              Thêm Sách Mới
+            </Typography>
             <Typography variant="body2" color="text.secondary">
               Hoàn thành các bước để thêm sách vào thư viện
             </Typography>
@@ -211,7 +309,7 @@ export default function BookCreateDialog({ open, onClose, onCreated }) {
 
       <DialogContent dividers sx={{ p: 0 }}>
         {/* Stepper */}
-        <Paper elevation={0} sx={{ px: 3, py: 2, borderBottom: 1, borderColor: 'divider' }}>
+        <Paper elevation={0} sx={{ px: 3, py: 2, borderBottom: 1, borderColor: "divider" }}>
           <Stepper activeStep={activeStep} alternativeLabel>
             {STEPS.map((label, index) => (
               <Step key={label}>
@@ -238,7 +336,11 @@ export default function BookCreateDialog({ open, onClose, onCreated }) {
                   {/* Basic Info Card */}
                   <Card elevation={1} sx={{ p: 3, borderRadius: 2 }}>
                     <Stack spacing={2}>
-                      <Typography variant="h6" fontWeight={600} sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <Typography
+                        variant="h6"
+                        fontWeight={600}
+                        sx={{ display: "flex", alignItems: "center", gap: 1 }}
+                      >
                         <LibraryBooksIcon color="primary" />
                         Thông tin cơ bản
                       </Typography>
@@ -247,7 +349,7 @@ export default function BookCreateDialog({ open, onClose, onCreated }) {
                         required
                         label="Tiêu đề sách"
                         value={form.title}
-                        onChange={e => setF("title", e.target.value)}
+                        onChange={(e) => setF("title", e.target.value)}
                         placeholder="Nhập tiêu đề sách..."
                         fullWidth
                       />
@@ -259,7 +361,7 @@ export default function BookCreateDialog({ open, onClose, onCreated }) {
                             <Select
                               value={form.language}
                               label="Ngôn ngữ"
-                              onChange={e => setF("language", e.target.value)}
+                              onChange={(e) => setF("language", e.target.value)}
                             >
                               <MenuItem value="Vietnamese">Tiếng Việt</MenuItem>
                               <MenuItem value="English">Tiếng Anh</MenuItem>
@@ -275,12 +377,12 @@ export default function BookCreateDialog({ open, onClose, onCreated }) {
                             label="Năm xuất bản"
                             type="number"
                             value={form.publicationYear}
-                            onChange={e => setF("publicationYear", e.target.value)}
+                            onChange={(e) => setF("publicationYear", e.target.value)}
                             InputProps={{
                               inputProps: {
                                 min: 1900,
-                                max: new Date().getFullYear() + 1
-                              }
+                                max: new Date().getFullYear() + 1,
+                              },
                             }}
                             fullWidth
                           />
@@ -293,10 +395,12 @@ export default function BookCreateDialog({ open, onClose, onCreated }) {
                             label="Giá bìa"
                             type="number"
                             value={form.coverPrice}
-                            onChange={e => setF("coverPrice", e.target.value)}
+                            onChange={(e) => setF("coverPrice", e.target.value)}
                             InputProps={{
-                              endAdornment: <InputAdornment position="end">VND</InputAdornment>,
-                              inputProps: { min: 0 }
+                              endAdornment: (
+                                <InputAdornment position="end">VND</InputAdornment>
+                              ),
+                              inputProps: { min: 0 },
                             }}
                             fullWidth
                           />
@@ -305,7 +409,7 @@ export default function BookCreateDialog({ open, onClose, onCreated }) {
                           <TextField
                             label="Vị trí kệ"
                             value={form.shelfLocation}
-                            onChange={e => setF("shelfLocation", e.target.value)}
+                            onChange={(e) => setF("shelfLocation", e.target.value)}
                             placeholder="Ví dụ: A1.02"
                             fullWidth
                           />
@@ -317,7 +421,7 @@ export default function BookCreateDialog({ open, onClose, onCreated }) {
                         multiline
                         rows={3}
                         value={form.description}
-                        onChange={e => setF("description", e.target.value)}
+                        onChange={(e) => setF("description", e.target.value)}
                         placeholder="Mô tả ngắn về nội dung sách..."
                         fullWidth
                       />
@@ -327,7 +431,11 @@ export default function BookCreateDialog({ open, onClose, onCreated }) {
                   {/* Publisher Card */}
                   <Card elevation={1} sx={{ p: 3, borderRadius: 2 }}>
                     <Stack spacing={2}>
-                      <Typography variant="h6" fontWeight={600} sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <Typography
+                        variant="h6"
+                        fontWeight={600}
+                        sx={{ display: "flex", alignItems: "center", gap: 1 }}
+                      >
                         <LocalLibraryIcon color="primary" />
                         Thông tin xuất bản
                       </Typography>
@@ -340,7 +448,9 @@ export default function BookCreateDialog({ open, onClose, onCreated }) {
                         openOnFocus
                         slotProps={autoSlots}
                         value={form.publisherName || ""}
-                        onChange={(_, val) => setF("publisherName", typeof val === "string" ? val : "")}
+                        onChange={(_, val) =>
+                          setF("publisherName", typeof val === "string" ? val : "")
+                        }
                         onInputChange={(_, val) => setF("publisherName", val)}
                         renderInput={(params) => (
                           <TextField
@@ -356,7 +466,10 @@ export default function BookCreateDialog({ open, onClose, onCreated }) {
               </Grid>
 
               <Grid item xs={12} md={4}>
-                <Card elevation={1} sx={{ p: 3, borderRadius: 2, position: 'sticky', top: 20 }}>
+                <Card
+                  elevation={1}
+                  sx={{ p: 3, borderRadius: 2, position: "sticky", top: 20 }}
+                >
                   <Stack spacing={2}>
                     <Typography variant="h6" fontWeight={600} color="primary">
                       Hướng dẫn
@@ -395,7 +508,11 @@ export default function BookCreateDialog({ open, onClose, onCreated }) {
                   {/* Book Details Card */}
                   <Card elevation={1} sx={{ p: 3, borderRadius: 2 }}>
                     <Stack spacing={2}>
-                      <Typography variant="h6" fontWeight={600} sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <Typography
+                        variant="h6"
+                        fontWeight={600}
+                        sx={{ display: "flex", alignItems: "center", gap: 1 }}
+                      >
                         <DescriptionIcon color="primary" />
                         Thông tin chi tiết
                       </Typography>
@@ -405,7 +522,7 @@ export default function BookCreateDialog({ open, onClose, onCreated }) {
                           <TextField
                             label="ISBN"
                             value={form.bookData.isbn}
-                            onChange={e => setBD("isbn", e.target.value)}
+                            onChange={(e) => setBD("isbn", e.target.value)}
                             placeholder="978-3-16-148410-0"
                             fullWidth
                           />
@@ -415,7 +532,7 @@ export default function BookCreateDialog({ open, onClose, onCreated }) {
                             label="Lần tái bản"
                             type="number"
                             value={form.bookData.edition}
-                            onChange={e => setBD("edition", e.target.value)}
+                            onChange={(e) => setBD("edition", e.target.value)}
                             InputProps={{ inputProps: { min: 1 } }}
                             fullWidth
                           />
@@ -425,7 +542,7 @@ export default function BookCreateDialog({ open, onClose, onCreated }) {
                             label="Số trang"
                             type="number"
                             value={form.bookData.pageCount}
-                            onChange={e => setBD("pageCount", e.target.value)}
+                            onChange={(e) => setBD("pageCount", e.target.value)}
                             InputProps={{ inputProps: { min: 1 } }}
                             fullWidth
                           />
@@ -437,7 +554,11 @@ export default function BookCreateDialog({ open, onClose, onCreated }) {
                   {/* Authors Card */}
                   <Card elevation={1} sx={{ p: 3, borderRadius: 2 }}>
                     <Stack spacing={2}>
-                      <Typography variant="h6" fontWeight={600} sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <Typography
+                        variant="h6"
+                        fontWeight={600}
+                        sx={{ display: "flex", alignItems: "center", gap: 1 }}
+                      >
                         <PersonIcon color="primary" />
                         Tác giả & Đóng góp
                       </Typography>
@@ -455,7 +576,9 @@ export default function BookCreateDialog({ open, onClose, onCreated }) {
                                   openOnFocus
                                   slotProps={autoSlots}
                                   value={a.fullName || ""}
-                                  onChange={(_, val) => upAuthor(i, "fullName", typeof val === "string" ? val : "")}
+                                  onChange={(_, val) =>
+                                    upAuthor(i, "fullName", typeof val === "string" ? val : "")
+                                  }
                                   onInputChange={(_, val) => upAuthor(i, "fullName", val)}
                                   renderInput={(params) => (
                                     <TextField
@@ -488,7 +611,9 @@ export default function BookCreateDialog({ open, onClose, onCreated }) {
                                   label="Thứ tự"
                                   type="number"
                                   value={a.ord}
-                                  onChange={(e) => upAuthor(i, "ord", Number(e.target.value || 1))}
+                                  onChange={(e) =>
+                                    upAuthor(i, "ord", Number(e.target.value || 1))
+                                  }
                                   InputProps={{ inputProps: { min: 1 } }}
                                   fullWidth
                                 />
@@ -527,7 +652,11 @@ export default function BookCreateDialog({ open, onClose, onCreated }) {
                   {/* Genres Card */}
                   <Card elevation={1} sx={{ p: 3, borderRadius: 2 }}>
                     <Stack spacing={2}>
-                      <Typography variant="h6" fontWeight={600} sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <Typography
+                        variant="h6"
+                        fontWeight={600}
+                        sx={{ display: "flex", alignItems: "center", gap: 1 }}
+                      >
                         <CategoryIcon color="primary" />
                         Thể loại
                       </Typography>
@@ -541,7 +670,14 @@ export default function BookCreateDialog({ open, onClose, onCreated }) {
                         openOnFocus
                         slotProps={autoSlots}
                         value={form.genres}
-                        onChange={(_, newVal) => setForm((p) => ({ ...p, genres: (newVal || []).map(x => String(x || "")).filter(Boolean) }))}
+                        onChange={(_, newVal) =>
+                          setForm((p) => ({
+                            ...p,
+                            genres: (newVal || [])
+                              .map((x) => String(x || ""))
+                              .filter(Boolean),
+                          }))
+                        }
                         renderInput={(params) => (
                           <TextField
                             {...params}
@@ -566,7 +702,10 @@ export default function BookCreateDialog({ open, onClose, onCreated }) {
               </Grid>
 
               <Grid item xs={12} md={4}>
-                <Card elevation={1} sx={{ p: 3, borderRadius: 2, position: 'sticky', top: 20 }}>
+                <Card
+                  elevation={1}
+                  sx={{ p: 3, borderRadius: 2, position: "sticky", top: 20 }}
+                >
                   <Stack spacing={2}>
                     <Typography variant="h6" fontWeight={600} color="primary">
                       Thông tin bổ sung
@@ -602,7 +741,11 @@ export default function BookCreateDialog({ open, onClose, onCreated }) {
                   {/* Media Card */}
                   <Card elevation={1} sx={{ p: 3, borderRadius: 2 }}>
                     <Stack spacing={3}>
-                      <Typography variant="h6" fontWeight={600} sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <Typography
+                        variant="h6"
+                        fontWeight={600}
+                        sx={{ display: "flex", alignItems: "center", gap: 1 }}
+                      >
                         <ImageIcon color="primary" />
                         Hình ảnh & Tài liệu số
                       </Typography>
@@ -616,7 +759,7 @@ export default function BookCreateDialog({ open, onClose, onCreated }) {
                             </Typography>
 
                             {coverPreview ? (
-                              <Box sx={{ position: 'relative' }}>
+                              <Box sx={{ position: "relative" }}>
                                 <CardMedia
                                   component="img"
                                   image={coverPreview}
@@ -624,19 +767,21 @@ export default function BookCreateDialog({ open, onClose, onCreated }) {
                                   sx={{
                                     height: 200,
                                     borderRadius: 2,
-                                    objectFit: 'cover'
+                                    objectFit: "cover",
                                   }}
                                 />
                                 <IconButton
                                   size="small"
-                                  onClick={() => setForm(p => ({ ...p, coverFile: null, coverUrl: '' }))}
+                                  onClick={() =>
+                                    setForm((p) => ({ ...p, coverFile: null, coverUrl: "" }))
+                                  }
                                   sx={{
-                                    position: 'absolute',
+                                    position: "absolute",
                                     top: 8,
                                     right: 8,
-                                    backgroundColor: 'rgba(0,0,0,0.5)',
-                                    color: 'white',
-                                    '&:hover': { backgroundColor: 'rgba(0,0,0,0.7)' }
+                                    backgroundColor: "rgba(0,0,0,0.5)",
+                                    color: "white",
+                                    "&:hover": { backgroundColor: "rgba(0,0,0,0.7)" },
                                   }}
                                 >
                                   <DeleteIcon fontSize="small" />
@@ -647,15 +792,15 @@ export default function BookCreateDialog({ open, onClose, onCreated }) {
                                 variant="outlined"
                                 sx={{
                                   height: 200,
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  justifyContent: 'center',
+                                  display: "flex",
+                                  alignItems: "center",
+                                  justifyContent: "center",
                                   borderRadius: 2,
-                                  backgroundColor: 'grey.50'
+                                  backgroundColor: "grey.50",
                                 }}
                               >
                                 <Stack alignItems="center" spacing={1}>
-                                  <ImageIcon sx={{ fontSize: 48, color: 'grey.400' }} />
+                                  <ImageIcon sx={{ fontSize: 48, color: "grey.400" }} />
                                   <Typography color="grey.500" variant="body2">
                                     Chưa có ảnh bìa
                                   </Typography>
@@ -675,7 +820,12 @@ export default function BookCreateDialog({ open, onClose, onCreated }) {
                                   type="file"
                                   accept="image/*"
                                   hidden
-                                  onChange={(e) => setForm((p) => ({ ...p, coverFile: e.target.files?.[0] || null }))}
+                                  onChange={(e) =>
+                                    setForm((p) => ({
+                                      ...p,
+                                      coverFile: e.target.files?.[0] || null,
+                                    }))
+                                  }
                                 />
                               </Button>
 
@@ -683,7 +833,9 @@ export default function BookCreateDialog({ open, onClose, onCreated }) {
                                 size="small"
                                 label="Hoặc URL ảnh"
                                 value={form.coverUrl}
-                                onChange={(e) => setForm((p) => ({ ...p, coverUrl: e.target.value }))}
+                                onChange={(e) =>
+                                  setForm((p) => ({ ...p, coverUrl: e.target.value }))
+                                }
                                 placeholder="https://example.com/cover.jpg"
                                 sx={{ flexGrow: 1, minWidth: 200 }}
                               />
@@ -695,24 +847,26 @@ export default function BookCreateDialog({ open, onClose, onCreated }) {
                         <Grid item xs={12} md={6}>
                           <Stack spacing={2}>
                             <Typography variant="subtitle1" fontWeight={600}>
-                              Tài liệu số (PDF)
+                              Tài liệu số (PDF/EPUB)
                             </Typography>
 
                             <Card
                               variant="outlined"
                               sx={{
                                 height: 200,
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "center",
                                 borderRadius: 2,
-                                backgroundColor: 'grey.50'
+                                backgroundColor: "grey.50",
                               }}
                             >
                               <Stack alignItems="center" spacing={1}>
-                                <DescriptionIcon sx={{ fontSize: 48, color: 'grey.400' }} />
+                                <DescriptionIcon sx={{ fontSize: 48, color: "grey.400" }} />
                                 <Typography color="grey.500" variant="body2" textAlign="center">
-                                  {form.ebookFile ? form.ebookFile.name : 'Chưa có file PDF'}
+                                  {form.ebookFile
+                                    ? form.ebookFile.name
+                                    : "Chưa có file PDF/EPUB"}
                                 </Typography>
                               </Stack>
                             </Card>
@@ -724,21 +878,33 @@ export default function BookCreateDialog({ open, onClose, onCreated }) {
                                 variant="outlined"
                                 size="small"
                               >
-                                Tải PDF lên
+                                Tải PDF/EPUB lên
                                 <input
                                   type="file"
-                                  accept="application/pdf"
+                                  accept="application/pdf,application/epub+zip,.pdf,.epub"
                                   hidden
-                                  onChange={(e) => setForm((p) => ({ ...p, ebookFile: e.target.files?.[0] || null }))}
+                                  onChange={(e) => {
+                                    const f = e.target.files?.[0] || null;
+                                    if (f && !isSupportedEbook(f)) {
+                                      enqueueSnackbar("Chỉ hỗ trợ PDF hoặc EPUB.", {
+                                        variant: "warning",
+                                      });
+                                      e.target.value = "";
+                                      return;
+                                    }
+                                    setForm((p) => ({ ...p, ebookFile: f }));
+                                  }}
                                 />
                               </Button>
 
                               <TextField
                                 size="small"
-                                label="Hoặc URL PDF"
+                                label="Hoặc URL PDF/EPUB"
                                 value={form.ebookViewUrl}
-                                onChange={(e) => setForm((p) => ({ ...p, ebookViewUrl: e.target.value }))}
-                                placeholder="https://example.com/ebook.pdf"
+                                onChange={(e) =>
+                                  setForm((p) => ({ ...p, ebookViewUrl: e.target.value }))
+                                }
+                                placeholder="https://example.com/ebook.pdf hoặc https://example.com/ebook.epub"
                                 sx={{ flexGrow: 1, minWidth: 200 }}
                               />
                             </Stack>
@@ -757,7 +923,11 @@ export default function BookCreateDialog({ open, onClose, onCreated }) {
                   {/* Copies Card */}
                   <Card elevation={1} sx={{ p: 3, borderRadius: 2 }}>
                     <Stack spacing={2}>
-                      <Typography variant="h6" fontWeight={600} sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <Typography
+                        variant="h6"
+                        fontWeight={600}
+                        sx={{ display: "flex", alignItems: "center", gap: 1 }}
+                      >
                         <LibraryBooksIcon color="primary" />
                         Quản lý bản sao
                       </Typography>
@@ -790,7 +960,7 @@ export default function BookCreateDialog({ open, onClose, onCreated }) {
                                     label="Trạng thái"
                                     onChange={(e) => upCopy(i, "status", e.target.value)}
                                   >
-                                    {STATUS_OPTIONS.map(s => (
+                                    {STATUS_OPTIONS.map((s) => (
                                       <MenuItem key={s.value} value={s.value}>
                                         <Chip
                                           label={s.label}
@@ -828,11 +998,7 @@ export default function BookCreateDialog({ open, onClose, onCreated }) {
 
                               <Grid item xs={12} sm={2}>
                                 <Tooltip title="Xoá bản sao">
-                                  <IconButton
-                                    size="small"
-                                    onClick={() => rmCopy(i)}
-                                    color="error"
-                                  >
+                                  <IconButton size="small" onClick={() => rmCopy(i)} color="error">
                                     <DeleteIcon fontSize="small" />
                                   </IconButton>
                                 </Tooltip>
@@ -845,7 +1011,7 @@ export default function BookCreateDialog({ open, onClose, onCreated }) {
                           startIcon={<AddIcon />}
                           onClick={addCopy}
                           variant="outlined"
-                          sx={{ alignSelf: 'flex-start' }}
+                          sx={{ alignSelf: "flex-start" }}
                         >
                           Thêm bản sao
                         </Button>
@@ -856,7 +1022,10 @@ export default function BookCreateDialog({ open, onClose, onCreated }) {
               </Grid>
 
               <Grid item xs={12} md={4}>
-                <Card elevation={1} sx={{ p: 3, borderRadius: 2, position: 'sticky', top: 20 }}>
+                <Card
+                  elevation={1}
+                  sx={{ p: 3, borderRadius: 2, position: "sticky", top: 20 }}
+                >
                   <Stack spacing={2}>
                     <Typography variant="h6" fontWeight={600} color="primary">
                       Hoàn tất
@@ -873,10 +1042,7 @@ export default function BookCreateDialog({ open, onClose, onCreated }) {
 
                     <Divider />
 
-                    <Alert
-                      severity={canSubmit ? "success" : "warning"}
-                      icon={false}
-                    >
+                    <Alert severity={canSubmit ? "success" : "warning"} icon={false}>
                       <Typography variant="body2" fontWeight={600}>
                         {canSubmit
                           ? "Tất cả thông tin đã sẵn sàng!"
@@ -915,7 +1081,7 @@ export default function BookCreateDialog({ open, onClose, onCreated }) {
             disabled={!canSubmit || saving}
             startIcon={saving ? null : <CheckCircleIcon />}
           >
-            {saving ? 'Đang lưu...' : 'Hoàn tất'}
+            {saving ? "Đang lưu..." : "Hoàn tất"}
           </Button>
         )}
       </DialogActions>
