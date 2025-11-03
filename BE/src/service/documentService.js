@@ -9,7 +9,7 @@ const {
   // thêm để tính "giữ chỗ mềm"
   LoanSlip, LoanDetail
 } = require('../model');
-const { Op, col, fn, where } = require('sequelize');
+const { Op, col, fn, where, literal  } = require('sequelize');
 
 /* =============================================================================
  *                              CONSTANTS & LABELS
@@ -303,7 +303,7 @@ async function getPendingHoldsByDocumentIds(documentIds = [], tx = undefined) {
       where: {
         deleted: false,
         // CASE-INSENSITIVE: UPPER(status) = 'PENDING'
-        [Op.and]: [ where(fn('upper', col('LoanSlip.status')), 'PENDING') ]
+        [Op.and]: [where(fn('upper', col('LoanSlip.status')), 'PENDING')]
       },
       attributes: []
     }],
@@ -1106,6 +1106,154 @@ const getGenre = async () => {
 };
 
 /* =============================================================================
+ *                      LATEST & POPULAR — ĐA LOẠI
+ * ========================================================================== */
+/**
+ * Lấy tài liệu mới nhất theo loại (hoặc all).
+ * Mặc định sắp xếp theo documentId DESC (an toàn cho mọi loại).
+ */
+async function getLatestDocuments({ page = 1, limit = 10, documentType = 'all' } = {}) {
+  const offset = (page - 1) * limit;
+
+  const whereDoc = { deleted: false };
+  const whereCat = buildCategoryWhere(documentType);
+
+  const totalItems = await Document.count({
+    where: whereDoc,
+    include: [{ model: Category, attributes: [], where: whereCat, required: true }],
+    distinct: true, col: 'documentId'
+  });
+
+  const rows = await Document.findAll({
+    where: whereDoc,
+    attributes: ['documentId', 'title', 'coverPhoto', 'coverPrice', 'categoryId', 'shelfLocation'],
+    include: listIncludeForDocuments(whereCat),
+    order: [['documentId', 'DESC']],
+    limit,
+    offset,
+    distinct: true,
+    subQuery: false
+  });
+
+  const ids = rows.map(r => r.documentId);
+  const pendingMap = await getPendingHoldsByDocumentIds(ids);
+
+  const items = rows.map(d => {
+    const o = d.toJSON();
+    const copies = Array.isArray(o.copies) ? o.copies : [];
+    const available = countAvailableCopiesCaseInsensitive(copies);
+    const holds = pendingMap.get(o.documentId) || 0;
+    return mapListItemWithEffective(d, available - holds);
+  });
+
+  const totalPages = Math.ceil(totalItems / limit);
+  return {
+    items, currentPage: page, totalPages, totalItems, limit,
+    hasNextPage: page < totalPages, hasPrevPage: page > 1
+  };
+}
+
+/**
+ * Lấy tài liệu ưa chuộng nhất theo loại (hoặc all) — tổng số lượt mượn của các bản sao.
+ */
+async function getPopularDocuments({ page = 1, limit = 10, documentType = 'all' } = {}) {
+  const offset = (page - 1) * limit;
+
+  const whereDoc = { deleted: false };
+  const whereCat = buildCategoryWhere(documentType);
+
+  // Tổng số items cho phân trang
+  const totalItems = await Document.count({
+    where: whereDoc,
+    include: [{ model: Category, attributes: [], where: whereCat, required: true }],
+    distinct: true, col: 'documentId'
+  });
+
+  // Xếp hạng theo tổng numberBorrow (LEFT JOIN để tài liệu chưa có copy vẫn tính 0)
+  const rankRows = await Document.findAll({
+    where: whereDoc,
+    attributes: [
+      'documentId',
+      [fn('COALESCE', fn('SUM', col('copies.numberBorrow')), 0), 'totalBorrow']
+    ],
+    include: [
+      {
+        model: Category,
+        attributes: [],
+        where: whereCat,
+        required: true
+      },
+      {
+        model: DocumentCopy,
+        as: 'copies',
+        attributes: [],
+        where: { deleted: false },
+        required: false
+      }
+    ],
+    group: ['Document.documentId'],
+    order: [[literal('totalBorrow'), 'DESC'], ['documentId', 'DESC']],
+    limit,
+    offset,
+    subQuery: false
+  });
+
+  if (!rankRows.length) {
+    return {
+      items: [],
+      currentPage: page,
+      totalPages: Math.ceil(totalItems / limit),
+      totalItems,
+      limit,
+      hasNextPage: false,
+      hasPrevPage: page > 1
+    };
+  }
+
+  const topIds = rankRows.map(r => r.documentId);
+
+  // Lấy lại detail theo include chuẩn (có copies tách riêng để tính tồn kho/effective)
+  const detailRows = await Document.findAll({
+    where: { deleted: false, documentId: { [Op.in]: topIds } },
+    include: listIncludeForDocuments(whereCat),
+    attributes: ['documentId', 'title', 'coverPhoto', 'coverPrice', 'categoryId', 'shelfLocation'],
+    order: [['documentId', 'DESC']],
+    distinct: true,
+    subQuery: false
+  });
+
+  const byId = new Map(detailRows.map(r => [r.documentId, r]));
+  const pendingMap = await getPendingHoldsByDocumentIds(topIds);
+
+  const items = rankRows.map(r => {
+    const row = byId.get(r.documentId);
+    if (!row) return null;
+
+    const o = row.toJSON();
+    const copies = Array.isArray(o.copies) ? o.copies : [];
+    const available = countAvailableCopiesCaseInsensitive(copies);
+    const holds = pendingMap.get(o.documentId) || 0;
+    const effective = available - holds;
+
+    return {
+      ...mapListItemWithEffective(row, effective),
+      totalBorrow: Number(r.get('totalBorrow') || 0)
+    };
+  }).filter(Boolean);
+
+  const totalPages = Math.ceil(totalItems / limit);
+  return {
+    items,
+    currentPage: page,
+    totalPages,
+    totalItems,
+    limit,
+    hasNextPage: page < totalPages,
+    hasPrevPage: page > 1
+  };
+}
+
+/* =============================================================================
  *                                  EXPORTS
  * ========================================================================== */
 module.exports = {
@@ -1124,5 +1272,8 @@ module.exports = {
   searchDocumentsUniversal,
 
   // Recommender API
-  getSimilarDocumentsForReader
+  getSimilarDocumentsForReader,
+
+  getLatestDocuments,
+  getPopularDocuments,
 };

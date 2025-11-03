@@ -7,6 +7,8 @@ const documentController = require('../controller/documentController');
 
 // ======================= ROUTES DÀNH CHO ĐỘC GIẢ (roleId = 3) =======================
 
+router.get('/reader/latest', documentController.getLatestDocumentsReader);
+router.get('/reader/popular', documentController.getPopularDocumentsReader);
 /**
  * @route   GET /api/books/reader
  * @desc    Lấy tài liệu theo loại (Book, Newspaper, Magazine) kèm cọc min/max, số bản sao sẵn sàng

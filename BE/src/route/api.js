@@ -240,6 +240,38 @@ routeApi.get('/', (req, res) => {
               // wPublisher: 'number (optional, default=1): trọng số publisher',
               // wCategory: 'number (optional, default=1): trọng số category'
             }
+          },
+          {
+            method: 'GET',
+            path: '/api/documents/reader/latest',
+            description: 'Lấy danh sách tài liệu mới nhất theo loại (book | magazine | newspaper | all). Mặc định lấy tất cả.',
+            auth: false,
+            query: {
+              page: 'number (optional, default=1): trang hiện tại',
+              limit: 'number (optional, default=10): số lượng bản ghi trên mỗi trang',
+              type: "string (optional, default='all'): 'book' | 'magazine' | 'newspaper' | 'all'"
+            },
+            examples: [
+              "GET /api/documents/reader/latest",
+              "GET /api/documents/reader/latest?type=book&page=1&limit=12",
+              "GET /api/documents/reader/latest?type=magazine"
+            ]
+          },
+          {
+            method: 'GET',
+            path: '/api/documents/reader/popular',
+            description: 'Lấy danh sách tài liệu được ưa chuộng nhất (xếp theo tổng số lượt mượn của các bản sao) theo loại (book | magazine | newspaper | all). Mặc định lấy tất cả.',
+            auth: false,
+            query: {
+              page: 'number (optional, default=1): trang hiện tại',
+              limit: 'number (optional, default=10): số lượng bản ghi trên mỗi trang',
+              type: "string (optional, default='all'): 'book' | 'magazine' | 'newspaper' | 'all'"
+            },
+            examples: [
+              "GET /api/documents/reader/popular",
+              "GET /api/documents/reader/popular?type=book&limit=5",
+              "GET /api/documents/reader/popular?type=newspaper&page=2"
+            ]
           }
 
         ]

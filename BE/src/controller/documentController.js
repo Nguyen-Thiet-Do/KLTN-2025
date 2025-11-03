@@ -246,7 +246,63 @@ const getSimilarDocumentsReader = async (req, res) => {
     });
   }
 };
+const getLatestDocumentsReader = async (req, res) => {
+  try {
+    const page = Math.max(parseInt(req.query.page) || 1, 1);
+    const limit = Math.max(parseInt(req.query.limit) || 10, 1);
+    const type = (req.query.type || 'all').toLowerCase(); // book|magazine|newspaper|all
+    const validTypes = ['book', 'magazine', 'newspaper', 'all'];
+    const documentType = validTypes.includes(type) ? type : 'all';
 
+    const result = await documentService.getLatestDocuments({ page, limit, documentType });
+    return res.status(200).json({
+      success: true,
+      message: 'Lấy danh sách tài liệu mới nhất thành công',
+      data: result.items,
+      pagination: {
+        currentPage: result.currentPage,
+        totalPages: result.totalPages,
+        totalItems: result.totalItems,
+        limit: result.limit,
+        hasNextPage: result.hasNextPage,
+        hasPrevPage: result.hasPrevPage
+      },
+      filter: { type: documentType }
+    });
+  } catch (error) {
+    console.error('Error in getLatestDocumentsReader:', error);
+    return res.status(500).json({ success: false, message: 'Lỗi khi lấy tài liệu mới nhất', error: error.message });
+  }
+};
+
+const getPopularDocumentsReader = async (req, res) => {
+  try {
+    const page = Math.max(parseInt(req.query.page) || 1, 1);
+    const limit = Math.max(parseInt(req.query.limit) || 10, 1);
+    const type = (req.query.type || 'all').toLowerCase();
+    const validTypes = ['book', 'magazine', 'newspaper', 'all'];
+    const documentType = validTypes.includes(type) ? type : 'all';
+
+    const result = await documentService.getPopularDocuments({ page, limit, documentType });
+    return res.status(200).json({
+      success: true,
+      message: 'Lấy danh sách tài liệu ưa chuộng thành công',
+      data: result.items,
+      pagination: {
+        currentPage: result.currentPage,
+        totalPages: result.totalPages,
+        totalItems: result.totalItems,
+        limit: result.limit,
+        hasNextPage: result.hasNextPage,
+        hasPrevPage: result.hasPrevPage
+      },
+      filter: { type: documentType }
+    });
+  } catch (error) {
+    console.error('Error in getPopularDocumentsReader:', error);
+    return res.status(500).json({ success: false, message: 'Lỗi khi lấy tài liệu ưa chuộng', error: error.message });
+  }
+};
 
 module.exports = {
   getAllBooksReader,
@@ -255,5 +311,7 @@ module.exports = {
   getAllGenres,
   getDocumentsByGenreReader,
   searchDocumentsUniversalReader,
-  getSimilarDocumentsReader
+  getSimilarDocumentsReader,
+  getLatestDocumentsReader,
+  getPopularDocumentsReader,
 };
