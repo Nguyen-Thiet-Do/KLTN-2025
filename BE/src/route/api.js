@@ -608,6 +608,22 @@ routeApi.get('/', (req, res) => {
             ]
           },
           {
+            method: 'PUT',
+            path: '/api/documents/admin/copies/:copyId',
+            description: 'Cập nhật thông tin bản sao theo ID',
+            auth: true,
+            role: 'Admin (roleId = 1), Librarian (roleId = 2)',
+            params: {
+              copyId: 'number (required): ID bản sao cần cập nhật'
+            },
+            body: {
+              barCode: 'string (optional)',
+              status: 'string (optional)',
+              conditionNote: 'string (optional)',
+              entryDate: 'date (optional, dạng YYYY-MM-DD)'
+            }
+          },
+          {
             method: 'DELETE',
             path: '/api/documents/admin/:id',
             description: 'Xoá mềm tài liệu theo ID (soft delete)',

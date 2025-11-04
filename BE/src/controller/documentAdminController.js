@@ -18,7 +18,8 @@ const {
   updateMagazine,
   updateNewspaper,
   softDeleteDocument,
-  softDeleteCopy
+  softDeleteCopy,
+  updateCopy
 } = require('../service/documentAdminService');
 
 function parseJSONSafe(s, fallback) {
@@ -404,6 +405,24 @@ async function deleteCopyCtrl(req, res) {
   }
 }
 
+// PUT /documents/copies/:copyId
+// Body: { barCode?, status?, conditionNote?, entryDate? }
+async function updateCopyCtrl(req, res) {
+  try {
+    const copyId = Number(req.params.copyId);
+    if (!Number.isInteger(copyId) || copyId <= 0) {
+      return res.status(400).json({ ok: false, message: 'documentCopyId không hợp lệ' });
+    }
+
+    const { barCode, status, conditionNote, entryDate } = req.body || {};
+    const result = await updateCopy(copyId, { barCode, status, conditionNote, entryDate });
+
+    return res.status(200).json(result);
+  } catch (e) {
+    return res.status(e.status || 500).json({ ok: false, message: e.message });
+  }
+}
+
 module.exports = {
   getBasicList,
   getBooks,
@@ -418,6 +437,7 @@ module.exports = {
   updateBookCtrl,
   updateMagazineCtrl,
   updateNewspaperCtrl,
+  updateCopyCtrl,
   deleteDocumentCtrl,
   deleteCopyCtrl
 };

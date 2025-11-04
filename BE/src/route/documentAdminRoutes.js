@@ -198,6 +198,20 @@ router.put(
   upload.fields([{ name: 'cover', maxCount: 1 }, { name: 'ebook', maxCount: 1 }]),
   documentAdminController.updateNewspaperCtrl
 );
+
+/**
+ * @route   PUT /api/documents/admin/copies/:copyId
+ * @desc    Cập nhật 1 bản sao (barCode/status/conditionNote/entryDate)
+ * @body    { barCode?, status?, conditionNote?, entryDate? }
+ * @access  Admin (1), Librarian (2)
+ */
+router.put(
+  '/copies/:copyId',
+  requireAuth,
+  requireRole([1, 2]),
+  documentAdminController.updateCopyCtrl
+);
+
 /**
  * @route   DELETE /api/documents/admin/:id
  * @desc    Xóa mềm 1 tài liệu. Tuỳ chọn cascade:

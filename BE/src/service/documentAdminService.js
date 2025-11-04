@@ -1535,6 +1535,81 @@ async function softDeleteCopy(documentCopyId) {
   });
 }
 
+/**
+ * Cập nhật 1 bản sao (DocumentCopy)
+ * - Hỗ trợ thay đổi: barCode, status, conditionNote, entryDate
+ * - Chặn trùng barCode với bản ghi khác
+ * - Chuẩn hoá barCode (viết hoa) và status (trim)
+ * - Trả về copy kèm thông tin cọc như API get one copy
+ */
+async function updateCopy(documentCopyId, {
+  barCode,
+  status,
+  conditionNote,
+  entryDate
+} = {}) {
+  if (!Number.isInteger(+documentCopyId) || +documentCopyId <= 0) {
+    const err = new Error('documentCopyId không hợp lệ'); err.status = 400; throw err;
+  }
+
+  return await sequelize.transaction(async (t) => {
+    const copy = await DocumentCopy.findOne({
+      where: { documentCopyId, deleted: false },
+      transaction: t, lock: t.LOCK.UPDATE
+    });
+    if (!copy) { const e = new Error('DocumentCopy không tồn tại hoặc đã bị xoá'); e.status = 404; throw e; }
+
+    const patch = {};
+
+    // barCode: unique trong toàn hệ thống
+    if (barCode !== undefined) {
+      const nextCode = barCode ? String(barCode).trim().toUpperCase() : null;
+      if (!nextCode) {
+        const e = new Error('barCode không được rỗng'); e.status = 400; throw e;
+      }
+      // check trùng với bản ghi khác
+      const dup = await DocumentCopy.findOne({
+        where: {
+          barCode: nextCode,
+          documentCopyId: { [Op.ne]: copy.documentCopyId }
+        },
+        transaction: t
+      });
+      if (dup) {
+        const e = new Error(`Barcode đã tồn tại: ${nextCode}`); e.status = 409; throw e;
+      }
+      patch.barCode = nextCode;
+    }
+
+    if (status !== undefined) {
+      patch.status = String(status || '').trim();
+      if (!patch.status) {
+        const e = new Error('status không được rỗng'); e.status = 400; throw e;
+      }
+    }
+
+    if (conditionNote !== undefined) {
+      patch.conditionNote = conditionNote != null ? String(conditionNote).trim() : null;
+    }
+
+    if (entryDate !== undefined) {
+      patch.entryDate = entryDate ? new Date(entryDate) : new Date(); // nếu gửi rỗng thì lấy now
+      if (isNaN(patch.entryDate.getTime())) {
+        const e = new Error('entryDate không hợp lệ'); e.status = 400; throw e;
+      }
+    }
+
+    if (Object.keys(patch).length) {
+      await copy.update(patch, { transaction: t });
+    }
+
+    // Trả về như “get one copy with deposit”
+    const data = await getDocumentCopyWithDeposit(copy.documentCopyId);
+    return { ok: true, data };
+  });
+}
+
+
 module.exports = {
   // list & deposit
   getBasicDocumentsByCategoryFast,
@@ -1553,6 +1628,8 @@ module.exports = {
   updateBook,
   updateMagazine,
   updateNewspaper,
+  updateCopy,
+  // soft delete
 
   softDeleteDocument,
   softDeleteCopy
