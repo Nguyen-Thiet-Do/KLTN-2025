@@ -16,6 +16,7 @@ import ButtonLoader from "../../../components/Loading/ButtonLoader";
 import BookDetailPanel from "./BookDetailPanel";
 import BookCreateDialog from "./BookCreateDialog";
 import AddCopyDialog from "./AddCopyDialog";
+import EditBookDialog from "./EditBookDialog";
 
 const ITEMS_PER_PAGE = 5;
 
@@ -54,6 +55,10 @@ export default function Book() {
   const [detailOpen, setDetailOpen] = useState(false);
   const [selectedId, setSelectedId] = useState(null);
   const [selectedBook, setSelectedBook] = useState(null);
+
+  // Sửa sách
+  const [editOpen, setEditOpen] = useState(false);
+  const [editRow, setEditRow] = useState(null);
 
   const [expanded, setExpanded] = useState({});
   const [copiesMap, setCopiesMap] = useState({});
@@ -119,7 +124,7 @@ export default function Book() {
 
   // Row menu
   const openMenu = (event, row) => { setMenuAnchor(event.currentTarget); setMenuRow(row); };
-  const closeMenu = () => { setMenuAnchor(null); /* giữ menuRow cho AddCopy */ };
+  const closeMenu = () => { setMenuAnchor(null); /* giữ menuRow cho AddCopy & Edit */ };
 
   const onMenuViewEbook = () => {
     closeMenu();
@@ -128,7 +133,11 @@ export default function Book() {
   };
 
   const onMenuAddCopy = () => { setAddDlgOpen(true); closeMenu(); };
-  const onMenuEdit = () => { enqueueSnackbar("Chức năng sửa đang phát triển.", { variant: "info" }); closeMenu(); };
+  const onMenuEdit = () => {
+    setEditRow(menuRow);
+    setEditOpen(true);
+    closeMenu();
+  };
   const onMenuDelete = () => { enqueueSnackbar("Chức năng xoá đang phát triển.", { variant: "info" }); closeMenu(); };
 
   // === Optimistic update cho thêm bản sao ===
@@ -383,7 +392,6 @@ export default function Book() {
         onCreated={(newBook) => {
           // Không reload: thêm ngay vào đầu danh sách
           setBooks(prev => [newBook, ...prev]);
-          // Có thể scroll lên đầu nếu muốn
         }}
       />
 
@@ -393,6 +401,20 @@ export default function Book() {
         open={addDlgOpen}
         onClose={() => setAddDlgOpen(false)}
         onSubmit={handleAddCopiesSubmit}
+      />
+
+      {/* Dialog sửa sách (ĐÃ DI CHUYỂN RA NGOÀI FragmentRow) */}
+      <EditBookDialog
+        open={editOpen}
+        id={editRow?.documentId}
+        initialBook={editRow}
+        onClose={() => setEditOpen(false)}
+        onUpdated={(updated) => {
+          // cập nhật ngay item trong bảng
+          setBooks(prev => prev.map(b => b.documentId === updated.documentId ? { ...b, ...updated } : b));
+          // nếu đang mở panel chi tiết, đồng bộ luôn
+          if (selectedId === updated.documentId) setSelectedBook(updated);
+        }}
       />
     </Box>
   );
