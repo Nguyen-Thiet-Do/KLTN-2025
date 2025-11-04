@@ -1,5 +1,5 @@
 // ================================
-// File: /service/documentAdminService.js (Optimized - fixed Author include + faster listing)
+// File: /service/documentAdminService.js (Optimized - full info + genres)
 // ================================
 
 const {
@@ -9,7 +9,7 @@ const {
   Genre, DocumentGenreMap
 } = require('../model');
 const sequelize = require('../config/database');
-const { Op, UniqueConstraintError, QueryTypes } = require('sequelize');
+const { Op, QueryTypes } = require('sequelize');
 
 // Nếu dùng upload file: service R2 (đã có trong dự án của bạn)
 const { uploadCover, uploadEbook } = require('./r2Service');
@@ -74,7 +74,7 @@ function computeDeposit({ coverPrice, depositRate, qualityPercent }) {
   return Math.round(cp * dr * (q / 100));
 }
 
-// Chuẩn hoá authors từ mảng mapping (DocumentAuthorMap + Author đã gắn kèm)
+// -------------------- Authors helpers --------------------
 function normalizeAuthorsFromMaps(maps = []) {
   const arr = [...maps].sort((a, b) => (a.ord ?? 1) - (b.ord ?? 1));
   return arr.map(m => ({
@@ -85,7 +85,6 @@ function normalizeAuthorsFromMaps(maps = []) {
   }));
 }
 
-// Chuẩn hoá authors khi include qua many-to-many alias 'authors'
 function normalizeAuthorsFromDocAuthors(authors = []) {
   const arr = [...authors].sort(
     (a, b) => (a.DocumentAuthorMap?.ord ?? 1) - (b.DocumentAuthorMap?.ord ?? 1)
@@ -96,6 +95,33 @@ function normalizeAuthorsFromDocAuthors(authors = []) {
     role: a.DocumentAuthorMap?.role ?? 'main',
     ord: a.DocumentAuthorMap?.ord ?? 1
   }));
+}
+
+// -------------------- Genres helpers --------------------
+function normalizeGenresFromMaps(maps = []) {
+  // maps: [{ Genre: { genreId, name } }]
+  const seen = new Set();
+  const out = [];
+  for (const m of maps) {
+    if (!m.Genre) continue;
+    const key = m.Genre.genreId;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ genreId: m.Genre.genreId, name: m.Genre.name });
+  }
+  return out;
+}
+
+function normalizeGenresFromDocGenres(genres = []) {
+  // genres: many-to-many alias 'genres'
+  const seen = new Set();
+  const out = [];
+  for (const g of genres) {
+    if (seen.has(g.genreId)) continue;
+    seen.add(g.genreId);
+    out.push({ genreId: g.genreId, name: g.name });
+  }
+  return out;
 }
 
 function extractSubtype(o) {
@@ -135,6 +161,8 @@ function mapItem(row) {
     coverPhoto: o.coverPhoto,
     ebookUrl: o.ebookUrl,
     numberOfCopy: o.numberOfCopy,
+    description: o.description ?? null,
+    shelfLocation: o.shelfLocation ?? null,
 
     // Category & Publisher
     category: o.Category ? { categoryId: o.Category.categoryId, name: o.Category.name } : null,
@@ -144,6 +172,11 @@ function mapItem(row) {
     authors: o.authors
       ? normalizeAuthorsFromDocAuthors(o.authors)
       : normalizeAuthorsFromMaps((o.authorsMaps || []).map(m => ({ ...m, Author: m.Author }))),
+
+    // Genres: ưu tiên alias 'genres', fallback maps nếu có
+    genres: o.genres
+      ? normalizeGenresFromDocGenres(o.genres)
+      : normalizeGenresFromMaps((o.genresMaps || []).map(m => ({ ...m, Genre: m.Genre }))),
 
     // Subtype
     book,
@@ -157,6 +190,7 @@ function mapItem(row) {
  *  - Two-step paging (lấy id theo trang → batch load)
  *  - Không JOIN N-N trong truy vấn phân trang
  *  - Hỗ trợ FULLTEXT hoặc LIKE fallback
+ *  - Trả đủ description, shelfLocation, genres
  * ==========================================================*/
 
 /**
@@ -226,7 +260,8 @@ async function getBasicDocumentsByCategoryFast({
       attributes: [
         'documentId', 'categoryId', 'publisherId', 'title',
         'language', 'publicationYear', 'coverPrice',
-        'coverPhoto', 'ebookUrl', 'numberOfCopy'
+        'coverPhoto', 'ebookUrl', 'numberOfCopy',
+        'description', 'shelfLocation' // <-- thêm
       ],
       include: [
         // Publisher không nở dòng → có thể include ngay ở pha 1
@@ -251,7 +286,8 @@ async function getBasicDocumentsByCategoryFast({
       where: { documentId: { [Op.in]: ids } },
       attributes: [
         'documentId', 'categoryId', 'publisherId', 'title', 'language',
-        'publicationYear', 'coverPrice', 'coverPhoto', 'ebookUrl', 'numberOfCopy'
+        'publicationYear', 'coverPrice', 'coverPhoto', 'ebookUrl', 'numberOfCopy',
+        'description', 'shelfLocation' // <-- thêm
       ],
       include: [
         { model: Category, attributes: ['categoryId', 'name'], required: false },
@@ -274,6 +310,7 @@ async function getBasicDocumentsByCategoryFast({
     promises.push(Promise.resolve([]), Promise.resolve([]));
   }
 
+  // Subtype cho đủ
   if (withSubtype) {
     promises.push(
       Book.findAll({ where: { documentId: { [Op.in]: ids }, deleted: false }, attributes: ['documentId', 'isbn', 'edition', 'pageCount'] }),
@@ -284,7 +321,15 @@ async function getBasicDocumentsByCategoryFast({
     promises.push(Promise.resolve([]), Promise.resolve([]), Promise.resolve([]));
   }
 
-  const [docsFull, authorMapsOnly, _authorRowsPlaceholder, books, magazines, newspapers] = await Promise.all(promises);
+  // Genres: luôn lấy để trả đủ bộ (nhẹ)
+  promises.push(
+    DocumentGenreMap.findAll({
+      where: { documentId: { [Op.in]: ids }, deleted: false },
+      attributes: ['documentId', 'genreId']
+    })
+  );
+
+  const [docsFull, authorMapsOnly, _authorRowsPlaceholder, books, magazines, newspapers, genreMapsOnly] = await Promise.all(promises);
 
   // Gắn Author vào map theo documentId (truy vấn Author 1 lần)
   let authorsByDoc = {};
@@ -304,6 +349,21 @@ async function getBasicDocumentsByCategoryFast({
     }
   }
 
+  // Gắn Genres vào map theo documentId (truy vấn Genre 1 lần)
+  let genresByDoc = {};
+  {
+    const genreIds = [...new Set((genreMapsOnly || []).map(m => m.genreId))];
+    const genreRows = genreIds.length
+      ? await Genre.findAll({ where: { genreId: { [Op.in]: genreIds }, deleted: false }, attributes: ['genreId', 'name'] })
+      : [];
+    const gById = new Map(genreRows.map(g => [g.genreId, g]));
+    for (const m of (genreMapsOnly || [])) {
+      const g = gById.get(m.genreId);
+      if (!g) continue;
+      (genresByDoc[m.documentId] ||= []).push({ Genre: g });
+    }
+  }
+
   const byId = new Map(docsFull.map(d => [d.documentId, d.toJSON()]));
 
   const bookByDoc = withSubtype ? Object.fromEntries(books.map(x => [x.documentId, { isbn: x.isbn, edition: x.edition, pageCount: x.pageCount }])) : {};
@@ -313,6 +373,7 @@ async function getBasicDocumentsByCategoryFast({
   const items = ids.map(id => {
     const o = byId.get(id); if (!o) return null;
     const authors = withAuthors ? normalizeAuthorsFromMaps(authorsByDoc[id] || []) : [];
+    const genres = normalizeGenresFromMaps(genresByDoc[id] || []);
     return {
       documentId: o.documentId,
       title: o.title,
@@ -322,9 +383,12 @@ async function getBasicDocumentsByCategoryFast({
       coverPhoto: o.coverPhoto,
       ebookUrl: o.ebookUrl,
       numberOfCopy: o.numberOfCopy,
+      description: o.description ?? null,
+      shelfLocation: o.shelfLocation ?? null,
       category: o.Category ? { categoryId: o.Category.categoryId, name: o.Category.name } : null,
       publisher: o.Publisher ? { publisherId: o.Publisher.publisherId, name: o.Publisher.name } : null,
       authors,
+      genres,
       book: withSubtype ? (bookByDoc[id] || null) : null,
       magazine: withSubtype ? (magByDoc[id] || null) : null,
       newspaper: withSubtype ? (newsByDoc[id] || null) : null
@@ -353,11 +417,6 @@ const getNewspapersBasic = (opts = {}) => getBasicDocumentsByCategoryFast({ ...o
  *                       COPIES + DEPOSIT
  * ==========================================================*/
 
-/**
- * Lấy toàn bộ copies của một document và tính tiền cọc cho từng copy
- * - Giữ nguyên logic, chỉ truy xuất các cột cần thiết
- * - Có thể mở rộng filter theo status khi cần
- */
 async function getDocumentCopiesWithDeposit(documentId, { status } = {}) {
   // 1) Lấy Document + Category (để có coverPrice, deposit_rate)
   const doc = await Document.findOne({
@@ -420,17 +479,14 @@ async function getDocumentCopiesWithDeposit(documentId, { status } = {}) {
 
 /* ============================================================
  *                       CREATE HELPERS (BULK)
- *  - Giảm round-trip bằng findAll IN-list + bulkCreate
- *  - Upsert N-N bằng bulkCreate(updateOnDuplicate)
  * ==========================================================*/
 
-// Chuẩn hoá type -> lấy categoryId (không JOIN trong truy vấn list, chỉ cần 1 lần ở create)
+// Chuẩn hoá type -> lấy categoryId
 async function resolveCategoryIdOrThrow(documentType) {
   const catMap = await getCategoryMapCached();
-  theIds = catMap[documentType];
-  const ids = theIds; // giữ tên biến cũ cho dễ đọc
+  const theIds = catMap[documentType];
+  const ids = theIds;
   if (!ids || ids.length === 0) throw new Error(`Category cho loại "${documentType}" chưa tồn tại trong DB`);
-  // Nếu có nhiều id khớp nhãn, ưu tiên id nhỏ nhất
   return Math.min(...ids);
 }
 
@@ -439,7 +495,6 @@ async function ensurePublisher(publisherName, t) {
   const name = String(publisherName).trim();
   if (!name) return null;
 
-  // Tìm theo tên 1 lần
   const found = await Publisher.findOne({ where: { name }, transaction: t, lock: t.LOCK.UPDATE });
   if (found) {
     if (found.deleted) await found.update({ deleted: false }, { transaction: t });
@@ -452,7 +507,6 @@ async function ensureGenres(genreNames = [], t) {
   if (!Array.isArray(genreNames) || genreNames.length === 0) return [];
   const names = [...new Set(genreNames.map(s => String(s).trim()).filter(Boolean))];
 
-  // Tìm tất cả 1 lần
   const existed = await Genre.findAll({ where: { name: { [Op.in]: names } }, transaction: t, lock: t.LOCK.UPDATE });
   const existedByName = new Map(existed.map(g => [g.name, g]));
 
@@ -461,7 +515,6 @@ async function ensureGenres(genreNames = [], t) {
     await Genre.bulkCreate(toCreate, { transaction: t, ignoreDuplicates: true });
   }
 
-  // Mở khoá soft-delete cho các genre tồn tại nhưng bị xoá mềm
   const allAfter = await Genre.findAll({ where: { name: { [Op.in]: names } }, transaction: t });
   const toUndeleteIds = allAfter.filter(g => g.deleted).map(g => g.genreId);
   if (toUndeleteIds.length) {
@@ -473,7 +526,7 @@ async function ensureGenres(genreNames = [], t) {
 
 async function ensureAuthors(authorInputs = [], t) {
   if (!Array.isArray(authorInputs) || authorInputs.length === 0) return [];
-  // Chuẩn hóa input + dedupe theo (fullName, role, ord) để giữ ord/role
+  // Chuẩn hóa input + dedupe theo (fullName, role, ord)
   const uniq = [];
   const seen = new Set();
   for (const a of authorInputs) {
@@ -485,7 +538,6 @@ async function ensureAuthors(authorInputs = [], t) {
     if (!seen.has(key)) { seen.add(key); uniq.push({ fullName, role, ord }); }
   }
 
-  // Tìm tất cả tác giả theo tên 1 lần
   const names = [...new Set(uniq.map(u => u.fullName))];
   const existed = await Author.findAll({ where: { fullName: { [Op.in]: names } }, transaction: t, lock: t.LOCK.UPDATE });
   const existedByName = new Map(existed.map(a => [a.fullName, a]));
@@ -495,14 +547,12 @@ async function ensureAuthors(authorInputs = [], t) {
     await Author.bulkCreate(toCreate, { transaction: t, ignoreDuplicates: true });
   }
 
-  // Undelete nếu cần
   const allAfter = await Author.findAll({ where: { fullName: { [Op.in]: names } }, transaction: t });
   const toUndeleteIds = allAfter.filter(a => a.deleted).map(a => a.authorId);
   if (toUndeleteIds.length) {
     await Author.update({ deleted: false }, { where: { authorId: { [Op.in]: toUndeleteIds } }, transaction: t });
   }
 
-  // Trả về mapping giữ role/ord
   const finalAuthors = await Author.findAll({ where: { fullName: { [Op.in]: names } }, transaction: t });
   const byName = new Map(finalAuthors.map(a => [a.fullName, a]));
   return uniq.map(u => ({ author: byName.get(u.fullName), role: u.role, ord: u.ord }));
@@ -619,7 +669,7 @@ async function createDocumentCopiesBulk(documentId, copies = [], t) {
 async function createBook({
   title, language, publicationYear, coverPrice, description, shelfLocation,
   publisherName, authors, genres,
-  // CHẤP NHẬN: multipart (coverFile, ebookFile) HOẶC url (coverUrl, ebookViewUrl)
+  // multipart (coverFile, ebookFile) HOẶC url (coverUrl, ebookViewUrl)
   coverFile, ebookFile, coverUrl, ebookViewUrl,
   bookData = {},
   initialCopies = [],
@@ -669,9 +719,14 @@ async function createBook({
 
     await createDocumentCopiesBulk(doc.documentId, copiesPayload, t);
 
-    // Trả kết quả đầy đủ: include authors qua many-to-many alias 'authors'
+    // Trả kết quả đầy đủ (kèm genres)
     const full = await Document.findOne({
       where: { documentId: doc.documentId },
+      attributes: [
+        'documentId','categoryId','publisherId','title','language',
+        'publicationYear','coverPrice','coverPhoto','ebookUrl','numberOfCopy',
+        'description','shelfLocation'
+      ],
       include: [
         { model: Category, attributes: ['categoryId', 'name'] },
         { model: Publisher, attributes: ['publisherId', 'name'], required: false },
@@ -680,6 +735,14 @@ async function createBook({
           as: 'authors',
           attributes: ['authorId', 'fullName'],
           through: { model: DocumentAuthorMap, attributes: ['role', 'ord'], where: { deleted: false } },
+          where: { deleted: false },
+          required: false
+        },
+        {
+          model: Genre,
+          as: 'genres',
+          attributes: ['genreId', 'name'],
+          through: { model: DocumentGenreMap, attributes: [], where: { deleted: false } },
           where: { deleted: false },
           required: false
         },
@@ -748,6 +811,11 @@ async function createMagazine({
 
     const full = await Document.findOne({
       where: { documentId: doc.documentId },
+      attributes: [
+        'documentId','categoryId','publisherId','title','language',
+        'publicationYear','coverPrice','coverPhoto','ebookUrl','numberOfCopy',
+        'description','shelfLocation'
+      ],
       include: [
         { model: Category, attributes: ['categoryId', 'name'] },
         { model: Publisher, attributes: ['publisherId', 'name'], required: false },
@@ -756,6 +824,14 @@ async function createMagazine({
           as: 'authors',
           attributes: ['authorId', 'fullName'],
           through: { model: DocumentAuthorMap, attributes: ['role', 'ord'], where: { deleted: false } },
+          where: { deleted: false },
+          required: false
+        },
+        {
+          model: Genre,
+          as: 'genres',
+          attributes: ['genreId', 'name'],
+          through: { model: DocumentGenreMap, attributes: [], where: { deleted: false } },
           where: { deleted: false },
           required: false
         },
@@ -822,6 +898,11 @@ async function createNewspaper({
 
     const full = await Document.findOne({
       where: { documentId: doc.documentId },
+      attributes: [
+        'documentId','categoryId','publisherId','title','language',
+        'publicationYear','coverPrice','coverPhoto','ebookUrl','numberOfCopy',
+        'description','shelfLocation'
+      ],
       include: [
         { model: Category, attributes: ['categoryId', 'name'] },
         { model: Publisher, attributes: ['publisherId', 'name'], required: false },
@@ -830,6 +911,14 @@ async function createNewspaper({
           as: 'authors',
           attributes: ['authorId', 'fullName'],
           through: { model: DocumentAuthorMap, attributes: ['role', 'ord'], where: { deleted: false } },
+          where: { deleted: false },
+          required: false
+        },
+        {
+          model: Genre,
+          as: 'genres',
+          attributes: ['genreId', 'name'],
+          through: { model: DocumentGenreMap, attributes: [], where: { deleted: false } },
           where: { deleted: false },
           required: false
         },
@@ -845,7 +934,6 @@ async function createNewspaper({
 /** Nhập thêm bản sao sau này */
 async function addCopies(documentId, copies = []) {
   return await sequelize.transaction(async (t) => {
-    // kiểm tra document còn tồn tại & chưa xoá
     const doc = await Document.findOne({
       where: { documentId, deleted: false },
       attributes: ['documentId'],
@@ -864,7 +952,6 @@ async function addCopies(documentId, copies = []) {
 }
 
 async function getDocumentCopyWithDeposit(documentCopyId) {
-  // Lấy copy + Document + Category để có coverPrice & deposit_rate
   const copy = await DocumentCopy.findOne({
     where: { documentCopyId, deleted: false },
     attributes: ['documentCopyId', 'documentId', 'barCode', 'status', 'conditionNote', 'entryDate'],
@@ -906,13 +993,17 @@ async function getDocumentCopyWithDeposit(documentCopyId) {
 }
 
 async function getDocumentCopyWithDepositAndDoc(documentCopyId, { withAuthors = true, withSubtype = true } = {}) {
-  // 1) Lấy bản sao và documentId
+  // 1) Lấy bản sao và documentId (trả thêm 2 field)
   const copy = await DocumentCopy.findOne({
     where: { documentCopyId, deleted: false },
     attributes: ['documentCopyId', 'documentId', 'barCode', 'status', 'conditionNote', 'entryDate'],
     include: [{
       model: Document,
-      attributes: ['documentId', 'categoryId', 'publisherId', 'title', 'language', 'publicationYear', 'coverPrice', 'coverPhoto', 'ebookUrl', 'numberOfCopy'],
+      attributes: [
+        'documentId','categoryId','publisherId','title','language',
+        'publicationYear','coverPrice','coverPhoto','ebookUrl','numberOfCopy',
+        'description','shelfLocation'
+      ],
       include: [{
         model: Category,
         attributes: ['categoryId', 'name', 'deposit_rate'],
@@ -928,18 +1019,22 @@ async function getDocumentCopyWithDepositAndDoc(documentCopyId, { withAuthors = 
   });
   if (!copy) return null;
 
-  // 2) Tính tiền cọc theo công thức hiện có
+  // 2) Tính tiền cọc
   const coverPrice = Number(copy.Document?.coverPrice) || 0;
   const depositRate = Number(copy.Document?.Category?.deposit_rate) || 0;
-  const quality = toNumberOrNull(copy.conditionNote); // ví dụ "100"
+  const quality = toNumberOrNull(copy.conditionNote);
   const deposit = computeDeposit({ coverPrice, depositRate, qualityPercent: quality });
 
-  // 3) (Tuỳ chọn) lấy thêm authors và subtype để map document cho "đủ bộ"
+  // 3) (Tuỳ chọn) lấy thêm authors, genres và subtype
   let documentFull = null;
   if (withAuthors || withSubtype) {
     documentFull = await Document.findOne({
       where: { documentId: copy.documentId, deleted: false },
-      attributes: ['documentId', 'categoryId', 'publisherId', 'title', 'language', 'publicationYear', 'coverPrice', 'coverPhoto', 'ebookUrl', 'numberOfCopy'],
+      attributes: [
+        'documentId','categoryId','publisherId','title','language',
+        'publicationYear','coverPrice','coverPhoto','ebookUrl','numberOfCopy',
+        'description','shelfLocation'
+      ],
       include: [
         { model: Category, attributes: ['categoryId', 'name'], required: false },
         { model: Publisher, attributes: ['publisherId', 'name'], required: false },
@@ -951,17 +1046,23 @@ async function getDocumentCopyWithDepositAndDoc(documentCopyId, { withAuthors = 
           where: { deleted: false },
           required: false
         } : null,
+        {
+          model: Genre,
+          as: 'genres',
+          attributes: ['genreId', 'name'],
+          through: { model: DocumentGenreMap, attributes: [], where: { deleted: false } },
+          where: { deleted: false },
+          required: false
+        },
         withSubtype ? { model: Book, as: 'book', attributes: ['isbn', 'edition', 'pageCount'], required: false } : null,
         withSubtype ? { model: Magazine, as: 'magazine', attributes: ['issn', 'volume', 'issue', 'period', 'coverDate'], required: false } : null,
         withSubtype ? { model: Newspaper, as: 'newspaper', attributes: ['issn', 'issueDate', 'issueNumber'], required: false } : null
       ].filter(Boolean)
     });
   } else {
-    // Nếu không cần authors/subtype thì tái sử dụng Document đã join ở bước (1)
     documentFull = copy.Document;
   }
 
-  // 4) Chuẩn hoá object document theo format list đang trả (dùng mapItem)
   const documentBasic = mapItem(documentFull);
 
   // 5) Trả kết quả
@@ -987,7 +1088,6 @@ async function getDocumentCopyWithDepositAndDoc(documentCopyId, { withAuthors = 
 // =================== UPDATE HELPERS ===================
 
 function mergeDefined(target, src) {
-  // Gộp chỉ các trường != undefined (cho phép null để xoá giá trị)
   for (const [k, v] of Object.entries(src || {})) {
     if (v !== undefined) target[k] = v;
   }
@@ -995,9 +1095,7 @@ function mergeDefined(target, src) {
 }
 
 async function ensureCoverAndEbookUrlsForUpdate({
-  // input mới
   coverFile, ebookFile, coverUrl, ebookViewUrl,
-  // giá trị hiện tại trong DB
   currentCoverUrl, currentEbookUrl
 }) {
   let cover = coverUrl !== undefined ? String(coverUrl || '').trim() : undefined;
@@ -1012,7 +1110,6 @@ async function ensureCoverAndEbookUrlsForUpdate({
     ebook = keyToPublicUrl(key);
   }
 
-  // cover/ebook = undefined => giữ nguyên; = '' hoặc null => xoá
   return {
     coverUrl: cover === undefined ? currentCoverUrl : (cover || null),
     ebookViewUrl: ebook === undefined ? currentEbookUrl : (ebook || null)
@@ -1020,20 +1117,14 @@ async function ensureCoverAndEbookUrlsForUpdate({
 }
 
 async function replaceDocAuthorMap(documentId, authorInputs = [], t) {
-  // undefined => giữ nguyên; [] => xoá hết
   if (authorInputs === undefined) return;
-
-  // 1) Soft-delete tất cả map hiện có của documentId
   await DocumentAuthorMap.update(
     { deleted: true },
     { where: { documentId }, transaction: t }
   );
-
-  // 2) Nếu gửi mảng rỗng thì xong
   if (!authorInputs || authorInputs.length === 0) return;
 
-  // 3) Ensure + upsert revive
-  const ensured = await ensureAuthors(authorInputs, t); // [{author, role, ord}]
+  const ensured = await ensureAuthors(authorInputs, t);
   const rows = ensured.map(a => ({
     documentId,
     authorId: a.author.authorId,
@@ -1049,20 +1140,16 @@ async function replaceDocAuthorMap(documentId, authorInputs = [], t) {
 }
 
 async function replaceDocGenreMap(documentId, genreNames, t) {
-  // undefined => giữ nguyên; [] => xoá hết
   if (genreNames === undefined) return;
 
-  // 1) Soft-delete tất cả map hiện có của documentId
   await DocumentGenreMap.update(
     { deleted: true },
     { where: { documentId }, transaction: t }
   );
 
-  // 2) Nếu gửi mảng rỗng thì xong
   if (!genreNames || genreNames.length === 0) return;
 
-  // 3) Ensure + upsert revive
-  const genres = await ensureGenres(genreNames, t); // [{genreId,...}]
+  const genres = await ensureGenres(genreNames, t);
   const rows = genres.map(g => ({
     documentId,
     genreId: g.genreId,
@@ -1076,7 +1163,6 @@ async function replaceDocGenreMap(documentId, genreNames, t) {
 }
 
 async function ensurePublisherForUpdate(publisherName, t) {
-  // undefined: giữ nguyên; ''|null: xoá; string: ensure
   if (publisherName === undefined) return undefined;
   if (!publisherName) return null; // clear
   const pub = await ensurePublisher(publisherName, t);
@@ -1097,7 +1183,6 @@ async function updateBook({
   }
 
   return await sequelize.transaction(async (t) => {
-    // Load doc + subtype
     const doc = await Document.findOne({
       where: { documentId, deleted: false },
       include: [{ model: Book, as: 'book', required: false }],
@@ -1105,16 +1190,13 @@ async function updateBook({
     });
     if (!doc) { const e = new Error('Document không tồn tại'); e.status = 404; throw e; }
 
-    // Files/URLs
     const fileUrls = await ensureCoverAndEbookUrlsForUpdate({
       coverFile, ebookFile, coverUrl, ebookViewUrl,
       currentCoverUrl: doc.coverPhoto,
       currentEbookUrl: doc.ebookUrl
     });
 
-    // Publisher
     const publisherId = await ensurePublisherForUpdate(publisherName, t);
-    // Build patch for Document
     const docPatch = {};
     mergeDefined(docPatch, {
       title,
@@ -1132,11 +1214,9 @@ async function updateBook({
       await doc.update(docPatch, { transaction: t });
     }
 
-    // Authors & Genres (chỉ khi gửi vào)
     await replaceDocAuthorMap(documentId, authors, t);
     await replaceDocGenreMap(documentId, genres, t);
 
-    // Subtype Book
     const bookPatch = {};
     if (bookData !== undefined) {
       mergeDefined(bookPatch, {
@@ -1153,15 +1233,24 @@ async function updateBook({
       }
     }
 
-    // Trả về đầy đủ
     const full = await Document.findOne({
       where: { documentId },
+      attributes: [
+        'documentId','categoryId','publisherId','title','language',
+        'publicationYear','coverPrice','coverPhoto','ebookUrl','numberOfCopy',
+        'description','shelfLocation'
+      ],
       include: [
         { model: Category, attributes: ['categoryId', 'name'] },
         { model: Publisher, attributes: ['publisherId', 'name'], required: false },
         {
           model: Author, as: 'authors', attributes: ['authorId', 'fullName'],
           through: { model: DocumentAuthorMap, attributes: ['role', 'ord'], where: { deleted: false } },
+          where: { deleted: false }, required: false
+        },
+        {
+          model: Genre, as: 'genres', attributes: ['genreId', 'name'],
+          through: { model: DocumentGenreMap, attributes: [], where: { deleted: false } },
           where: { deleted: false }, required: false
         },
         { model: Book, as: 'book', attributes: ['isbn', 'edition', 'pageCount'] }
@@ -1242,12 +1331,22 @@ async function updateMagazine({
 
     const full = await Document.findOne({
       where: { documentId },
+      attributes: [
+        'documentId','categoryId','publisherId','title','language',
+        'publicationYear','coverPrice','coverPhoto','ebookUrl','numberOfCopy',
+        'description','shelfLocation'
+      ],
       include: [
         { model: Category, attributes: ['categoryId', 'name'] },
         { model: Publisher, attributes: ['publisherId', 'name'], required: false },
         {
           model: Author, as: 'authors', attributes: ['authorId', 'fullName'],
           through: { model: DocumentAuthorMap, attributes: ['role', 'ord'], where: { deleted: false } },
+          where: { deleted: false }, required: false
+        },
+        {
+          model: Genre, as: 'genres', attributes: ['genreId', 'name'],
+          through: { model: DocumentGenreMap, attributes: [], where: { deleted: false } },
           where: { deleted: false }, required: false
         },
         { model: Magazine, as: 'magazine', attributes: ['issn', 'volume', 'issue', 'period', 'coverDate'] }
@@ -1328,12 +1427,22 @@ async function updateNewspaper({
 
     const full = await Document.findOne({
       where: { documentId },
+      attributes: [
+        'documentId','categoryId','publisherId','title','language',
+        'publicationYear','coverPrice','coverPhoto','ebookUrl','numberOfCopy',
+        'description','shelfLocation'
+      ],
       include: [
         { model: Category, attributes: ['categoryId', 'name'] },
         { model: Publisher, attributes: ['publisherId', 'name'], required: false },
         {
           model: Author, as: 'authors', attributes: ['authorId', 'fullName'],
           through: { model: DocumentAuthorMap, attributes: ['role', 'ord'], where: { deleted: false } },
+          where: { deleted: false }, required: false
+        },
+        {
+          model: Genre, as: 'genres', attributes: ['genreId', 'name'],
+          through: { model: DocumentGenreMap, attributes: [], where: { deleted: false } },
           where: { deleted: false }, required: false
         },
         { model: Newspaper, as: 'newspaper', attributes: ['issn', 'issueDate', 'issueNumber'] }
@@ -1370,17 +1479,6 @@ const ALLOWED_COPY_DELETE_STATUSES = new Set([
   'maintenance_ok'     // bảo trì xong (tuỳ hệ thống)
 ]);
 
-async function recalcNumberOfCopy(documentId, t) {
-  const active = await DocumentCopy.count({
-    where: { documentId, deleted: false }, transaction: t
-  });
-  await Document.update(
-    { numberOfCopy: active },
-    { where: { documentId }, transaction: t }
-  );
-  return active;
-}
-
 /**
  * Kiểm tra điều kiện để xoá mềm 1 Document.
  * - Nếu còn copies active và không bật cascadeCopies => chặn
@@ -1398,7 +1496,6 @@ async function assertDeletableDocument(documentId, { cascadeCopies }, t) {
   }
 
   if (allActiveCount > 0) {
-    // lấy 1 bản sao bị chặn (nếu có)
     const blockedOne = await DocumentCopy.findOne({
       where: {
         documentId,
@@ -1413,8 +1510,6 @@ async function assertDeletableDocument(documentId, { cascadeCopies }, t) {
       err.status = 409; throw err;
     }
   }
-
-  // (Tuỳ chọn) nếu có bảng Loan/LoanDetail thì kiểm tra thêm giao dịch mở ở đây.
 }
 
 /**
@@ -1432,14 +1527,6 @@ async function assertDeletableCopy(copy, t) {
 
 // ======================== SOFT DELETE: SERVICES ========================
 
-/**
- * Xóa mềm 1 Document.
- * @param {number} documentId
- * @param {object} opts
- * @param {boolean} [opts.cascadeSubtype=true]  - xóa mềm bản ghi subtype (Book/Magazine/Newspaper)
- * @param {boolean} [opts.cascadeCopies=false]  - xóa mềm toàn bộ copies
- * @param {boolean} [opts.cascadeMaps=false]    - xóa mềm map Author/Genre
- */
 async function softDeleteDocument(documentId, {
   cascadeSubtype = true,
   cascadeCopies = false,
@@ -1460,22 +1547,18 @@ async function softDeleteDocument(documentId, {
     });
     if (!doc) { const e = new Error('Document không tồn tại'); e.status = 404; throw e; }
 
-    // Kiểm tra điều kiện trước khi xoá
     await assertDeletableDocument(documentId, { cascadeCopies }, t);
 
-    // Đánh dấu document deleted
     if (!doc.deleted) {
       await doc.update({ deleted: true }, { transaction: t });
     }
 
-    // Xoá mềm subtype (nếu có)
     if (cascadeSubtype) {
       if (doc.book && !doc.book.deleted) await doc.book.update({ deleted: true }, { transaction: t });
       if (doc.magazine && !doc.magazine.deleted) await doc.magazine.update({ deleted: true }, { transaction: t });
       if (doc.newspaper && !doc.newspaper.deleted) await doc.newspaper.update({ deleted: true }, { transaction: t });
     }
 
-    // Xoá mềm copies (nếu bật và đã kiểm tra blocked)
     let affectedCopies = 0;
     if (cascadeCopies) {
       const result = await DocumentCopy.update(
@@ -1486,7 +1569,6 @@ async function softDeleteDocument(documentId, {
       await recalcNumberOfCopy(documentId, t);
     }
 
-    // Xoá mềm mapping (nếu bật)
     if (cascadeMaps) {
       await DocumentAuthorMap.update(
         { deleted: true },
@@ -1508,10 +1590,6 @@ async function softDeleteDocument(documentId, {
   });
 }
 
-/**
- * Xóa mềm 1 DocumentCopy và đồng bộ lại numberOfCopy.
- * @param {number} documentCopyId
- */
 async function softDeleteCopy(documentCopyId) {
   if (!Number.isInteger(+documentCopyId) || +documentCopyId <= 0) {
     const err = new Error('documentCopyId không hợp lệ'); err.status = 400; throw err;
@@ -1523,7 +1601,6 @@ async function softDeleteCopy(documentCopyId) {
     });
     if (!copy) { const e = new Error('DocumentCopy không tồn tại'); e.status = 404; throw e; }
 
-    // Kiểm tra trạng thái copy có được phép xoá
     await assertDeletableCopy(copy, t);
 
     if (!copy.deleted) {
@@ -1535,13 +1612,6 @@ async function softDeleteCopy(documentCopyId) {
   });
 }
 
-/**
- * Cập nhật 1 bản sao (DocumentCopy)
- * - Hỗ trợ thay đổi: barCode, status, conditionNote, entryDate
- * - Chặn trùng barCode với bản ghi khác
- * - Chuẩn hoá barCode (viết hoa) và status (trim)
- * - Trả về copy kèm thông tin cọc như API get one copy
- */
 async function updateCopy(documentCopyId, {
   barCode,
   status,
@@ -1561,13 +1631,11 @@ async function updateCopy(documentCopyId, {
 
     const patch = {};
 
-    // barCode: unique trong toàn hệ thống
     if (barCode !== undefined) {
       const nextCode = barCode ? String(barCode).trim().toUpperCase() : null;
       if (!nextCode) {
         const e = new Error('barCode không được rỗng'); e.status = 400; throw e;
       }
-      // check trùng với bản ghi khác
       const dup = await DocumentCopy.findOne({
         where: {
           barCode: nextCode,
@@ -1593,7 +1661,7 @@ async function updateCopy(documentCopyId, {
     }
 
     if (entryDate !== undefined) {
-      patch.entryDate = entryDate ? new Date(entryDate) : new Date(); // nếu gửi rỗng thì lấy now
+      patch.entryDate = entryDate ? new Date(entryDate) : new Date();
       if (isNaN(patch.entryDate.getTime())) {
         const e = new Error('entryDate không hợp lệ'); e.status = 400; throw e;
       }
@@ -1603,12 +1671,10 @@ async function updateCopy(documentCopyId, {
       await copy.update(patch, { transaction: t });
     }
 
-    // Trả về như “get one copy with deposit”
     const data = await getDocumentCopyWithDeposit(copy.documentCopyId);
     return { ok: true, data };
   });
 }
-
 
 module.exports = {
   // list & deposit
@@ -1624,14 +1690,12 @@ module.exports = {
   createMagazine,
   createNewspaper,
   addCopies,
-  // === update (NEW) ===
+  // update
   updateBook,
   updateMagazine,
   updateNewspaper,
   updateCopy,
   // soft delete
-
   softDeleteDocument,
   softDeleteCopy
 };
-
