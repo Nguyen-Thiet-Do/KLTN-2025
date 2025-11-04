@@ -1,3 +1,5 @@
+// bookService.js
+
 import api from "./api";
 
 /** Lấy 1 trang sách từ BE (nếu cần xài server-side ở nơi khác) */
