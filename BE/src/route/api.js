@@ -512,7 +512,127 @@ routeApi.get('/', (req, res) => {
               { "barCode": "BK-0101", "status": "available", "conditionNote": "100" },
               { "status": "available", "conditionNote": "98" }
             ]
+          },
+          // NEW: Cập nhật Sách (Book)
+          {
+            method: 'PUT',
+            path: '/api/documents/admin/books/:id',
+            description: 'Cập nhật tài liệu loại Sách (Book)',
+            auth: true,
+            role: 'Admin (roleId = 1), Librarian (roleId = 2)',
+            params: {
+              id: 'number (required): ID tài liệu'
+            },
+            body: {
+              // Gửi 1 trong 2 kiểu:
+              // 1) multipart/form-data: files: cover (optional), ebook (optional) + các field text phía dưới
+              // 2) application/json: coverUrl (optional), ebookViewUrl (optional) + các field
+              title: 'string (optional)',
+              language: 'string (optional)',
+              publicationYear: 'number (optional)',
+              coverPrice: 'number (optional)',
+              description: 'string (optional)',
+              shelfLocation: 'string (optional)',
+              publisherName: 'string (optional, ""/null để xoá publisher, không gửi để giữ nguyên)',
+              authors: 'array [{ fullName, role?, ord? }] (optional: không gửi=giữ nguyên; []=xoá hết; gửi mảng=thay toàn bộ)',
+              genres: 'array [name] (optional: không gửi=giữ nguyên; []=xoá hết; gửi mảng=thay toàn bộ)',
+              coverUrl: 'string (optional: không gửi=giữ nguyên; ""/null=xoá)',
+              ebookViewUrl: 'string (optional: không gửi=giữ nguyên; ""/null=xoá)',
+              bookData: '{ isbn?: string, edition?: number, pageCount?: number } (optional: chỉ cập nhật trường được gửi)'
+            },
+            examples: [
+              'multipart: cover=<file>, title=Clean Code (2nd ed), bookData={"edition":2}',
+              'json: { "publisherName": "", "authors": [], "genres": ["Kỹ năng"] }'
+            ]
+          },
+
+          // NEW: Cập nhật Tạp chí (Magazine)
+          {
+            method: 'PUT',
+            path: '/api/documents/admin/magazines/:id',
+            description: 'Cập nhật tài liệu loại Tạp chí (Magazine)',
+            auth: true,
+            role: 'Admin (roleId = 1), Librarian (roleId = 2)',
+            params: {
+              id: 'number (required): ID tài liệu'
+            },
+            body: {
+              // multipart hoặc json — giống /books/:id
+              title: 'string (optional)',
+              language: 'string (optional)',
+              publicationYear: 'number (optional)',
+              coverPrice: 'number (optional)',
+              description: 'string (optional)',
+              shelfLocation: 'string (optional)',
+              publisherName: 'string (optional, ""/null để xoá, không gửi để giữ nguyên)',
+              authors: 'array [{ fullName, role?, ord? }] (optional: không gửi=giữ nguyên; []=xoá hết; gửi mảng=thay toàn bộ)',
+              genres: 'array [name] (optional: không gửi=giữ nguyên; []=xoá hết; gửi mảng=thay toàn bộ)',
+              coverUrl: 'string (optional: không gửi=giữ nguyên; ""/null=xoá)',
+              ebookViewUrl: 'string (optional: không gửi=giữ nguyên; ""/null=xoá)',
+              magazineData: '{ issn?: string, volume?: number, issue?: number, period?: string, coverDate?: string } (optional)'
+            },
+            examples: [
+              'multipart: ebook=<file>, magazineData={"issue":10,"volume":42}',
+              'json: { "coverUrl": null, "magazineData": { "period": "Monthly" } }'
+            ]
+          },
+
+          // NEW: Cập nhật Báo (Newspaper)
+          {
+            method: 'PUT',
+            path: '/api/documents/admin/newspapers/:id',
+            description: 'Cập nhật tài liệu loại Báo (Newspaper)',
+            auth: true,
+            role: 'Admin (roleId = 1), Librarian (roleId = 2)',
+            params: {
+              id: 'number (required): ID tài liệu'
+            },
+            body: {
+              // multipart hoặc json — giống /books/:id
+              title: 'string (optional)',
+              language: 'string (optional)',
+              publicationYear: 'number (optional)',
+              coverPrice: 'number (optional)',
+              description: 'string (optional)',
+              shelfLocation: 'string (optional)',
+              publisherName: 'string (optional, ""/null để xoá, không gửi để giữ nguyên)',
+              authors: 'array [{ fullName, role?, ord? }] (optional: không gửi=giữ nguyên; []=xoá hết; gửi mảng=thay toàn bộ)',
+              genres: 'array [name] (optional: không gửi=giữ nguyên; []=xoá hết; gửi mảng=thay toàn bộ)',
+              coverUrl: 'string (optional: không gửi=giữ nguyên; ""/null=xoá)',
+              ebookViewUrl: 'string (optional: không gửi=giữ nguyên; ""/null=xoá)',
+              newspaperData: '{ issn?: string, issueDate?: string (YYYY-MM-DD), issueNumber?: number } (optional)'
+            },
+            examples: [
+              'multipart: cover=<file>, newspaperData={"issueDate":"2025-03-01"}',
+              'json: { "genres": [], "newspaperData": { "issueNumber": 120 } }'
+            ]
+          },
+          {
+            method: 'DELETE',
+            path: '/api/documents/admin/:id',
+            description: 'Xoá mềm tài liệu theo ID (soft delete)',
+            auth: true,
+            role: 'Admin (roleId = 1), Librarian (roleId = 2)',
+            params: {
+              id: 'number (required): ID tài liệu cần xoá'
+            },
+            query: {
+              cascadeSubtype: '0|1 (optional, default=1) — xoá mềm Book/Magazine/Newspaper',
+              cascadeCopies: '0|1 (optional, default=0) — xoá mềm toàn bộ bản sao (cấm nếu có copy ở trạng thái bị chặn)',
+              cascadeMaps: '0|1 (optional, default=0) — xoá mềm liên kết tác giả/thể loại'
+            }
+          },
+          {
+            method: 'DELETE',
+            path: '/api/documents/admin/copies/:copyId',
+            description: 'Xoá mềm bản sao theo ID (soft delete)',
+            auth: true,
+            role: 'Admin (roleId = 1), Librarian (roleId = 2)',
+            params: {
+              copyId: 'number (required): ID bản sao cần xoá'
+            }
           }
+
         ]
       },
       {

@@ -984,6 +984,557 @@ async function getDocumentCopyWithDepositAndDoc(documentCopyId, { withAuthors = 
   };
 }
 
+// =================== UPDATE HELPERS ===================
+
+function mergeDefined(target, src) {
+  // Gộp chỉ các trường != undefined (cho phép null để xoá giá trị)
+  for (const [k, v] of Object.entries(src || {})) {
+    if (v !== undefined) target[k] = v;
+  }
+  return target;
+}
+
+async function ensureCoverAndEbookUrlsForUpdate({
+  // input mới
+  coverFile, ebookFile, coverUrl, ebookViewUrl,
+  // giá trị hiện tại trong DB
+  currentCoverUrl, currentEbookUrl
+}) {
+  let cover = coverUrl !== undefined ? String(coverUrl || '').trim() : undefined;
+  let ebook = ebookViewUrl !== undefined ? String(ebookViewUrl || '').trim() : undefined;
+
+  if (cover === undefined && coverFile) {
+    const { key } = await uploadCover(coverFile);
+    cover = keyToPublicUrl(key);
+  }
+  if (ebook === undefined && ebookFile) {
+    const { key } = await uploadEbook(ebookFile);
+    ebook = keyToPublicUrl(key);
+  }
+
+  // cover/ebook = undefined => giữ nguyên; = '' hoặc null => xoá
+  return {
+    coverUrl: cover === undefined ? currentCoverUrl : (cover || null),
+    ebookViewUrl: ebook === undefined ? currentEbookUrl : (ebook || null)
+  };
+}
+
+async function replaceDocAuthorMap(documentId, authorInputs = [], t) {
+  // undefined => giữ nguyên; [] => xoá hết
+  if (authorInputs === undefined) return;
+
+  // 1) Soft-delete tất cả map hiện có của documentId
+  await DocumentAuthorMap.update(
+    { deleted: true },
+    { where: { documentId }, transaction: t }
+  );
+
+  // 2) Nếu gửi mảng rỗng thì xong
+  if (!authorInputs || authorInputs.length === 0) return;
+
+  // 3) Ensure + upsert revive
+  const ensured = await ensureAuthors(authorInputs, t); // [{author, role, ord}]
+  const rows = ensured.map(a => ({
+    documentId,
+    authorId: a.author.authorId,
+    role: a.role || 'main',
+    ord: a.ord || 1,
+    deleted: false
+  }));
+
+  await DocumentAuthorMap.bulkCreate(rows, {
+    updateOnDuplicate: ['deleted', 'role', 'ord'],
+    transaction: t
+  });
+}
+
+async function replaceDocGenreMap(documentId, genreNames, t) {
+  // undefined => giữ nguyên; [] => xoá hết
+  if (genreNames === undefined) return;
+
+  // 1) Soft-delete tất cả map hiện có của documentId
+  await DocumentGenreMap.update(
+    { deleted: true },
+    { where: { documentId }, transaction: t }
+  );
+
+  // 2) Nếu gửi mảng rỗng thì xong
+  if (!genreNames || genreNames.length === 0) return;
+
+  // 3) Ensure + upsert revive
+  const genres = await ensureGenres(genreNames, t); // [{genreId,...}]
+  const rows = genres.map(g => ({
+    documentId,
+    genreId: g.genreId,
+    deleted: false
+  }));
+
+  await DocumentGenreMap.bulkCreate(rows, {
+    updateOnDuplicate: ['deleted'],
+    transaction: t
+  });
+}
+
+async function ensurePublisherForUpdate(publisherName, t) {
+  // undefined: giữ nguyên; ''|null: xoá; string: ensure
+  if (publisherName === undefined) return undefined;
+  if (!publisherName) return null; // clear
+  const pub = await ensurePublisher(publisherName, t);
+  return pub ? pub.publisherId : null;
+}
+
+// =================== UPDATE: BOOK ===================
+async function updateBook({
+  documentId,
+  title, language, publicationYear, coverPrice, description, shelfLocation,
+  publisherName, authors, genres,
+  coverFile, ebookFile, coverUrl, ebookViewUrl,
+  bookData = {}
+}) {
+  if (!Number.isInteger(+documentId) || +documentId <= 0) {
+    const err = new Error('documentId không hợp lệ');
+    err.status = 400; throw err;
+  }
+
+  return await sequelize.transaction(async (t) => {
+    // Load doc + subtype
+    const doc = await Document.findOne({
+      where: { documentId, deleted: false },
+      include: [{ model: Book, as: 'book', required: false }],
+      transaction: t, lock: t.LOCK.UPDATE
+    });
+    if (!doc) { const e = new Error('Document không tồn tại'); e.status = 404; throw e; }
+
+    // Files/URLs
+    const fileUrls = await ensureCoverAndEbookUrlsForUpdate({
+      coverFile, ebookFile, coverUrl, ebookViewUrl,
+      currentCoverUrl: doc.coverPhoto,
+      currentEbookUrl: doc.ebookUrl
+    });
+
+    // Publisher
+    const publisherId = await ensurePublisherForUpdate(publisherName, t);
+    // Build patch for Document
+    const docPatch = {};
+    mergeDefined(docPatch, {
+      title,
+      shelfLocation: shelfLocation === '' ? null : shelfLocation,
+      language: language === '' ? null : language,
+      publicationYear: publicationYear !== undefined ? (Number.isFinite(+publicationYear) ? +publicationYear : null) : undefined,
+      coverPrice: coverPrice !== undefined ? (Number.isFinite(+coverPrice) ? +coverPrice : null) : undefined,
+      description: description === '' ? null : description,
+      coverPhoto: fileUrls.coverUrl,
+      ebookUrl: fileUrls.ebookViewUrl
+    });
+    if (publisherId !== undefined) mergeDefined(docPatch, { publisherId });
+
+    if (Object.keys(docPatch).length) {
+      await doc.update(docPatch, { transaction: t });
+    }
+
+    // Authors & Genres (chỉ khi gửi vào)
+    await replaceDocAuthorMap(documentId, authors, t);
+    await replaceDocGenreMap(documentId, genres, t);
+
+    // Subtype Book
+    const bookPatch = {};
+    if (bookData !== undefined) {
+      mergeDefined(bookPatch, {
+        isbn: bookData.isbn === '' ? null : bookData.isbn,
+        edition: bookData.edition !== undefined ? (Number.isFinite(+bookData.edition) ? +bookData.edition : null) : undefined,
+        pageCount: bookData.pageCount !== undefined ? (Number.isFinite(+bookData.pageCount) ? +bookData.pageCount : null) : undefined
+      });
+      if (Object.keys(bookPatch).length) {
+        if (doc.book) {
+          await doc.book.update(bookPatch, { transaction: t });
+        } else {
+          await Book.create({ documentId, ...bookPatch, deleted: false }, { transaction: t });
+        }
+      }
+    }
+
+    // Trả về đầy đủ
+    const full = await Document.findOne({
+      where: { documentId },
+      include: [
+        { model: Category, attributes: ['categoryId', 'name'] },
+        { model: Publisher, attributes: ['publisherId', 'name'], required: false },
+        {
+          model: Author, as: 'authors', attributes: ['authorId', 'fullName'],
+          through: { model: DocumentAuthorMap, attributes: ['role', 'ord'], where: { deleted: false } },
+          where: { deleted: false }, required: false
+        },
+        { model: Book, as: 'book', attributes: ['isbn', 'edition', 'pageCount'] }
+      ],
+      transaction: t
+    });
+
+    return mapItem(full);
+  });
+}
+
+// =================== UPDATE: MAGAZINE ===================
+async function updateMagazine({
+  documentId,
+  title, language, publicationYear, coverPrice, description, shelfLocation,
+  publisherName, authors, genres,
+  coverFile, ebookFile, coverUrl, ebookViewUrl,
+  magazineData = {}
+}) {
+  if (!Number.isInteger(+documentId) || +documentId <= 0) {
+    const err = new Error('documentId không hợp lệ');
+    err.status = 400; throw err;
+  }
+
+  return await sequelize.transaction(async (t) => {
+    const doc = await Document.findOne({
+      where: { documentId, deleted: false },
+      include: [{ model: Magazine, as: 'magazine', required: false }],
+      transaction: t, lock: t.LOCK.UPDATE
+    });
+    if (!doc) { const e = new Error('Document không tồn tại'); e.status = 404; throw e; }
+
+    const fileUrls = await ensureCoverAndEbookUrlsForUpdate({
+      coverFile, ebookFile, coverUrl, ebookViewUrl,
+      currentCoverUrl: doc.coverPhoto,
+      currentEbookUrl: doc.ebookUrl
+    });
+
+    const publisherId = await ensurePublisherForUpdate(publisherName, t);
+
+    const docPatch = {};
+    mergeDefined(docPatch, {
+      title,
+      shelfLocation: shelfLocation === '' ? null : shelfLocation,
+      language: language === '' ? null : language,
+      publicationYear: publicationYear !== undefined ? (Number.isFinite(+publicationYear) ? +publicationYear : null) : undefined,
+      coverPrice: coverPrice !== undefined ? (Number.isFinite(+coverPrice) ? +coverPrice : null) : undefined,
+      description: description === '' ? null : description,
+      coverPhoto: fileUrls.coverUrl,
+      ebookUrl: fileUrls.ebookViewUrl
+    });
+    if (publisherId !== undefined) mergeDefined(docPatch, { publisherId });
+
+    if (Object.keys(docPatch).length) {
+      await doc.update(docPatch, { transaction: t });
+    }
+
+    await replaceDocAuthorMap(documentId, authors, t);
+    await replaceDocGenreMap(documentId, genres, t);
+
+    const magPatch = {};
+    if (magazineData !== undefined) {
+      mergeDefined(magPatch, {
+        issn: magazineData.issn === '' ? null : magazineData.issn,
+        volume: magazineData.volume !== undefined ? (Number.isFinite(+magazineData.volume) ? +magazineData.volume : null) : undefined,
+        issue: magazineData.issue !== undefined ? (Number.isFinite(+magazineData.issue) ? +magazineData.issue : null) : undefined,
+        period: magazineData.period === '' ? null : magazineData.period,
+        coverDate: magazineData.coverDate === '' ? null : magazineData.coverDate
+      });
+      if (Object.keys(magPatch).length) {
+        if (doc.magazine) {
+          await doc.magazine.update(magPatch, { transaction: t });
+        } else {
+          await Magazine.create({ documentId, ...magPatch, deleted: false }, { transaction: t });
+        }
+      }
+    }
+
+    const full = await Document.findOne({
+      where: { documentId },
+      include: [
+        { model: Category, attributes: ['categoryId', 'name'] },
+        { model: Publisher, attributes: ['publisherId', 'name'], required: false },
+        {
+          model: Author, as: 'authors', attributes: ['authorId', 'fullName'],
+          through: { model: DocumentAuthorMap, attributes: ['role', 'ord'], where: { deleted: false } },
+          where: { deleted: false }, required: false
+        },
+        { model: Magazine, as: 'magazine', attributes: ['issn', 'volume', 'issue', 'period', 'coverDate'] }
+      ],
+      transaction: t
+    });
+
+    return mapItem(full);
+  });
+}
+
+// =================== UPDATE: NEWSPAPER ===================
+async function updateNewspaper({
+  documentId,
+  title, language, publicationYear, coverPrice, description, shelfLocation,
+  publisherName, authors, genres,
+  coverFile, ebookFile, coverUrl, ebookViewUrl,
+  newspaperData = {}
+}) {
+  if (!Number.isInteger(+documentId) || +documentId <= 0) {
+    const err = new Error('documentId không hợp lệ');
+    err.status = 400; throw err;
+  }
+
+  return await sequelize.transaction(async (t) => {
+    const doc = await Document.findOne({
+      where: { documentId, deleted: false },
+      include: [{ model: Newspaper, as: 'newspaper', required: false }],
+      transaction: t, lock: t.LOCK.UPDATE
+    });
+    if (!doc) { const e = new Error('Document không tồn tại'); e.status = 404; throw e; }
+
+    const fileUrls = await ensureCoverAndEbookUrlsForUpdate({
+      coverFile, ebookFile, coverUrl, ebookViewUrl,
+      currentCoverUrl: doc.coverPhoto,
+      currentEbookUrl: doc.ebookUrl
+    });
+
+    const publisherId = await ensurePublisherForUpdate(publisherName, t);
+
+    const docPatch = {};
+    mergeDefined(docPatch, {
+      title,
+      shelfLocation: shelfLocation === '' ? null : shelfLocation,
+      language: language === '' ? null : language,
+      publicationYear: publicationYear !== undefined ? (Number.isFinite(+publicationYear) ? +publicationYear : null) : undefined,
+      coverPrice: coverPrice !== undefined ? (Number.isFinite(+coverPrice) ? +coverPrice : null) : undefined,
+      description: description === '' ? null : description,
+      coverPhoto: fileUrls.coverUrl,
+      ebookUrl: fileUrls.ebookViewUrl
+    });
+    if (publisherId !== undefined) mergeDefined(docPatch, { publisherId });
+
+    if (Object.keys(docPatch).length) {
+      await doc.update(docPatch, { transaction: t });
+    }
+
+    await replaceDocAuthorMap(documentId, authors, t);
+    await replaceDocGenreMap(documentId, genres, t);
+
+    const newsPatch = {};
+    if (newspaperData !== undefined) {
+      mergeDefined(newsPatch, {
+        issn: newspaperData.issn === '' ? null : newspaperData.issn,
+        issueDate: newspaperData.issueDate === '' ? null : newspaperData.issueDate,
+        issueNumber: newspaperData.issueNumber !== undefined
+          ? (Number.isFinite(+newspaperData.issueNumber) ? +newspaperData.issueNumber : null)
+          : undefined
+      });
+      if (Object.keys(newsPatch).length) {
+        if (doc.newspaper) {
+          await doc.newspaper.update(newsPatch, { transaction: t });
+        } else {
+          await Newspaper.create({ documentId, ...newsPatch, deleted: false }, { transaction: t });
+        }
+      }
+    }
+
+    const full = await Document.findOne({
+      where: { documentId },
+      include: [
+        { model: Category, attributes: ['categoryId', 'name'] },
+        { model: Publisher, attributes: ['publisherId', 'name'], required: false },
+        {
+          model: Author, as: 'authors', attributes: ['authorId', 'fullName'],
+          through: { model: DocumentAuthorMap, attributes: ['role', 'ord'], where: { deleted: false } },
+          where: { deleted: false }, required: false
+        },
+        { model: Newspaper, as: 'newspaper', attributes: ['issn', 'issueDate', 'issueNumber'] }
+      ],
+      transaction: t
+    });
+
+    return mapItem(full);
+  });
+}
+
+async function recalcNumberOfCopy(documentId, t) {
+  const active = await DocumentCopy.count({
+    where: { documentId, deleted: false }, transaction: t
+  });
+  await Document.update(
+    { numberOfCopy: active },
+    { where: { documentId }, transaction: t }
+  );
+  return active;
+}
+
+// ======================== SOFT DELETE: CONSTANTS & HELPERS ========================
+
+const BLOCKED_COPY_STATUSES = new Set([
+  'borrowed',        // đang mượn
+  'reserved',        // đã đặt chỗ
+  'overdue',         // quá hạn
+  'lost_processing'  // đang xử lý mất sách / tranh chấp
+]);
+
+const ALLOWED_COPY_DELETE_STATUSES = new Set([
+  'available',         // sẵn sàng
+  'maintenance_ok'     // bảo trì xong (tuỳ hệ thống)
+]);
+
+async function recalcNumberOfCopy(documentId, t) {
+  const active = await DocumentCopy.count({
+    where: { documentId, deleted: false }, transaction: t
+  });
+  await Document.update(
+    { numberOfCopy: active },
+    { where: { documentId }, transaction: t }
+  );
+  return active;
+}
+
+/**
+ * Kiểm tra điều kiện để xoá mềm 1 Document.
+ * - Nếu còn copies active và không bật cascadeCopies => chặn
+ * - Nếu bật cascadeCopies, cấm khi tồn tại copy ở trạng thái blocked
+ */
+async function assertDeletableDocument(documentId, { cascadeCopies }, t) {
+  const allActiveCount = await DocumentCopy.count({
+    where: { documentId, deleted: false },
+    transaction: t
+  });
+
+  if (allActiveCount > 0 && !cascadeCopies) {
+    const err = new Error('Không thể xóa: tài liệu còn bản sao đang tồn tại. Bật cascadeCopies=1 nếu muốn xóa mềm toàn bộ bản sao.');
+    err.status = 409; throw err;
+  }
+
+  if (allActiveCount > 0) {
+    // lấy 1 bản sao bị chặn (nếu có)
+    const blockedOne = await DocumentCopy.findOne({
+      where: {
+        documentId,
+        deleted: false,
+        status: { [Op.in]: Array.from(BLOCKED_COPY_STATUSES) }
+      },
+      attributes: ['documentCopyId', 'status', 'barCode'],
+      transaction: t
+    });
+    if (blockedOne) {
+      const err = new Error(`Không thể xóa: có bản sao đang ở trạng thái "${blockedOne.status}" (barCode=${blockedOne.barCode}). Hãy thu hồi/hoàn tất giao dịch trước.`);
+      err.status = 409; throw err;
+    }
+  }
+
+  // (Tuỳ chọn) nếu có bảng Loan/LoanDetail thì kiểm tra thêm giao dịch mở ở đây.
+}
+
+/**
+ * Kiểm tra điều kiện để xoá mềm 1 Copy.
+ * - Chỉ cho phép xoá khi status nằm trong whitelist (vd: available)
+ */
+async function assertDeletableCopy(copy, t) {
+  if (copy.deleted) return;
+  const status = String(copy.status || '').trim().toLowerCase();
+  if (!ALLOWED_COPY_DELETE_STATUSES.has(status)) {
+    const err = new Error(`Không thể xóa bản sao: trạng thái hiện tại "${copy.status}" không cho phép xóa.`);
+    err.status = 409; throw err;
+  }
+}
+
+// ======================== SOFT DELETE: SERVICES ========================
+
+/**
+ * Xóa mềm 1 Document.
+ * @param {number} documentId
+ * @param {object} opts
+ * @param {boolean} [opts.cascadeSubtype=true]  - xóa mềm bản ghi subtype (Book/Magazine/Newspaper)
+ * @param {boolean} [opts.cascadeCopies=false]  - xóa mềm toàn bộ copies
+ * @param {boolean} [opts.cascadeMaps=false]    - xóa mềm map Author/Genre
+ */
+async function softDeleteDocument(documentId, {
+  cascadeSubtype = true,
+  cascadeCopies = false,
+  cascadeMaps = false
+} = {}) {
+  if (!Number.isInteger(+documentId) || +documentId <= 0) {
+    const err = new Error('documentId không hợp lệ'); err.status = 400; throw err;
+  }
+
+  return await sequelize.transaction(async (t) => {
+    const doc = await Document.findOne({
+      where: { documentId }, transaction: t, lock: t.LOCK.UPDATE,
+      include: [
+        { model: Book, as: 'book', required: false },
+        { model: Magazine, as: 'magazine', required: false },
+        { model: Newspaper, as: 'newspaper', required: false }
+      ]
+    });
+    if (!doc) { const e = new Error('Document không tồn tại'); e.status = 404; throw e; }
+
+    // Kiểm tra điều kiện trước khi xoá
+    await assertDeletableDocument(documentId, { cascadeCopies }, t);
+
+    // Đánh dấu document deleted
+    if (!doc.deleted) {
+      await doc.update({ deleted: true }, { transaction: t });
+    }
+
+    // Xoá mềm subtype (nếu có)
+    if (cascadeSubtype) {
+      if (doc.book && !doc.book.deleted) await doc.book.update({ deleted: true }, { transaction: t });
+      if (doc.magazine && !doc.magazine.deleted) await doc.magazine.update({ deleted: true }, { transaction: t });
+      if (doc.newspaper && !doc.newspaper.deleted) await doc.newspaper.update({ deleted: true }, { transaction: t });
+    }
+
+    // Xoá mềm copies (nếu bật và đã kiểm tra blocked)
+    let affectedCopies = 0;
+    if (cascadeCopies) {
+      const result = await DocumentCopy.update(
+        { deleted: true },
+        { where: { documentId, deleted: false }, transaction: t }
+      );
+      affectedCopies = Array.isArray(result) ? result[0] : result;
+      await recalcNumberOfCopy(documentId, t);
+    }
+
+    // Xoá mềm mapping (nếu bật)
+    if (cascadeMaps) {
+      await DocumentAuthorMap.update(
+        { deleted: true },
+        { where: { documentId, deleted: false }, transaction: t }
+      );
+      await DocumentGenreMap.update(
+        { deleted: true },
+        { where: { documentId, deleted: false }, transaction: t }
+      );
+    }
+
+    return {
+      ok: true,
+      documentId,
+      deleted: true,
+      cascade: { subtype: cascadeSubtype, copies: cascadeCopies, maps: cascadeMaps },
+      affectedCopies
+    };
+  });
+}
+
+/**
+ * Xóa mềm 1 DocumentCopy và đồng bộ lại numberOfCopy.
+ * @param {number} documentCopyId
+ */
+async function softDeleteCopy(documentCopyId) {
+  if (!Number.isInteger(+documentCopyId) || +documentCopyId <= 0) {
+    const err = new Error('documentCopyId không hợp lệ'); err.status = 400; throw err;
+  }
+
+  return await sequelize.transaction(async (t) => {
+    const copy = await DocumentCopy.findOne({
+      where: { documentCopyId }, transaction: t, lock: t.LOCK.UPDATE
+    });
+    if (!copy) { const e = new Error('DocumentCopy không tồn tại'); e.status = 404; throw e; }
+
+    // Kiểm tra trạng thái copy có được phép xoá
+    await assertDeletableCopy(copy, t);
+
+    if (!copy.deleted) {
+      await copy.update({ deleted: true }, { transaction: t });
+      await recalcNumberOfCopy(copy.documentId, t);
+    }
+
+    return { ok: true, documentCopyId, deleted: true, documentId: copy.documentId };
+  });
+}
+
 module.exports = {
   // list & deposit
   getBasicDocumentsByCategoryFast,
@@ -997,5 +1548,13 @@ module.exports = {
   createBook,
   createMagazine,
   createNewspaper,
-  addCopies
+  addCopies,
+  // === update (NEW) ===
+  updateBook,
+  updateMagazine,
+  updateNewspaper,
+
+  softDeleteDocument,
+  softDeleteCopy
 };
+

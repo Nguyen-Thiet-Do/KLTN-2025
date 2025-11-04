@@ -13,7 +13,12 @@ const {
   createBook,
   createMagazine,
   createNewspaper,
-  addCopies
+  addCopies,
+  updateBook,
+  updateMagazine,
+  updateNewspaper,
+  softDeleteDocument,
+  softDeleteCopy
 } = require('../service/documentAdminService');
 
 function parseJSONSafe(s, fallback) {
@@ -258,6 +263,147 @@ async function getCopyWithDepositSingleCtrl(req, res) {
   }
 }
 
+// PUT /documents/book/:id  (multipart hoặc json)
+async function updateBookCtrl(req, res) {
+  try {
+    const documentId = Number(req.params.id);
+    if (!Number.isInteger(documentId) || documentId <= 0) {
+      return res.status(400).json({ ok: false, message: 'documentId không hợp lệ' });
+    }
+    const files = {
+      coverFile: req.files?.cover?.[0],
+      ebookFile: req.files?.ebook?.[0]
+    };
+    const b = req.body;
+
+    const data = await updateBook({
+      documentId,
+      title: b.title,
+      language: b.language,
+      publicationYear: b.publicationYear,
+      coverPrice: b.coverPrice,
+      description: b.description,
+      shelfLocation: b.shelfLocation,
+      publisherName: b.publisherName,
+      authors: (b.authors !== undefined) ? parseJSONSafe(b.authors, []) : undefined,
+      genres: (b.genres !== undefined) ? parseJSONSafe(b.genres, []) : undefined,
+      coverUrl: b.coverUrl,
+      ebookViewUrl: b.ebookViewUrl,
+      bookData: (b.bookData !== undefined) ? parseJSONSafe(b.bookData, {}) : undefined,
+      ...files
+    });
+
+    return res.status(200).json({ ok: true, data });
+  } catch (e) {
+    return res.status(e.status || 500).json({ ok: false, message: e.message });
+  }
+}
+
+// PUT /documents/magazine/:id
+async function updateMagazineCtrl(req, res) {
+  try {
+    const documentId = Number(req.params.id);
+    if (!Number.isInteger(documentId) || documentId <= 0) {
+      return res.status(400).json({ ok: false, message: 'documentId không hợp lệ' });
+    }
+    const files = {
+      coverFile: req.files?.cover?.[0],
+      ebookFile: req.files?.ebook?.[0]
+    };
+    const b = req.body;
+
+    const data = await updateMagazine({
+      documentId,
+      title: b.title,
+      language: b.language,
+      publicationYear: b.publicationYear,
+      coverPrice: b.coverPrice,
+      description: b.description,
+      shelfLocation: b.shelfLocation,
+      publisherName: b.publisherName,
+      authors: (b.authors !== undefined) ? parseJSONSafe(b.authors, []) : undefined,
+      genres: (b.genres !== undefined) ? parseJSONSafe(b.genres, []) : undefined,
+      coverUrl: b.coverUrl,
+      ebookViewUrl: b.ebookViewUrl,
+      magazineData: (b.magazineData !== undefined) ? parseJSONSafe(b.magazineData, {}) : undefined,
+      ...files
+    });
+
+    return res.status(200).json({ ok: true, data });
+  } catch (e) {
+    return res.status(e.status || 500).json({ ok: false, message: e.message });
+  }
+}
+
+// PUT /documents/newspaper/:id
+async function updateNewspaperCtrl(req, res) {
+  try {
+    const documentId = Number(req.params.id);
+    if (!Number.isInteger(documentId) || documentId <= 0) {
+      return res.status(400).json({ ok: false, message: 'documentId không hợp lệ' });
+    }
+    const files = {
+      coverFile: req.files?.cover?.[0],
+      ebookFile: req.files?.ebook?.[0]
+    };
+    const b = req.body;
+
+    const data = await updateNewspaper({
+      documentId,
+      title: b.title,
+      language: b.language,
+      publicationYear: b.publicationYear,
+      coverPrice: b.coverPrice,
+      description: b.description,
+      shelfLocation: b.shelfLocation,
+      publisherName: b.publisherName,
+      authors: (b.authors !== undefined) ? parseJSONSafe(b.authors, []) : undefined,
+      genres: (b.genres !== undefined) ? parseJSONSafe(b.genres, []) : undefined,
+      coverUrl: b.coverUrl,
+      ebookViewUrl: b.ebookViewUrl,
+      newspaperData: (b.newspaperData !== undefined) ? parseJSONSafe(b.newspaperData, {}) : undefined,
+      ...files
+    });
+
+    return res.status(200).json({ ok: true, data });
+  } catch (e) {
+    return res.status(e.status || 500).json({ ok: false, message: e.message });
+  }
+}
+
+// DELETE /documents/:id  (?cascadeSubtype=1&cascadeCopies=0&cascadeMaps=0)
+async function deleteDocumentCtrl(req, res) {
+  try {
+    const documentId = Number(req.params.id);
+    if (!Number.isInteger(documentId) || documentId <= 0) {
+      return res.status(400).json({ ok: false, message: 'documentId không hợp lệ' });
+    }
+
+    const cascadeSubtype = req.query.cascadeSubtype !== '0'; // default true
+    const cascadeCopies = req.query.cascadeCopies === '1';   // default false
+    const cascadeMaps = req.query.cascadeMaps === '1';       // default false
+
+    const data = await softDeleteDocument(documentId, { cascadeSubtype, cascadeCopies, cascadeMaps });
+    return res.status(200).json(data);
+  } catch (e) {
+    return res.status(e.status || 500).json({ ok: false, message: e.message });
+  }
+}
+
+// DELETE /documents/copies/:copyId
+async function deleteCopyCtrl(req, res) {
+  try {
+    const copyId = Number(req.params.copyId);
+    if (!Number.isInteger(copyId) || copyId <= 0) {
+      return res.status(400).json({ ok: false, message: 'documentCopyId không hợp lệ' });
+    }
+    const data = await softDeleteCopy(copyId);
+    return res.status(200).json(data);
+  } catch (e) {
+    return res.status(e.status || 500).json({ ok: false, message: e.message });
+  }
+}
+
 module.exports = {
   getBasicList,
   getBooks,
@@ -268,5 +414,10 @@ module.exports = {
   createMagazineCtrl,
   createNewspaperCtrl,
   addCopiesCtrl,
-  getCopyWithDepositSingleCtrl
+  getCopyWithDepositSingleCtrl,
+  updateBookCtrl,
+  updateMagazineCtrl,
+  updateNewspaperCtrl,
+  deleteDocumentCtrl,
+  deleteCopyCtrl
 };
