@@ -29,7 +29,9 @@ export async function getAllBooks({ pageSize = 100 } = {}) {
 /** Lấy chi tiết sách theo ID (dùng cho panel) */
 export async function getBookById(id) {
     // nếu endpoint khác, chỉ cần đổi URL dưới đây
-    const { data } = await api.get(`/documents/admin/books/${id}`);
+    const { data } = await api.get(`/documents/reader/books/${id}`);
+    console.log(data);
+    
     return data;
 }
 
@@ -135,4 +137,75 @@ export async function addBookCopies(documentId, copies = []) {
 
     const { data } = await api.post(`/documents/admin/${documentId}/copies`, payload);
     return data; // { ok: true, createdCount, numberOfCopy } theo controller
+}
+
+
+/**
+ * Cập nhật sách (PUT /documents/admin/books/:id)
+ * payload: chỉ gửi TRƯỜNG CẦN SỬA.
+ * - Nếu có file: multipart (cover, ebook) + các field text
+ * - Nếu không file: JSON
+ * - authors / genres:
+ *    - undefined: giữ nguyên
+ *    - []       : xoá hết
+ *    - array    : thay toàn bộ
+ * - publisherName:
+ *    - undefined: giữ nguyên
+ *    - ""/null  : xoá
+ */
+export async function updateBook(id, payload = {}) {
+    if (!id) throw new Error("Thiếu id");
+
+    const hasFile = !!(payload.coverFile || payload.ebookFile);
+
+    // Helper: append only when defined (and not undefined)
+    const appendIfDef = (fd, k, v) => {
+        if (v === undefined) return;
+        if (v === null) return fd.append(k, ""); // cho phép clear bằng rỗng
+        fd.append(k, v);
+    };
+
+    if (hasFile) {
+        const fd = new FormData();
+        appendIfDef(fd, "title", payload.title);
+        appendIfDef(fd, "language", payload.language);
+        appendIfDef(fd, "publicationYear", payload.publicationYear);
+        appendIfDef(fd, "coverPrice", payload.coverPrice);
+        appendIfDef(fd, "description", payload.description);
+        appendIfDef(fd, "shelfLocation", payload.shelfLocation);
+        appendIfDef(fd, "publisherName", payload.publisherName);
+
+        if (payload.authors !== undefined) fd.append("authors", JSON.stringify(payload.authors || []));
+        if (payload.genres !== undefined) fd.append("genres", JSON.stringify(payload.genres || []));
+        if (payload.bookData !== undefined) fd.append("bookData", JSON.stringify(payload.bookData || {}));
+
+        if (payload.coverFile) fd.append("cover", payload.coverFile);
+        if (payload.ebookFile) fd.append("ebook", payload.ebookFile);
+
+        // Khi có file, BE bỏ qua coverUrl/ebookViewUrl nên khỏi gửi
+        const { data } = await api.put(`/documents/admin/books/${id}`, fd, {
+            headers: { "Content-Type": "multipart/form-data" },
+        });
+        return data;
+    } else {
+        // JSON – chỉ đưa keys có ý định sửa
+        const body = {};
+        const set = (k, v) => { if (v !== undefined) body[k] = v; };
+
+        set("title", payload.title);
+        set("language", payload.language);
+        set("publicationYear", payload.publicationYear);
+        set("coverPrice", payload.coverPrice);
+        set("description", payload.description);
+        set("shelfLocation", payload.shelfLocation);
+        set("publisherName", payload.publisherName); // ""/null để xoá
+        set("authors", payload.authors);             // undefined giữ nguyên; [] xoá; array thay
+        set("genres", payload.genres);
+        set("bookData", payload.bookData);           // phần subtype
+        set("coverUrl", payload.coverUrl);           // ""/null để xoá
+        set("ebookViewUrl", payload.ebookViewUrl);   // ""/null để xoá
+
+        const { data } = await api.put(`/documents/admin/books/${id}`, body);
+        return data; // { ok:true, data: <bookMapped> }
+    }
 }
