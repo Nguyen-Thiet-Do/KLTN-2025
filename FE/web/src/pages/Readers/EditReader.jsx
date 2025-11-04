@@ -17,38 +17,15 @@ import {
   IconButton,
   Card,
   CardContent,
-  Stack,
 } from "@mui/material";
 import { Close } from "@mui/icons-material";
+import { useSnackbar } from "notistack"; // ✅ Thêm notistack
 import { updateReader } from "../../services/readerService";
 
-/**
- * EditReader — Material UI Dialog version
- * Props:
- *  - open: boolean
- *  - reader: object (must include readerId)
- *  - onSuccess: () => void
- *  - onCancel: () => void
- */
 export default function EditReader({ open = true, reader = {}, onSuccess, onCancel }) {
-  const initial = useMemo(() => ({
-    fullName: reader?.fullName || "",
-    gender: normalizeGender(reader?.gender) ?? "",
-    dateOfBirth: reader?.dateOfBirth ? new Date(reader.dateOfBirth).toISOString().slice(0, 10) : "",
-    address: reader?.address || "",
-    phoneNumber: reader?.phoneNumber || "",
-    note: reader?.note || "",
-  }), [reader]);
+  const { enqueueSnackbar } = useSnackbar(); // ✅ Hook snackbar
 
-  const [form, setForm] = useState(initial);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
-
-  useEffect(() => {
-    setForm(initial);
-  }, [initial]);
-
-  function normalizeGender(gender) {
+  const normalizeGender = (gender) => {
     if (gender == null) return "";
     if (typeof gender === "object") {
       const value = gender?.data?.[0] ?? (gender instanceof Uint8Array ? gender[0] : undefined);
@@ -61,7 +38,29 @@ export default function EditReader({ open = true, reader = {}, onSuccess, onCanc
     if (["female", "nu", "nữ", "0"].includes(g)) return "0";
     if (["other", "khac", "khác"].includes(g)) return "other";
     return "";
-  }
+  };
+
+  const initial = useMemo(
+    () => ({
+      fullName: reader?.fullName || "",
+      gender: normalizeGender(reader?.gender),
+      dateOfBirth: reader?.dateOfBirth
+        ? new Date(reader.dateOfBirth).toISOString().slice(0, 10)
+        : "",
+      address: reader?.address || "",
+      phoneNumber: reader?.phoneNumber || "",
+      note: reader?.note || "",
+    }),
+    [reader]
+  );
+
+  const [form, setForm] = useState(initial);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    setForm(initial);
+  }, [initial]);
 
   const handleChange = (e) => {
     setForm({ ...form, [e.target.name]: e.target.value });
@@ -78,12 +77,23 @@ export default function EditReader({ open = true, reader = {}, onSuccess, onCanc
     const msg = validate();
     if (msg) {
       setError(msg);
+      enqueueSnackbar(msg, { variant: "warning" });
       return;
     }
+
     setLoading(true);
     setError(null);
+
     try {
       const token = sessionStorage.getItem("accessToken");
+      if (!token) {
+        enqueueSnackbar("⚠️ Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.", {
+          variant: "warning",
+        });
+        setLoading(false);
+        return;
+      }
+
       const payload = {
         fullName: form.fullName,
         gender: form.gender,
@@ -92,11 +102,19 @@ export default function EditReader({ open = true, reader = {}, onSuccess, onCanc
         phoneNumber: form.phoneNumber,
         note: form.note,
       };
+
       const res = await updateReader(reader.readerId, payload, token);
-      if (res.success) onSuccess?.();
-      else setError(res.message || "Cập nhật thất bại");
+
+      if (res.success) {
+        enqueueSnackbar("✅ Cập nhật thông tin thành công!", { variant: "success" });
+        onSuccess?.();
+      } else {
+        enqueueSnackbar(res.message || "❌ Cập nhật thất bại!", { variant: "error" });
+        setError(res.message || "Cập nhật thất bại");
+      }
     } catch (err) {
-      console.error(err);
+      console.error("❌ Lỗi khi cập nhật độc giả:", err);
+      enqueueSnackbar("⚠️ Lỗi khi kết nối đến máy chủ!", { variant: "error" });
       setError(err.response?.data?.message || "Lỗi khi cập nhật độc giả");
     } finally {
       setLoading(false);
@@ -133,17 +151,47 @@ export default function EditReader({ open = true, reader = {}, onSuccess, onCanc
         },
       }}
     >
-      <DialogTitle sx={{ background: "linear-gradient(135deg, #667EEA 0%, #764BA2 100%)", color: "white", py: 2, position: "relative" }}>
-        <Typography variant="h5" fontWeight={700} textAlign="center">Sửa Thông Tin Độc Giả</Typography>
-        <IconButton onClick={handleClose} disabled={loading} sx={{ position: "absolute", right: 16, top: "50%", transform: "translateY(-50%)", color: "white", "&:hover": { backgroundColor: "rgba(255,255,255,0.1)" } }}>
+      {/* Header */}
+      <DialogTitle
+        sx={{
+          background: "linear-gradient(135deg, #667EEA 0%, #764BA2 100%)",
+          color: "white",
+          py: 2,
+          position: "relative",
+        }}
+      >
+        <Typography variant="h5" fontWeight={700} textAlign="center">
+          Sửa Thông Tin Độc Giả
+        </Typography>
+        <IconButton
+          onClick={handleClose}
+          disabled={loading}
+          sx={{
+            position: "absolute",
+            right: 16,
+            top: "50%",
+            transform: "translateY(-50%)",
+            color: "white",
+            "&:hover": { backgroundColor: "rgba(255,255,255,0.1)" },
+          }}
+        >
           <Close />
         </IconButton>
       </DialogTitle>
 
+      {/* Form */}
       <Box component="form" onSubmit={handleSubmit} sx={{ display: "contents" }}>
-        <DialogContent sx={{ p: 0, overflowY: "auto", minHeight: 0, display: "flex", flexDirection: "column" }}>
+        <DialogContent
+          sx={{
+            p: 0,
+            overflowY: "auto",
+            minHeight: 0,
+            display: "flex",
+            flexDirection: "column",
+          }}
+        >
           {error && (
-            <Alert severity="error" sx={{ m: 3, mb: 2, borderRadius: 2, "& .MuiAlert-message": { py: 1 } }}>
+            <Alert severity="error" sx={{ m: 3, mb: 2, borderRadius: 2 }}>
               {error}
             </Alert>
           )}
@@ -151,16 +199,60 @@ export default function EditReader({ open = true, reader = {}, onSuccess, onCanc
           {/* Section: Thông tin cá nhân */}
           <Card elevation={0} sx={{ borderRadius: 0 }}>
             <CardContent sx={{ p: 4 }}>
-              <Typography variant="h6" fontWeight={600} sx={{ mb: 3, color: "#667EEA", display: "flex", alignItems: "center", "&::before": { content: '"1"', display: "inline-flex", alignItems: "center", justifyContent: "center", width: 24, height: 24, backgroundColor: "#667EEA", color: "white", borderRadius: "50%", fontSize: "0.875rem", mr: 2 } }}>
+              <Typography
+                variant="h6"
+                fontWeight={600}
+                sx={{
+                  mb: 3,
+                  color: "#667EEA",
+                  display: "flex",
+                  alignItems: "center",
+                  "&::before": {
+                    content: '"1"',
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    width: 24,
+                    height: 24,
+                    backgroundColor: "#667EEA",
+                    color: "white",
+                    borderRadius: "50%",
+                    fontSize: "0.875rem",
+                    mr: 2,
+                  },
+                }}
+              >
                 Thông Tin Cá Nhân
               </Typography>
 
-              <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" }, gap: 3 }}>
-                <TextField name="fullName" label="Họ và tên" value={form.fullName} onChange={handleChange} required disabled={loading} placeholder="Nhập họ và tên đầy đủ" sx={fieldSx} />
+              <Box
+                sx={{
+                  display: "grid",
+                  gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" },
+                  gap: 3,
+                }}
+              >
+                <TextField
+                  name="fullName"
+                  label="Họ và tên"
+                  value={form.fullName}
+                  onChange={handleChange}
+                  required
+                  disabled={loading}
+                  placeholder="Nhập họ và tên đầy đủ"
+                  sx={fieldSx}
+                />
 
                 <FormControl required sx={fieldSx}>
                   <InputLabel id="gender-label">Giới tính</InputLabel>
-                  <Select labelId="gender-label" name="gender" value={form.gender} label="Giới tính" onChange={handleChange} disabled={loading}>
+                  <Select
+                    labelId="gender-label"
+                    name="gender"
+                    value={form.gender}
+                    label="Giới tính"
+                    onChange={handleChange}
+                    disabled={loading}
+                  >
                     <MenuItem value="">
                       <em>Chọn giới tính</em>
                     </MenuItem>
@@ -170,23 +262,107 @@ export default function EditReader({ open = true, reader = {}, onSuccess, onCanc
                   </Select>
                 </FormControl>
 
-                <TextField name="dateOfBirth" type="date" label="Ngày sinh" value={form.dateOfBirth} onChange={handleChange} disabled={loading} InputLabelProps={{ shrink: true }} sx={fieldSx} />
+                <TextField
+                  name="dateOfBirth"
+                  type="date"
+                  label="Ngày sinh"
+                  value={form.dateOfBirth}
+                  onChange={handleChange}
+                  disabled={loading}
+                  InputLabelProps={{ shrink: true }}
+                  sx={fieldSx}
+                />
 
-                <TextField name="phoneNumber" label="Số điện thoại" value={form.phoneNumber} onChange={handleChange} disabled={loading} placeholder="Nhập số điện thoại" sx={fieldSx} />
+                <TextField
+                  name="phoneNumber"
+                  label="Số điện thoại"
+                  value={form.phoneNumber}
+                  onChange={handleChange}
+                  disabled={loading}
+                  placeholder="Nhập số điện thoại"
+                  sx={fieldSx}
+                />
 
-                <TextField name="address" label="Địa chỉ" value={form.address} onChange={handleChange} disabled={loading} placeholder="Nhập địa chỉ đầy đủ" sx={{ ...fieldSx, gridColumn: { xs: "auto", md: "1 / span 2" } }} />
+                <TextField
+                  name="address"
+                  label="Địa chỉ"
+                  value={form.address}
+                  onChange={handleChange}
+                  disabled={loading}
+                  placeholder="Nhập địa chỉ đầy đủ"
+                  sx={{
+                    ...fieldSx,
+                    gridColumn: { xs: "auto", md: "1 / span 2" },
+                  }}
+                />
 
-                <TextField name="note" label="Ghi chú" value={form.note} onChange={handleChange} disabled={loading} placeholder="Thêm ghi chú (nếu có)" multiline rows={3} sx={{ ...fieldSx, gridColumn: { xs: "auto", md: "1 / span 2" } }} />
+                <TextField
+                  name="note"
+                  label="Ghi chú"
+                  value={form.note}
+                  onChange={handleChange}
+                  disabled={loading}
+                  placeholder="Thêm ghi chú (nếu có)"
+                  multiline
+                  rows={3}
+                  sx={{
+                    ...fieldSx,
+                    gridColumn: { xs: "auto", md: "1 / span 2" },
+                  }}
+                />
               </Box>
             </CardContent>
           </Card>
         </DialogContent>
 
-        <DialogActions sx={{ px: 4, pb: 3, pt: 3, gap: 2, borderTop: "1px solid #e0e0e0", backgroundColor: "white" }}>
-          <Button onClick={handleClose} disabled={loading} variant="outlined" sx={{ px: 4, py: 1, borderRadius: 2, borderColor: "#667EEA", color: "#667EEA", fontWeight: 600, "&:hover": { borderColor: "#5A67D8", backgroundColor: "rgba(102,126,234,0.04)" } }}>
+        {/* Footer buttons */}
+        <DialogActions
+          sx={{
+            px: 4,
+            pb: 3,
+            pt: 3,
+            gap: 2,
+            borderTop: "1px solid #e0e0e0",
+            backgroundColor: "white",
+          }}
+        >
+          <Button
+            onClick={handleClose}
+            disabled={loading}
+            variant="outlined"
+            sx={{
+              px: 4,
+              py: 1,
+              borderRadius: 2,
+              borderColor: "#667EEA",
+              color: "#667EEA",
+              fontWeight: 600,
+              "&:hover": {
+                borderColor: "#5A67D8",
+                backgroundColor: "rgba(102,126,234,0.04)",
+              },
+            }}
+          >
             Hủy
           </Button>
-          <Button type="submit" disabled={loading} variant="contained" sx={{ px: 4, py: 1, borderRadius: 2, background: "linear-gradient(135deg, #667EEA 0%, #764BA2 100%)", fontWeight: 600, boxShadow: "0 4px 12px rgba(102,126,234,0.3)", "&:hover": { background: "linear-gradient(135deg, #5A67D8 0%, #6B46C1 100%)", boxShadow: "0 6px 16px rgba(102,126,234,0.4)", transform: "translateY(-1px)" }, "&:disabled": { background: "#ccc", boxShadow: "none", transform: "none" } }}>
+
+          <Button
+            type="submit"
+            disabled={loading}
+            variant="contained"
+            sx={{
+              px: 4,
+              py: 1,
+              borderRadius: 2,
+              background: "linear-gradient(135deg, #667EEA 0%, #764BA2 100%)",
+              fontWeight: 600,
+              boxShadow: "0 4px 12px rgba(102,126,234,0.3)",
+              "&:hover": {
+                background: "linear-gradient(135deg, #5A67D8 0%, #6B46C1 100%)",
+                boxShadow: "0 6px 16px rgba(102,126,234,0.4)",
+              },
+            }}
+          >
             {loading ? (
               <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
                 <CircularProgress size={16} sx={{ color: "white" }} />

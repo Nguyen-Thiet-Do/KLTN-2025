@@ -19,21 +19,24 @@ import {
   CardContent,
 } from "@mui/material";
 import { Close } from "@mui/icons-material";
+import { useSnackbar } from "notistack"; // ✅ Thêm hook notistack
 import { createReader } from "../../services/readerService";
 
 export default function AddReader({ onSuccess, onCancel, open = true }) {
+  const { enqueueSnackbar } = useSnackbar(); // ✅ Sử dụng notistack
+
   const [form, setForm] = useState({
-    // account
     email: "",
     password: "",
-    // profile
     fullName: "",
     gender: "",
     dateOfBirth: "",
     phoneNumber: "",
+    cccd: "",
     address: "",
     note: "",
   });
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
@@ -46,13 +49,31 @@ export default function AddReader({ onSuccess, onCancel, open = true }) {
     e.preventDefault();
     setLoading(true);
     setError(null);
+
     try {
       const token = sessionStorage.getItem("accessToken");
+      if (!token) {
+        enqueueSnackbar("⚠️ Phiên đăng nhập hết hạn. Vui lòng đăng nhập lại.", {
+          variant: "warning",
+        });
+        setLoading(false);
+        return;
+      }
+
       const res = await createReader(token, form);
-      if (res.success) onSuccess();
-      else setError(res.message || "Thêm thất bại");
+
+      if (res.success) {
+        enqueueSnackbar("✅ Thêm độc giả thành công!", { variant: "success" });
+        onSuccess(); // reload lại danh sách
+      } else {
+        enqueueSnackbar(res.message || "❌ Thêm độc giả thất bại!", {
+          variant: "error",
+        });
+        setError(res.message || "Thêm thất bại.");
+      }
     } catch (err) {
-      console.error(err);
+      console.error("❌ Lỗi khi thêm độc giả:", err);
+      enqueueSnackbar("⚠️ Lỗi khi kết nối đến máy chủ!", { variant: "error" });
       setError(err.response?.data?.message || "Lỗi khi thêm độc giả");
     } finally {
       setLoading(false);
@@ -63,7 +84,6 @@ export default function AddReader({ onSuccess, onCancel, open = true }) {
     if (!loading) onCancel();
   };
 
-  // style helper cho TextField/Select
   const fieldSx = {
     "& .MuiOutlinedInput-root": {
       borderRadius: 2,
@@ -85,7 +105,7 @@ export default function AddReader({ onSuccess, onCancel, open = true }) {
           boxShadow: "0 20px 60px rgba(0,0,0,0.3)",
           height: "90vh",
           display: "grid",
-          gridTemplateRows: "auto 1fr auto", // Header | Content (scroll) | Actions
+          gridTemplateRows: "auto 1fr auto",
           overflow: "hidden",
         },
       }}
@@ -118,9 +138,8 @@ export default function AddReader({ onSuccess, onCancel, open = true }) {
         </IconButton>
       </DialogTitle>
 
-      {/* Form giữ grid order: content + actions */}
+      {/* Form */}
       <Box component="form" onSubmit={handleSubmit} sx={{ display: "contents" }}>
-        {/* Content (scroll area) */}
         <DialogContent
           sx={{
             p: 0,
@@ -131,13 +150,16 @@ export default function AddReader({ onSuccess, onCancel, open = true }) {
           }}
         >
           {error && (
-            <Alert severity="error" sx={{ m: 3, mb: 2, borderRadius: 2, "& .MuiAlert-message": { py: 1 } }}>
+            <Alert severity="error" sx={{ m: 3, mb: 2, borderRadius: 2 }}>
               {error}
             </Alert>
           )}
 
-          {/* Section 1: Tài khoản (2 cột) */}
-          <Card elevation={0} sx={{ borderRadius: 0, borderBottom: "1px solid #e0e0e0" }}>
+          {/* Thông tin tài khoản */}
+          <Card
+            elevation={0}
+            sx={{ borderRadius: 0, borderBottom: "1px solid #e0e0e0" }}
+          >
             <CardContent sx={{ p: 4, pb: 3 }}>
               <Typography
                 variant="h6"
@@ -165,7 +187,13 @@ export default function AddReader({ onSuccess, onCancel, open = true }) {
                 Thông Tin Tài Khoản
               </Typography>
 
-              <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" }, gap: 3 }}>
+              <Box
+                sx={{
+                  display: "grid",
+                  gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" },
+                  gap: 3,
+                }}
+              >
                 <TextField
                   name="email"
                   type="email"
@@ -192,7 +220,7 @@ export default function AddReader({ onSuccess, onCancel, open = true }) {
             </CardContent>
           </Card>
 
-          {/* Section 2: Thông tin cá nhân (2 cột) */}
+          {/* Thông tin cá nhân */}
           <Card elevation={0} sx={{ borderRadius: 0 }}>
             <CardContent sx={{ p: 4, pt: 3 }}>
               <Typography
@@ -221,7 +249,13 @@ export default function AddReader({ onSuccess, onCancel, open = true }) {
                 Thông Tin Cá Nhân
               </Typography>
 
-              <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" }, gap: 3 }}>
+              <Box
+                sx={{
+                  display: "grid",
+                  gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" },
+                  gap: 3,
+                }}
+              >
                 <TextField
                   name="fullName"
                   label="Họ và tên"
@@ -235,7 +269,14 @@ export default function AddReader({ onSuccess, onCancel, open = true }) {
 
                 <FormControl required sx={fieldSx}>
                   <InputLabel id="gender-label">Giới tính</InputLabel>
-                  <Select labelId="gender-label" name="gender" value={form.gender} label="Giới tính" onChange={handleChange} disabled={loading}>
+                  <Select
+                    labelId="gender-label"
+                    name="gender"
+                    value={form.gender}
+                    label="Giới tính"
+                    onChange={handleChange}
+                    disabled={loading}
+                  >
                     <MenuItem value="">
                       <em>Chọn giới tính</em>
                     </MenuItem>
@@ -267,13 +308,26 @@ export default function AddReader({ onSuccess, onCancel, open = true }) {
                 />
 
                 <TextField
+                  name="cccd"
+                  label="CCCD"
+                  value={form.cccd}
+                  onChange={handleChange}
+                  disabled={loading}
+                  placeholder="Nhập số CCCD"
+                  sx={fieldSx}
+                />
+
+                <TextField
                   name="address"
                   label="Địa chỉ"
                   value={form.address}
                   onChange={handleChange}
                   disabled={loading}
                   placeholder="Nhập địa chỉ đầy đủ"
-                  sx={{ ...fieldSx, gridColumn: { xs: "auto", md: "1 / span 2" } }}
+                  sx={{
+                    ...fieldSx,
+                    gridColumn: { xs: "auto", md: "1 / span 2" },
+                  }}
                 />
 
                 <TextField
@@ -285,14 +339,17 @@ export default function AddReader({ onSuccess, onCancel, open = true }) {
                   placeholder="Thêm ghi chú (nếu có)"
                   multiline
                   rows={3}
-                  sx={{ ...fieldSx, gridColumn: { xs: "auto", md: "1 / span 2" } }}
+                  sx={{
+                    ...fieldSx,
+                    gridColumn: { xs: "auto", md: "1 / span 2" },
+                  }}
                 />
               </Box>
             </CardContent>
           </Card>
         </DialogContent>
 
-        {/* Actions */}
+        {/* Footer */}
         <DialogActions
           sx={{
             px: 4,
@@ -314,11 +371,15 @@ export default function AddReader({ onSuccess, onCancel, open = true }) {
               borderColor: "#667EEA",
               color: "#667EEA",
               fontWeight: 600,
-              "&:hover": { borderColor: "#5A67D8", backgroundColor: "rgba(102,126,234,0.04)" },
+              "&:hover": {
+                borderColor: "#5A67D8",
+                backgroundColor: "rgba(102,126,234,0.04)",
+              },
             }}
           >
             Hủy
           </Button>
+
           <Button
             type="submit"
             disabled={loading}
@@ -333,9 +394,7 @@ export default function AddReader({ onSuccess, onCancel, open = true }) {
               "&:hover": {
                 background: "linear-gradient(135deg, #5A67D8 0%, #6B46C1 100%)",
                 boxShadow: "0 6px 16px rgba(102,126,234,0.4)",
-                transform: "translateY(-1px)",
               },
-              "&:disabled": { background: "#ccc", boxShadow: "none", transform: "none" },
             }}
           >
             {loading ? (

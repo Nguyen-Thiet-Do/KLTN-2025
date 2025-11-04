@@ -1,4 +1,3 @@
-// src/services/readerService.js
 import api from "./api";
 
 // 📋 Lấy danh sách độc giả
@@ -8,8 +7,13 @@ export const getReaders = async () => {
 };
 
 // ➕ Thêm mới độc giả
-export const createReader = async (data) => {
-  const res = await api.post("/reader", data);
+export const createReader = async (token, data) => {
+  const res = await api.post("/reader", data, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+  });
   return res.data;
 };
 
@@ -25,9 +29,8 @@ export const updateReader = async (id, data) => {
   return res.data;
 };
 
-// 🔍 Lấy độc giả theo ID (API trả { success, reader })
+// 🔍 Lấy độc giả theo ID
 export const getReaderById = async (id) => {
   const res = await api.get(`/reader/${id}`);
-  // Trả ra đúng object reader để FE dùng trực tiếp
   return res?.data?.reader ?? null;
 };

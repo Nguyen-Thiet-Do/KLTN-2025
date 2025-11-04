@@ -1,9 +1,12 @@
 // src/notifications/NotificationsProvider.jsx
-import { SnackbarProvider } from 'notistack';
+import { SnackbarProvider, closeSnackbar } from 'notistack';
 import { IconButton } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 
 export default function NotificationsProvider({ children }) {
+  // ✅ Cho phép đóng snackbar từ action
+  window.__closeSnackbar = (id) => closeSnackbar(id);
+
   return (
     <SnackbarProvider
       maxSnack={4}
@@ -12,7 +15,7 @@ export default function NotificationsProvider({ children }) {
       preventDuplicate
       variant="info"
       action={(snackbarId) => (
-        <IconButton size="small" onClick={() => window.__closeSnackbar?.(snackbarId)}>
+        <IconButton size="small" onClick={() => closeSnackbar(snackbarId)}>
           <CloseIcon fontSize="small" />
         </IconButton>
       )}

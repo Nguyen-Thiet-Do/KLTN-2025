@@ -240,16 +240,22 @@ export default function Readers() {
         <Card sx={{ borderRadius: 3, boxShadow: "0 8px 32px rgba(0,0,0,0.1)", overflow: "hidden" }}>
           <TableContainer>
             <Table>
-              <TableHead>
-                <TableRow sx={{ backgroundColor: "rgba(102,126,234,0.08)" }}>
-                  <TableCell sx={{ fontWeight: 700, color: "#2D3748" }}>Mã độc giả</TableCell>
-                  <TableCell sx={{ fontWeight: 700, color: "#2D3748" }}>Họ tên</TableCell>
-                  <TableCell sx={{ fontWeight: 700, color: "#2D3748" }}>Giới tính</TableCell>
-                  <TableCell sx={{ fontWeight: 700, color: "#2D3748" }}>Ngày sinh</TableCell>
-                  <TableCell sx={{ fontWeight: 700, color: "#2D3748" }}>Email</TableCell>
-                  <TableCell sx={{ fontWeight: 700, color: "#2D3748", textAlign: "center" }}>Hành động</TableCell>
-                </TableRow>
-              </TableHead>
+            <TableHead>
+  <TableRow sx={{ backgroundColor: "rgba(102,126,234,0.08)" }}>
+    <TableCell sx={{ fontWeight: 700 }}>Mã độc giả</TableCell>
+    <TableCell sx={{ fontWeight: 700 }}>Họ tên</TableCell>
+    <TableCell sx={{ fontWeight: 700 }}>Giới tính</TableCell>
+    <TableCell sx={{ fontWeight: 700 }}>Ngày sinh</TableCell>
+   <TableCell sx={{ fontWeight: 700 }}>SĐT</TableCell>
+
+
+    <TableCell sx={{ fontWeight: 700 }}>CCCD</TableCell>      
+    <TableCell sx={{ fontWeight: 700 }}>Địa chỉ</TableCell>   
+    <TableCell sx={{ fontWeight: 700 }}>Email</TableCell>
+    <TableCell sx={{ fontWeight: 700, textAlign: "center" }}>Hành động</TableCell>
+  </TableRow>
+</TableHead>
+
               <TableBody>
                 {currentReaders.length === 0 ? (
                   <TableRow>
@@ -292,6 +298,11 @@ export default function Readers() {
                       <TableCell>
                         {r.dateOfBirth ? new Date(r.dateOfBirth).toLocaleDateString("vi-VN") : "-"}
                       </TableCell>
+                      <TableCell>{r.phoneNumber || "-"}</TableCell>
+
+                      <TableCell>{r.cccd || "-"}</TableCell>      
+<TableCell>{r.address || "-"}</TableCell>  
+
                       <TableCell>{r.email}</TableCell>
                       <TableCell sx={{ textAlign: "center" }}>
                         <Stack direction="row" spacing={1} justifyContent="center">
