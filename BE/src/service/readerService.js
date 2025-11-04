@@ -1,3 +1,4 @@
+// BE/services/readerService.js
 const { Reader, Account } = require("../model");
 const bcrypt = require("bcrypt");
 
@@ -22,6 +23,7 @@ const getAllReaders = async () => {
       fullName: r.fullName,
       gender: r.gender,
       dateOfBirth: r.dateOfBirth,
+      cccd: r.cccd,                     
       address: r.address,
       email: r.Account?.email || null,
       phoneNumber: r.Account?.phoneNumber || null,
@@ -51,7 +53,7 @@ const getReaderByAccountId = async (accountId) => {
 // 🔹 THÊM ĐỘC GIẢ MỚI (CHO ADMIN)
 // ============================================================
 const createReader = async (data) => {
-  const { fullName, email, password, gender, dateOfBirth, phoneNumber, address } = data;
+  const { fullName, email, password, gender, dateOfBirth, phoneNumber, address, cccd } = data;
   if (!fullName || !email || !password) throw new Error("Thiếu thông tin bắt buộc");
 
   const transaction = await Reader.sequelize.transaction();
@@ -78,6 +80,7 @@ const createReader = async (data) => {
         fullName,
         gender: gender || null,
         dateOfBirth: dateOfBirth || null,
+        cccd: cccd || null,           // ✅ thêm
         address: address || null,
       },
       { transaction }
@@ -92,19 +95,19 @@ const createReader = async (data) => {
 };
 
 // ============================================================
-// 🔹 CẬP NHẬT THÔNG TIN ĐỘC GIẢ (CHO ADMIN HOẶC THỦ THƯ)
+// 🔹 CẬP NHẬT THÔNG TIN ĐỘC GIẢ
 // ============================================================
 const updateReader = async (id, data) => {
-  const { fullName, gender, dateOfBirth, address } = data;
+  const { fullName, gender, dateOfBirth, address, cccd } = data;
   const [affected] = await Reader.update(
-    { fullName, gender, dateOfBirth, address },
+    { fullName, gender, dateOfBirth, address, cccd }, // ✅ thêm cccd
     { where: { readerId: id } }
   );
   return { affectedRows: affected };
 };
 
 // ============================================================
-// 🗑️ XÓA ĐỘC GIẢ (XÓA CẢ ACCOUNT LIÊN KẾT)
+// 🗑️ XÓA ĐỘC GIẢ
 // ============================================================
 const deleteReader = async (readerId) => {
   const transaction = await Reader.sequelize.transaction();
@@ -125,6 +128,10 @@ const deleteReader = async (readerId) => {
     throw err;
   }
 };
+
+// ============================================================
+// 🔹 LẤY ĐỘC GIẢ THEO ID
+// ============================================================
 const getReaderById = async (readerId) => {
   const r = await Reader.findOne({
     where: { readerId, deleted: false },
@@ -140,12 +147,14 @@ const getReaderById = async (readerId) => {
     fullName: r.fullName,
     gender: r.gender,
     dateOfBirth: r.dateOfBirth,
+    cccd: r.cccd,                   
     address: r.address,
     email: r.Account?.email || null,
     phoneNumber: r.Account?.phoneNumber || null,
     status: r.Account?.status || null,
   };
 };
+
 module.exports = {
   getAllReaders,
   getReaderByAccountId,
