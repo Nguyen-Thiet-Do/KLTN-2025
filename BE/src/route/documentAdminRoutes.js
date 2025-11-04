@@ -159,4 +159,84 @@ router.post(
   documentAdminController.addCopiesCtrl
 );
 
+/**
+ * @route   PUT /api/documents/admin/books/:id
+ * @desc    Sửa tài liệu loại Sách (Book). Hỗ trợ multipart (cover/ebook) hoặc JSON.
+ * @body    Trường nào gửi mới thì cập nhật; không gửi thì giữ nguyên.
+ * @access  Admin (1), Librarian (2)
+ */
+router.put(
+  '/books/:id',
+  requireAuth,
+  requireRole([1, 2]),
+  upload.fields([{ name: 'cover', maxCount: 1 }, { name: 'ebook', maxCount: 1 }]),
+  documentAdminController.updateBookCtrl
+);
+
+/**
+ * @route   PUT /api/documents/admin/magazines/:id
+ * @desc    Sửa tài liệu loại Tạp chí (Magazine)
+ * @access  Admin (1), Librarian (2)
+ */
+router.put(
+  '/magazines/:id',
+  requireAuth,
+  requireRole([1, 2]),
+  upload.fields([{ name: 'cover', maxCount: 1 }, { name: 'ebook', maxCount: 1 }]),
+  documentAdminController.updateMagazineCtrl
+);
+
+/**
+ * @route   PUT /api/documents/admin/newspapers/:id
+ * @desc    Sửa tài liệu loại Báo (Newspaper)
+ * @access  Admin (1), Librarian (2)
+ */
+router.put(
+  '/newspapers/:id',
+  requireAuth,
+  requireRole([1, 2]),
+  upload.fields([{ name: 'cover', maxCount: 1 }, { name: 'ebook', maxCount: 1 }]),
+  documentAdminController.updateNewspaperCtrl
+);
+
+/**
+ * @route   PUT /api/documents/admin/copies/:copyId
+ * @desc    Cập nhật 1 bản sao (barCode/status/conditionNote/entryDate)
+ * @body    { barCode?, status?, conditionNote?, entryDate? }
+ * @access  Admin (1), Librarian (2)
+ */
+router.put(
+  '/copies/:copyId',
+  requireAuth,
+  requireRole([1, 2]),
+  documentAdminController.updateCopyCtrl
+);
+
+/**
+ * @route   DELETE /api/documents/admin/:id
+ * @desc    Xóa mềm 1 tài liệu. Tuỳ chọn cascade:
+ *          ?cascadeSubtype=0|1 (default=1)
+ *          ?cascadeCopies=0|1   (default=0)
+ *          ?cascadeMaps=0|1     (default=0)
+ * @access  Admin (1), Librarian (2)
+ */
+router.delete(
+  '/:id',
+  requireAuth,
+  requireRole([1, 2]),
+  documentAdminController.deleteDocumentCtrl
+);
+
+/**
+ * @route   DELETE /api/documents/admin/copies/:copyId
+ * @desc    Xóa mềm 1 bản sao; tự động cập nhật lại numberOfCopy của tài liệu
+ * @access  Admin (1), Librarian (2)
+ */
+router.delete(
+  '/copies/:copyId',
+  requireAuth,
+  requireRole([1, 2]),
+  documentAdminController.deleteCopyCtrl
+);
+
 module.exports = router;
