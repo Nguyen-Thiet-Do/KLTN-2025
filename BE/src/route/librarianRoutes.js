@@ -14,7 +14,8 @@ router.post("/", requireAuth, requireRole([1]), librarianController.createLibrar
 
 // ✅ Cập nhật thủ thư (Admin)
 router.put("/:id", requireAuth, requireRole([1]), librarianController.updateLibrarian);
-
+// ✅ Đặt lại mật khẩu thủ thư (Admin + Thủ thư)
+router.put("/:id/reset-password", requireAuth, requireRole([1, 2]), librarianController.resetLibrarianPassword);
 // ✅ Xóa thủ thư theo ID (Admin)
 router.delete("/:id", requireAuth, requireRole([1]), librarianController.deleteLibrarian);
 

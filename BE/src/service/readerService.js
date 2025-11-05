@@ -1,4 +1,3 @@
-// BE/services/readerService.js
 const { Reader, Account } = require("../model");
 const bcrypt = require("bcrypt");
 
@@ -23,7 +22,7 @@ const getAllReaders = async () => {
       fullName: r.fullName,
       gender: r.gender,
       dateOfBirth: r.dateOfBirth,
-      cccd: r.cccd,                     
+      cccd: r.cccd,
       address: r.address,
       email: r.Account?.email || null,
       phoneNumber: r.Account?.phoneNumber || null,
@@ -60,7 +59,6 @@ const createReader = async (data) => {
   try {
     const passwordHash = await bcrypt.hash(password, 10);
 
-    // 1️⃣ Tạo tài khoản
     const account = await Account.create(
       {
         email,
@@ -72,7 +70,6 @@ const createReader = async (data) => {
       { transaction }
     );
 
-    // 2️⃣ Tạo độc giả
     const reader = await Reader.create(
       {
         accountId: account.accountId,
@@ -80,7 +77,7 @@ const createReader = async (data) => {
         fullName,
         gender: gender || null,
         dateOfBirth: dateOfBirth || null,
-        cccd: cccd || null,           // ✅ thêm
+        cccd: cccd || null,
         address: address || null,
       },
       { transaction }
@@ -90,6 +87,7 @@ const createReader = async (data) => {
     return { readerId: reader.readerId, accountId: account.accountId, fullName, email };
   } catch (err) {
     await transaction.rollback();
+    console.error("❌ Lỗi createReader:", err);
     throw err;
   }
 };
@@ -98,12 +96,52 @@ const createReader = async (data) => {
 // 🔹 CẬP NHẬT THÔNG TIN ĐỘC GIẢ
 // ============================================================
 const updateReader = async (id, data) => {
-  const { fullName, gender, dateOfBirth, address, cccd } = data;
-  const [affected] = await Reader.update(
-    { fullName, gender, dateOfBirth, address, cccd }, // ✅ thêm cccd
-    { where: { readerId: id } }
-  );
-  return { affectedRows: affected };
+  const { fullName, gender, dateOfBirth, address, cccd, email, phoneNumber, password } = data;
+
+  const transaction = await Reader.sequelize.transaction();
+  try {
+    const reader = await Reader.findByPk(id, { include: [Account], transaction });
+    if (!reader) throw new Error("Không tìm thấy độc giả");
+
+    await reader.update({ fullName, gender, dateOfBirth, address, cccd }, { transaction });
+
+    const updates = {};
+    if (email) updates.email = email;
+    if (phoneNumber) updates.phoneNumber = phoneNumber;
+    if (password && password.trim() !== "") {
+      updates.passwordHash = await bcrypt.hash(password, 10);
+    }
+
+    if (Object.keys(updates).length > 0) {
+      await Account.update(updates, { where: { accountId: reader.accountId }, transaction });
+    }
+
+    await transaction.commit();
+    return { success: true, message: "Cập nhật độc giả thành công" };
+  } catch (error) {
+    await transaction.rollback();
+    console.error("❌ Lỗi updateReader:", error);
+    return { success: false, message: error.message };
+  }
+};
+
+// ============================================================
+// 🔐 ĐẶT LẠI MẬT KHẨU THỦ CÔNG
+// ============================================================
+const resetReaderPassword = async (readerId, newPassword) => {
+  try {
+    if (!newPassword || newPassword.trim() === "") throw new Error("Mật khẩu mới không hợp lệ");
+    const reader = await Reader.findByPk(readerId);
+    if (!reader) throw new Error("Không tìm thấy độc giả");
+
+    const passwordHash = await bcrypt.hash(newPassword, 10);
+    await Account.update({ passwordHash }, { where: { accountId: reader.accountId } });
+
+    return { success: true, message: "Đặt lại mật khẩu thành công" };
+  } catch (error) {
+    console.error("❌ Lỗi resetReaderPassword:", error);
+    return { success: false, message: error.message };
+  }
 };
 
 // ============================================================
@@ -125,6 +163,7 @@ const deleteReader = async (readerId) => {
     return true;
   } catch (err) {
     await transaction.rollback();
+    console.error("❌ Lỗi deleteReader:", err);
     throw err;
   }
 };
@@ -135,10 +174,12 @@ const deleteReader = async (readerId) => {
 const getReaderById = async (readerId) => {
   const r = await Reader.findOne({
     where: { readerId, deleted: false },
-    include: [{
-      model: Account,
-      attributes: ["email", "phoneNumber", "status"],
-    }],
+    include: [
+      {
+        model: Account,
+        attributes: ["email", "phoneNumber", "status"],
+      },
+    ],
   });
   if (!r) return null;
 
@@ -147,7 +188,7 @@ const getReaderById = async (readerId) => {
     fullName: r.fullName,
     gender: r.gender,
     dateOfBirth: r.dateOfBirth,
-    cccd: r.cccd,                   
+    cccd: r.cccd,
     address: r.address,
     email: r.Account?.email || null,
     phoneNumber: r.Account?.phoneNumber || null,
@@ -162,4 +203,5 @@ module.exports = {
   updateReader,
   deleteReader,
   getReaderById,
+  resetReaderPassword, // ✅ thêm export
 };

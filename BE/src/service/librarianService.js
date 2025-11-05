@@ -17,13 +17,16 @@ const getAllLibrarians = async () => {
       order: [['librarianId', 'ASC']],
     });
 
-    // Chuẩn hóa output cho FE
+    // ✅ Chuẩn hóa output cho FE
     return librarians.map((l) => ({
       librarianId: l.librarianId,
       fullName: l.fullName,
       gender: l.gender,
       dateOfBirth: l.dateOfBirth,
-      address: l.address,
+      cccd: l.cccd || null,
+      address: l.address || null,
+      basicSalary: l.basicSalary || null,
+      salaryCoefficient: l.salaryCoefficient || null,
       email: l.Account?.email || null,
       phoneNumber: l.Account?.phoneNumber || null,
     }));
@@ -52,7 +55,7 @@ const getLibrarianByAccountId = async (accountId) => {
 // 🔹 THÊM THỦ THƯ MỚI (CHO ADMIN)
 // ============================================================
 const createLibrarian = async (data) => {
-  const { fullName, email, password, gender, dateOfBirth, phoneNumber, address } = data;
+  const { fullName, email, password, gender, dateOfBirth, phoneNumber, address, cccd, basicSalary } = data;
   if (!fullName || !email || !password) throw new Error('Thiếu thông tin bắt buộc');
 
   const transaction = await Librarian.sequelize.transaction();
@@ -80,6 +83,8 @@ const createLibrarian = async (data) => {
         gender: gender || null,
         dateOfBirth: dateOfBirth || null,
         address: address || null,
+        cccd: cccd || null,
+        basicSalary: basicSalary || null,
       },
       { transaction }
     );
@@ -93,17 +98,77 @@ const createLibrarian = async (data) => {
 };
 
 // ============================================================
-// 🔹 CẬP NHẬT THÔNG TIN THỦ THƯ (CHO ADMIN)
+// 🔹 CẬP NHẬT THÔNG TIN THỦ THƯ
 // ============================================================
 const updateLibrarian = async (id, data) => {
-  const { fullName, gender, dateOfBirth, address } = data;
-  const [affected] = await Librarian.update(
-    { fullName, gender, dateOfBirth, address },
-    { where: { librarianId: id } }
-  );
-  return { affectedRows: affected };
+  const {
+    fullName,
+    gender,
+    dateOfBirth,
+    phoneNumber,
+    address,
+    cccd,
+    basicSalary,
+    salaryCoefficient,
+    note,
+  } = data;
+
+  const transaction = await Librarian.sequelize.transaction();
+  try {
+    // 🔍 Tìm thủ thư hiện tại để lấy accountId
+    const librarian = await Librarian.findByPk(id);
+    if (!librarian) throw new Error("Không tìm thấy thủ thư.");
+
+    // 1️⃣ Cập nhật Librarian
+    await Librarian.update(
+      {
+        fullName,
+        gender,
+        dateOfBirth,
+        address,
+        cccd,
+        basicSalary,
+        salaryCoefficient,
+        note,
+      },
+      { where: { librarianId: id }, transaction }
+    );
+
+    // 2️⃣ Cập nhật số điện thoại trong Account (nếu có)
+    if (phoneNumber) {
+      await Account.update(
+        { phoneNumber },
+        { where: { accountId: librarian.accountId }, transaction }
+      );
+    }
+
+    await transaction.commit();
+    return { success: true, message: "Cập nhật thành công." };
+  } catch (err) {
+    await transaction.rollback();
+    console.error("❌ Lỗi updateLibrarian:", err);
+    return { success: false, message: err.message };
+  }
 };
 
+// ============================================================
+// 🔐 ĐẶT LẠI MẬT KHẨU THỦ CÔNG
+// ============================================================
+const resetLibrarianPassword = async (librarianId, newPassword) => {
+  try {
+    if (!newPassword || newPassword.trim() === "") throw new Error("Mật khẩu mới không hợp lệ");
+    const librarian = await Librarian.findByPk(librarianId);
+    if (!librarian) throw new Error("Không tìm thấy thủ thư");
+
+    const passwordHash = await bcrypt.hash(newPassword, 10);
+    await Account.update({ passwordHash }, { where: { accountId: librarian.accountId } });
+
+    return { success: true, message: "Đặt lại mật khẩu thành công" };
+  } catch (error) {
+    console.error("❌ Lỗi resetLibrarianPassword:", error);
+    return { success: false, message: error.message };
+  }
+};
 // ============================================================
 // 🗑️ XÓA THỦ THƯ (XÓA CẢ ACCOUNT LIÊN KẾT)
 // ============================================================
@@ -133,4 +198,5 @@ module.exports = {
   createLibrarian,
   updateLibrarian,
   deleteLibrarian,
+  resetLibrarianPassword
 };

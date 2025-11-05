@@ -17,7 +17,8 @@ router.post("/", requireAuth, requireRole([1]), readerController.createReader);
 
 // ✅ Cập nhật độc giả (Admin hoặc Thủ thư)
 router.put("/:id", requireAuth, requireRole([1, 2]), readerController.updateReader);
-
+// ✅ Đặt lại mật khẩu độc giả (Admin + Thủ thư)
+router.put("/:id/reset-password", requireAuth, requireRole([1, 2]), readerController.resetReaderPassword);
 // ✅ Xóa độc giả theo ID (Admin)
 router.delete("/:id", requireAuth, requireRole([1]), readerController.deleteReader);
 

@@ -47,6 +47,18 @@ const updateLibrarian = async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 };
+// ✅ Đặt lại mật khẩu 
+const resetLibrarianPassword = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { newPassword } = req.body;
+    const result = await librarianService.resetLibrarianPassword(id, newPassword);
+    res.json(result);
+  } catch (err) {
+    console.error("❌ Lỗi khi đặt lại mật khẩu:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
 
 // ✅ Xóa thủ thư
 const deleteLibrarian = async (req, res) => {
@@ -69,4 +81,5 @@ module.exports = {
   createLibrarian,
   updateLibrarian,
   deleteLibrarian,
+  resetLibrarianPassword,
 };
