@@ -44,8 +44,11 @@ async function hasUnresolvedViolation(readerId) {
 
 /**
  * Đặt mượn trước (Reader)
+ * - KHÔNG truyền quantity
+ * - Mỗi documentId chỉ được đặt 1 bản (trùng -> 400)
+ *
  * @param {object} user - req.user (JWT), yêu cầu roleId = 3
- * @param {object} payload - { items: [{ documentId: number, quantity?: number }], note?: string }
+ * @param {object} payload - { items: Array<number | { documentId: number }>, note?: string }
  */
 async function reserveLoanForReaderService(user, payload) {
   const t = await sequelize.transaction();
@@ -69,21 +72,35 @@ async function reserveLoanForReaderService(user, payload) {
       throw e;
     }
 
-    // Chuẩn hoá items (gộp theo documentId)
+    // --- Chuẩn hoá items: KHÔNG quantity, KHÔNG CHO PHÉP TRÙNG ---
+    // Chấp nhận: [1, 2, 5] hoặc [{documentId:1}, {documentId:2}, {documentId:5}]
     const itemsIn = Array.isArray(payload?.items) ? payload.items : [];
     if (!itemsIn.length) {
       const e = new Error('Danh sách sách mượn trống');
       e.statusCode = 400;
       throw e;
     }
-    const merged = new Map();
-    for (const it of itemsIn) {
-      const id = Number(it.documentId);
-      const qty = Math.max(1, Number(it.quantity || 1));
-      if (!id || qty <= 0) continue;
-      merged.set(id, (merged.get(id) || 0) + qty);
+
+    const seen = new Set();
+    const items = [];
+    for (const raw of itemsIn) {
+      const id = Number(typeof raw === 'object' ? raw?.documentId : raw);
+      if (!id) continue;
+
+      if (seen.has(id)) {
+        const e = new Error(`Tài liệu #${id} xuất hiện nhiều lần. Mỗi tài liệu chỉ được đặt 1 bản.`);
+        e.statusCode = 400;
+        throw e;
+      }
+      seen.add(id);
+      items.push({ documentId: id }); // luôn 1 bản
     }
-    const items = [...merged.entries()].map(([documentId, quantity]) => ({ documentId, quantity }));
+
+    if (items.length === 0) {
+      const e = new Error('Danh sách sách mượn không hợp lệ');
+      e.statusCode = 400;
+      throw e;
+    }
 
     // Hạn mức mượn
     const currentlyBorrowing = await countBorrowingBooks(reader.readerId);
@@ -93,7 +110,7 @@ async function reserveLoanForReaderService(user, payload) {
       throw e;
     }
     const remaining = 3 - currentlyBorrowing;
-    const requestedTotal = items.reduce((s, x) => s + x.quantity, 0);
+    const requestedTotal = items.length; // mỗi item = 1 bản
     if (requestedTotal > remaining) {
       const e = new Error(`Số sách yêu cầu (${requestedTotal}) vượt quá số còn được mượn (${remaining}).`);
       e.statusCode = 400;
@@ -129,7 +146,7 @@ async function reserveLoanForReaderService(user, payload) {
       });
 
       // 2) Đếm số lượng đang "giữ chỗ mềm" từ các phiếu PENDING
-      //    (LoanDetail chưa gán documentCopyId, cùng documentId — mình tag bằng note)
+      //    (LoanDetail chưa gán documentCopyId, cùng documentId — tag qua note)
       const pendingHolds = await LoanDetail.count({
         include: [{
           model: LoanSlip,
@@ -146,8 +163,8 @@ async function reserveLoanForReaderService(user, payload) {
       });
 
       const effectiveAvailable = available - pendingHolds;
-      if (effectiveAvailable < it.quantity) {
-        const e = new Error(`"${detail.title}" chỉ còn ${effectiveAvailable} bản khả dụng để đặt trước.`);
+      if (effectiveAvailable < 1) {
+        const e = new Error(`"${detail.title}" hiện không còn bản khả dụng để đặt trước.`);
         e.statusCode = 400;
         throw e;
       }
@@ -159,13 +176,13 @@ async function reserveLoanForReaderService(user, payload) {
       detailPreview.push({
         documentId: detail.documentId,
         title: detail.title,
-        quantity: it.quantity,
+        quantity: 1,            // luôn 1
         depositMin: minPerOne,
         depositMax: maxPerOne,
       });
 
-      if (minPerOne != null) totalDepositMin += minPerOne * it.quantity;
-      if (maxPerOne != null) totalDepositMax += maxPerOne * it.quantity;
+      if (minPerOne != null) totalDepositMin += minPerOne;
+      if (maxPerOne != null) totalDepositMax += maxPerOne;
     }
 
     // Tạo LoanSlip ở trạng thái PENDING
@@ -185,23 +202,21 @@ async function reserveLoanForReaderService(user, payload) {
       { transaction: t }
     );
 
-    // Tạo LoanDetail: chưa chọn bản sao -> documentCopyId = null
+    // Tạo LoanDetail: mỗi tài liệu 1 dòng
     for (const it of detailPreview) {
-      for (let i = 0; i < it.quantity; i++) {
-        await LoanDetail.create(
-          {
-            loanSlipId: slip.loanSlipId,
-            documentCopyId: null, // sẽ gán khi thủ thư duyệt
-            returnDate: null,
-            status: 'PENDING',
-            depositAmount: null,  // sẽ chốt khi duyệt
-            fineAmount: 0,
-            renewalCount: 0,
-            note: `REQUEST_DOCUMENT_ID=${it.documentId}`, // tag để tính pendingHolds
-          },
-          { transaction: t }
-        );
-      }
+      await LoanDetail.create(
+        {
+          loanSlipId: slip.loanSlipId,
+          documentCopyId: null, // sẽ gán khi thủ thư duyệt
+          returnDate: null,
+          status: 'PENDING',
+          depositAmount: null,  // sẽ chốt khi duyệt
+          fineAmount: 0,
+          renewalCount: 0,
+          note: `REQUEST_DOCUMENT_ID=${it.documentId}`, // tag để tính pendingHolds
+        },
+        { transaction: t }
+      );
     }
 
     await t.commit();
