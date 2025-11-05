@@ -11,7 +11,6 @@ import {
   TableContainer,
   TableHead,
   TableRow,
-  Paper,
   IconButton,
   Chip,
   CircularProgress,
@@ -28,9 +27,10 @@ import {
   Edit as EditIcon,
   Delete as DeleteIcon,
   Refresh as RefreshIcon,
+  LockReset as ResetIcon,
 } from "@mui/icons-material";
 
-import { getReaders, deleteReader } from "../../services/readerService";
+import { getReaders, deleteReader, resetReaderPassword } from "../../services/readerService";
 import AddReader from "./AddReader";
 import EditReader from "./EditReader";
 
@@ -38,18 +38,12 @@ export default function Readers() {
   const [readers, setReaders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingReader, setEditingReader] = useState(null);
-
-  // 🔍 Tìm kiếm
   const [searchQuery, setSearchQuery] = useState("");
-
-  // 🔢 Phân trang (giống style Thủ thư)
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 5;
 
-  // 🔄 Load danh sách độc giả
   const fetchData = async () => {
     try {
       const token = sessionStorage.getItem("accessToken");
@@ -79,17 +73,14 @@ export default function Readers() {
     fetchData();
   }, []);
 
-  // 👀 Hiển thị giới tính (giữ logic tương tự)
   const getGenderDisplay = (gender) => {
     if (!gender) return "-";
-
     if (typeof gender === "object") {
       const value = gender?.data?.[0] ?? (gender instanceof Uint8Array ? gender[0] : undefined);
       if (value === 1) return "Nam";
       if (value === 0) return "Nữ";
       return "Khác";
     }
-
     const g = gender.toString().trim().toLowerCase();
     if (["male", "nam", "1"].includes(g)) return "Nam";
     if (["female", "nu", "nữ", "0"].includes(g)) return "Nữ";
@@ -97,11 +88,9 @@ export default function Readers() {
     return "-";
   };
 
-  // 🗑️ Xóa độc giả (confirm giống Thủ thư)
   const handleDelete = async (id, name) => {
     const confirmed = window.confirm(`Bạn có chắc chắn muốn xóa độc giả "${name}" không?`);
     if (!confirmed) return;
-
     try {
       const token = sessionStorage.getItem("accessToken");
       const res = await deleteReader(id, token);
@@ -116,21 +105,34 @@ export default function Readers() {
     }
   };
 
-  // 🔎 Lọc theo tên/email
+  // 🔐 Đặt lại mật khẩu thủ công
+  const handleResetPassword = async (reader) => {
+    const newPassword = prompt(`Nhập mật khẩu mới cho "${reader.fullName}":`);
+    if (!newPassword || newPassword.trim() === "") return alert("Mật khẩu không hợp lệ.");
+    try {
+      const token = sessionStorage.getItem("accessToken");
+      const res = await resetReaderPassword(reader.readerId, newPassword, token);
+      if (res.success) alert("✅ Đặt lại mật khẩu thành công.");
+      else alert(res.message || "Không thể đặt lại mật khẩu.");
+    } catch (err) {
+      alert("Lỗi khi đặt lại mật khẩu: " + (err.response?.data?.message || err.message));
+    }
+  };
+
   const filteredReaders = useMemo(() => {
     const keyword = searchQuery.trim().toLowerCase();
     if (!keyword) return readers;
-    return readers.filter((r) => r.fullName?.toLowerCase().includes(keyword) || r.email?.toLowerCase().includes(keyword));
+    return readers.filter(
+      (r) => r.fullName?.toLowerCase().includes(keyword) || r.email?.toLowerCase().includes(keyword)
+    );
   }, [readers, searchQuery]);
 
-  // 📄 Phân trang
   const totalPages = Math.ceil(filteredReaders.length / itemsPerPage) || 1;
   const startIndex = (currentPage - 1) * itemsPerPage;
   const currentReaders = filteredReaders.slice(startIndex, startIndex + itemsPerPage);
 
   return (
     <Box sx={{ p: 3 }}>
-      {/* Header gradient giống Thủ thư */}
       <Box sx={{ mb: 4 }}>
         <Typography
           variant="h4"
@@ -150,10 +152,14 @@ export default function Readers() {
         </Typography>
       </Box>
 
-      {/* Thanh công cụ trong Card */}
       <Card sx={{ mb: 3, borderRadius: 3, boxShadow: "0 8px 32px rgba(0,0,0,0.1)" }}>
         <CardContent>
-          <Stack direction={{ xs: "column", md: "row" }} spacing={2} alignItems="center" justifyContent="space-between">
+          <Stack
+            direction={{ xs: "column", md: "row" }}
+            spacing={2}
+            alignItems="center"
+            justifyContent="space-between"
+          >
             <Stack direction="row" spacing={2}>
               <Button
                 variant="outlined"
@@ -164,7 +170,10 @@ export default function Readers() {
                   borderColor: "#667EEA",
                   color: "#667EEA",
                   fontWeight: 600,
-                  "&:hover": { borderColor: "#5A67D8", backgroundColor: "rgba(102,126,234,0.04)" },
+                  "&:hover": {
+                    borderColor: "#5A67D8",
+                    backgroundColor: "rgba(102,126,234,0.04)",
+                  },
                 }}
               >
                 Làm mới
@@ -222,7 +231,6 @@ export default function Readers() {
         </CardContent>
       </Card>
 
-      {/* Loading & Error */}
       {loading && (
         <Box sx={{ display: "flex", justifyContent: "center", my: 4 }}>
           <CircularProgress />
@@ -235,31 +243,28 @@ export default function Readers() {
         </Alert>
       )}
 
-      {/* Bảng dữ liệu */}
       {!loading && !error && (
         <Card sx={{ borderRadius: 3, boxShadow: "0 8px 32px rgba(0,0,0,0.1)", overflow: "hidden" }}>
           <TableContainer>
             <Table>
-            <TableHead>
-  <TableRow sx={{ backgroundColor: "rgba(102,126,234,0.08)" }}>
-    <TableCell sx={{ fontWeight: 700 }}>Mã độc giả</TableCell>
-    <TableCell sx={{ fontWeight: 700 }}>Họ tên</TableCell>
-    <TableCell sx={{ fontWeight: 700 }}>Giới tính</TableCell>
-    <TableCell sx={{ fontWeight: 700 }}>Ngày sinh</TableCell>
-   <TableCell sx={{ fontWeight: 700 }}>SĐT</TableCell>
-
-
-    <TableCell sx={{ fontWeight: 700 }}>CCCD</TableCell>      
-    <TableCell sx={{ fontWeight: 700 }}>Địa chỉ</TableCell>   
-    <TableCell sx={{ fontWeight: 700 }}>Email</TableCell>
-    <TableCell sx={{ fontWeight: 700, textAlign: "center" }}>Hành động</TableCell>
-  </TableRow>
-</TableHead>
+              <TableHead>
+                <TableRow sx={{ backgroundColor: "rgba(102,126,234,0.08)" }}>
+                  <TableCell sx={{ fontWeight: 700 }}>Mã độc giả</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>Họ tên</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>Giới tính</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>Ngày sinh</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>SĐT</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>CCCD</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>Địa chỉ</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>Email</TableCell>
+                  <TableCell sx={{ fontWeight: 700, textAlign: "center" }}>Hành động</TableCell>
+                </TableRow>
+              </TableHead>
 
               <TableBody>
                 {currentReaders.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={6} sx={{ textAlign: "center", py: 4 }}>
+                    <TableCell colSpan={9} sx={{ textAlign: "center", py: 4 }}>
                       <Typography variant="body1" color="text.secondary">
                         Không có dữ liệu độc giả
                       </Typography>
@@ -275,7 +280,11 @@ export default function Readers() {
                         <Chip
                           label={`DG${r.readerId}`}
                           size="small"
-                          sx={{ backgroundColor: "rgba(102,126,234,0.1)", color: "#667EEA", fontWeight: 600 }}
+                          sx={{
+                            backgroundColor: "rgba(102,126,234,0.1)",
+                            color: "#667EEA",
+                            fontWeight: 600,
+                          }}
                         />
                       </TableCell>
                       <TableCell>
@@ -299,24 +308,43 @@ export default function Readers() {
                         {r.dateOfBirth ? new Date(r.dateOfBirth).toLocaleDateString("vi-VN") : "-"}
                       </TableCell>
                       <TableCell>{r.phoneNumber || "-"}</TableCell>
-
-                      <TableCell>{r.cccd || "-"}</TableCell>      
-<TableCell>{r.address || "-"}</TableCell>  
-
+                      <TableCell>{r.cccd || "-"}</TableCell>
+                      <TableCell>{r.address || "-"}</TableCell>
                       <TableCell>{r.email}</TableCell>
+
                       <TableCell sx={{ textAlign: "center" }}>
                         <Stack direction="row" spacing={1} justifyContent="center">
                           <IconButton
                             size="small"
                             onClick={() => setEditingReader(r)}
-                            sx={{ color: "#667EEA", "&:hover": { backgroundColor: "rgba(102,126,234,0.1)" } }}
+                            sx={{
+                              color: "#667EEA",
+                              "&:hover": { backgroundColor: "rgba(102,126,234,0.1)" },
+                            }}
                           >
                             <EditIcon />
                           </IconButton>
+
+                          {/* ✅ Nút đặt lại mật khẩu */}
+                          <IconButton
+                            size="small"
+                            onClick={() => handleResetPassword(r)}
+                            sx={{
+                              color: "#ED8936",
+                              "&:hover": { backgroundColor: "rgba(237,137,54,0.1)" },
+                            }}
+                            title="Đặt lại mật khẩu"
+                          >
+                            <ResetIcon />
+                          </IconButton>
+
                           <IconButton
                             size="small"
                             onClick={() => handleDelete(r.readerId, r.fullName)}
-                            sx={{ color: "#E53E3E", "&:hover": { backgroundColor: "rgba(229,62,62,0.1)" } }}
+                            sx={{
+                              color: "#E53E3E",
+                              "&:hover": { backgroundColor: "rgba(229,62,62,0.1)" },
+                            }}
                           >
                             <DeleteIcon />
                           </IconButton>
@@ -329,7 +357,6 @@ export default function Readers() {
             </Table>
           </TableContainer>
 
-          {/* Phân trang giống Thủ thư */}
           {totalPages > 1 && (
             <Box sx={{ p: 2, display: "flex", justifyContent: "center" }}>
               <Pagination
@@ -352,7 +379,6 @@ export default function Readers() {
         </Card>
       )}
 
-      {/* Modal thêm độc giả (API tương tự Librarians) */}
       {showAddModal && (
         <AddReader
           open={showAddModal}
@@ -364,7 +390,6 @@ export default function Readers() {
         />
       )}
 
-      {/* Modal sửa độc giả */}
       {editingReader && (
         <EditReader
           reader={editingReader}

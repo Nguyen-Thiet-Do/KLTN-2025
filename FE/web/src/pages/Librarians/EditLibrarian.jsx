@@ -1,37 +1,30 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Dialog, DialogTitle, DialogContent, DialogActions,
   TextField, Button, MenuItem, FormControl, InputLabel, Select,
   Box, Alert, CircularProgress, Typography, IconButton, Card, CardContent,
 } from "@mui/material";
 import { Close } from "@mui/icons-material";
+import { useSnackbar } from "notistack"; // ✅ thêm import notistack
 import { updateLibrarian } from "../../services/librarianService";
 
-// ---- helper: chuẩn hoá giới tính về "0" | "1"
+// Chuẩn hóa giới tính
 function normalizeGender(raw) {
-  // số 0/1 hoặc chuỗi "0"/"1"
   if (raw === 0 || raw === 1) return String(raw);
   if (raw === "0" || raw === "1") return raw;
-
-  // boolean
   if (raw === true) return "1";
   if (raw === false) return "0";
-
-  // buffer-like { data: [0] } hoặc [48]/[49] (ASCII '0'/'1')
   const buf = raw?.data?.[0];
   if (buf === 0 || buf === 1) return String(buf);
   if (buf === 48) return "0";
   if (buf === 49) return "1";
-
-  // string khác
   const s = String(raw || "").toLowerCase().trim();
   if (["1", "nam", "male", "m"].includes(s)) return "1";
   if (["0", "nữ", "nu", "female", "f"].includes(s)) return "0";
-
-  // mặc định
   return "0";
 }
 
+// Chuẩn hóa ngày sinh
 function normalizeDob(dob) {
   if (!dob) return "";
   const str = String(dob);
@@ -39,21 +32,30 @@ function normalizeDob(dob) {
 }
 
 export default function EditLibrarian({ librarian, onSuccess, onCancel, open = true }) {
+  const { enqueueSnackbar } = useSnackbar(); // ✅ hook để hiển thị thông báo
+
   const [form, setForm] = useState({
     fullName: librarian?.fullName || "",
     gender: normalizeGender(librarian?.gender),
     dateOfBirth: normalizeDob(librarian?.dateOfBirth),
+    phoneNumber: librarian?.phoneNumber || "",
+    cccd: librarian?.cccd || "",
     address: librarian?.address || "",
+    basicSalary: librarian?.basicSalary || "",
+    salaryCoefficient: librarian?.salaryCoefficient || "",
     note: librarian?.note || "",
   });
 
-  // ⚠️ Đồng bộ lại khi prop librarian đổi (fetch xong,..)
   useEffect(() => {
     setForm({
       fullName: librarian?.fullName || "",
       gender: normalizeGender(librarian?.gender),
       dateOfBirth: normalizeDob(librarian?.dateOfBirth),
+      phoneNumber: librarian?.phoneNumber || "",
+      cccd: librarian?.cccd || "",
       address: librarian?.address || "",
+      basicSalary: librarian?.basicSalary || "",
+      salaryCoefficient: librarian?.salaryCoefficient || "",
       note: librarian?.note || "",
     });
   }, [librarian]);
@@ -74,15 +76,25 @@ export default function EditLibrarian({ librarian, onSuccess, onCancel, open = t
       const token = sessionStorage.getItem("accessToken");
       const payload = {
         ...form,
-        // ép về number nếu API yêu cầu
         gender: form.gender === "1" ? 1 : 0,
+        basicSalary: form.basicSalary ? parseFloat(form.basicSalary) : null,
+        salaryCoefficient: form.salaryCoefficient ? parseFloat(form.salaryCoefficient) : null,
         dateOfBirth: form.dateOfBirth || null,
       };
+
       const res = await updateLibrarian(librarian.librarianId, payload, token);
-      if (res?.success) onSuccess?.();
-      else setError(res?.message || "Không thể cập nhật.");
+
+      if (res?.success) {
+        enqueueSnackbar("✅ Cập nhật thông tin thủ thư thành công!", { variant: "success" }); // ✅ thông báo thành công
+        onSuccess?.();
+      } else {
+        enqueueSnackbar(res?.message || "Không thể cập nhật thủ thư.", { variant: "error" }); // ✅ thông báo lỗi
+        setError(res?.message || "Không thể cập nhật thủ thư.");
+      }
     } catch (err) {
-      setError(err?.response?.data?.message || err?.message || "Lỗi khi cập nhật.");
+      const msg = err?.response?.data?.message || err?.message || "Lỗi khi cập nhật.";
+      enqueueSnackbar(`❌ ${msg}`, { variant: "error" }); // ✅ thông báo lỗi
+      setError(msg);
     } finally {
       setLoading(false);
     }
@@ -150,7 +162,6 @@ export default function EditLibrarian({ librarian, onSuccess, onCancel, open = t
           sx={{
             p: 0,
             overflowY: "auto",
-            minHeight: 0,
             display: "flex",
             flexDirection: "column",
           }}
@@ -207,22 +218,19 @@ export default function EditLibrarian({ librarian, onSuccess, onCancel, open = t
                   sx={fieldSx}
                 />
 
-                {/* labelId + label phải khớp, value là "0"/"1" */}
                 <FormControl required sx={fieldSx}>
                   <InputLabel id="gender-label">Giới tính</InputLabel>
                   <Select
                     labelId="gender-label"
                     name="gender"
-                    value={form.gender ?? ""}   // tránh undefined
+                    value={form.gender ?? ""}
                     label="Giới tính"
                     onChange={handleChange}
                     disabled={loading}
-                    displayEmpty
                   >
-                    {/* Nếu muốn có placeholder khi rỗng */}
-                    {/* <MenuItem value=""><em>Chọn giới tính</em></MenuItem> */}
                     <MenuItem value="1">Nam</MenuItem>
                     <MenuItem value="0">Nữ</MenuItem>
+                    <MenuItem value="other">Khác</MenuItem>
                   </Select>
                 </FormControl>
 
@@ -238,13 +246,55 @@ export default function EditLibrarian({ librarian, onSuccess, onCancel, open = t
                 />
 
                 <TextField
+                  name="phoneNumber"
+                  label="Số điện thoại"
+                  value={form.phoneNumber}
+                  onChange={handleChange}
+                  disabled={loading}
+                  placeholder="Nhập số điện thoại"
+                  sx={fieldSx}
+                />
+
+                <TextField
+                  name="cccd"
+                  label="Số CCCD"
+                  value={form.cccd}
+                  onChange={handleChange}
+                  disabled={loading}
+                  placeholder="Nhập số căn cước công dân"
+                  sx={fieldSx}
+                />
+
+                <TextField
+                  name="basicSalary"
+                  type="number"
+                  label="Lương cơ bản"
+                  value={form.basicSalary}
+                  onChange={handleChange}
+                  disabled={loading}
+                  placeholder="Nhập lương cơ bản"
+                  sx={fieldSx}
+                />
+
+                <TextField
+                  name="salaryCoefficient"
+                  type="number"
+                  label="Hệ số lương"
+                  value={form.salaryCoefficient}
+                  onChange={handleChange}
+                  disabled={loading}
+                  placeholder="Nhập hệ số lương"
+                  sx={fieldSx}
+                />
+
+                <TextField
                   name="address"
                   label="Địa chỉ"
                   value={form.address}
                   onChange={handleChange}
                   disabled={loading}
                   placeholder="Nhập địa chỉ đầy đủ"
-                  sx={fieldSx}
+                  sx={{ ...fieldSx, gridColumn: { xs: "auto", md: "1 / span 2" } }}
                 />
 
                 <TextField
@@ -278,24 +328,33 @@ export default function EditLibrarian({ librarian, onSuccess, onCancel, open = t
             disabled={loading}
             variant="outlined"
             sx={{
-              px: 4, py: 1, borderRadius: 2,
-              borderColor: "#667EEA", color: "#667EEA", fontWeight: 600,
+              px: 4,
+              py: 1,
+              borderRadius: 2,
+              borderColor: "#667EEA",
+              color: "#667EEA",
+              fontWeight: 600,
               "&:hover": { borderColor: "#5A67D8", backgroundColor: "rgba(102,126,234,0.04)" },
             }}
           >
             Hủy
           </Button>
+
           <Button
             type="submit"
             disabled={loading}
             variant="contained"
             sx={{
-              px: 4, py: 1, borderRadius: 2,
+              px: 4,
+              py: 1,
+              borderRadius: 2,
               background: "linear-gradient(135deg, #667EEA 0%, #764BA2 100%)",
-              fontWeight: 600, boxShadow: "0 4px 12px rgba(102,126,234,0.3)",
+              fontWeight: 600,
+              boxShadow: "0 4px 12px rgba(102,126,234,0.3)",
               "&:hover": {
                 background: "linear-gradient(135deg, #5A67D8 0%, #6B46C1 100%)",
-                boxShadow: "0 6px 16px rgba(102,126,234,0.4)", transform: "translateY(-1px)",
+                boxShadow: "0 6px 16px rgba(102,126,234,0.4)",
+                transform: "translateY(-1px)",
               },
               "&:disabled": { background: "#ccc", boxShadow: "none", transform: "none" },
             }}

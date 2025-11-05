@@ -19,21 +19,28 @@ import {
   CardContent,
 } from "@mui/material";
 import { Close } from "@mui/icons-material";
+import { useSnackbar } from "notistack"; // ✅ thêm dòng này
 import { createLibrarian } from "../../services/librarianService";
 
 export default function AddLibrarian({ onSuccess, onCancel, open = true }) {
+  const { enqueueSnackbar } = useSnackbar(); // ✅ hook snackbar
+
   const [form, setForm] = useState({
-    // account
+    // Account info
     email: "",
     password: "",
-    // profile
+    // Librarian info
     fullName: "",
     gender: "",
     dateOfBirth: "",
     phoneNumber: "",
+    cccd: "",
     address: "",
+    basicSalary: "",
+    salaryCoefficient: "",
     note: "",
   });
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
@@ -49,11 +56,19 @@ export default function AddLibrarian({ onSuccess, onCancel, open = true }) {
     try {
       const token = sessionStorage.getItem("accessToken");
       const res = await createLibrarian(token, form);
-      if (res.success) onSuccess();
-      else setError(res.message || "Thêm thất bại");
+
+      if (res.success) {
+        enqueueSnackbar("✅ Thêm thủ thư mới thành công!", { variant: "success" }); // ✅ thông báo thành công
+        onSuccess();
+      } else {
+        enqueueSnackbar(res.message || "Không thể thêm thủ thư.", { variant: "error" }); // ✅ thông báo lỗi
+        setError(res.message || "Thêm thất bại");
+      }
     } catch (err) {
       console.error(err);
-      setError(err.response?.data?.message || "Lỗi khi thêm thủ thư");
+      const msg = err.response?.data?.message || "Lỗi khi thêm thủ thư";
+      enqueueSnackbar(`❌ ${msg}`, { variant: "error" }); // ✅ thông báo lỗi
+      setError(msg);
     } finally {
       setLoading(false);
     }
@@ -63,7 +78,6 @@ export default function AddLibrarian({ onSuccess, onCancel, open = true }) {
     if (!loading) onCancel();
   };
 
-  // style helper cho TextField/Select
   const fieldSx = {
     "& .MuiOutlinedInput-root": {
       borderRadius: 2,
@@ -85,12 +99,11 @@ export default function AddLibrarian({ onSuccess, onCancel, open = true }) {
           boxShadow: "0 20px 60px rgba(0,0,0,0.3)",
           height: "90vh",
           display: "grid",
-          gridTemplateRows: "auto 1fr auto", // Header | Content (scroll) | Actions
+          gridTemplateRows: "auto 1fr auto",
           overflow: "hidden",
         },
       }}
     >
-      {/* Header */}
       <DialogTitle
         sx={{
           background: "linear-gradient(135deg, #667EEA 0%, #764BA2 100%)",
@@ -118,29 +131,23 @@ export default function AddLibrarian({ onSuccess, onCancel, open = true }) {
         </IconButton>
       </DialogTitle>
 
-      {/* Form giữ grid order: content + actions */}
       <Box component="form" onSubmit={handleSubmit} sx={{ display: "contents" }}>
-        {/* Content (scroll area) */}
         <DialogContent
           sx={{
             p: 0,
             overflowY: "auto",
-            minHeight: 0,
             display: "flex",
             flexDirection: "column",
           }}
         >
           {error && (
-            <Alert
-              severity="error"
-              sx={{ m: 3, mb: 2, borderRadius: 2, "& .MuiAlert-message": { py: 1 } }}
-            >
+            <Alert severity="error" sx={{ m: 3, mb: 2, borderRadius: 2 }}>
               {error}
             </Alert>
           )}
 
-          {/* Section 1: Tài khoản (2 cột) */}
-          <Card elevation={0} sx={{ borderRadius: 0, borderBottom: "1px solid #e0e0e0" }}>
+          {/* 1️⃣ Thông tin tài khoản */}
+          <Card elevation={0} sx={{ borderBottom: "1px solid #e0e0e0" }}>
             <CardContent sx={{ p: 4, pb: 3 }}>
               <Typography
                 variant="h6"
@@ -168,7 +175,6 @@ export default function AddLibrarian({ onSuccess, onCancel, open = true }) {
                 Thông Tin Tài Khoản
               </Typography>
 
-              {/* Grid 2 cột responsive */}
               <Box
                 sx={{
                   display: "grid",
@@ -202,8 +208,8 @@ export default function AddLibrarian({ onSuccess, onCancel, open = true }) {
             </CardContent>
           </Card>
 
-          {/* Section 2: Thông tin cá nhân (2 cột) */}
-          <Card elevation={0} sx={{ borderRadius: 0 }}>
+          {/* 2️⃣ Thông tin cá nhân */}
+          <Card elevation={0}>
             <CardContent sx={{ p: 4, pt: 3 }}>
               <Typography
                 variant="h6"
@@ -231,7 +237,6 @@ export default function AddLibrarian({ onSuccess, onCancel, open = true }) {
                 Thông Tin Cá Nhân
               </Typography>
 
-              {/* Grid 2 cột responsive */}
               <Box
                 sx={{
                   display: "grid",
@@ -265,6 +270,7 @@ export default function AddLibrarian({ onSuccess, onCancel, open = true }) {
                     </MenuItem>
                     <MenuItem value="1">Nam</MenuItem>
                     <MenuItem value="0">Nữ</MenuItem>
+                    <MenuItem value="other">Khác</MenuItem>
                   </Select>
                 </FormControl>
 
@@ -274,8 +280,8 @@ export default function AddLibrarian({ onSuccess, onCancel, open = true }) {
                   label="Ngày sinh"
                   value={form.dateOfBirth}
                   onChange={handleChange}
-                  disabled={loading}
                   InputLabelProps={{ shrink: true }}
+                  disabled={loading}
                   sx={fieldSx}
                 />
 
@@ -289,7 +295,38 @@ export default function AddLibrarian({ onSuccess, onCancel, open = true }) {
                   sx={fieldSx}
                 />
 
-                {/* Địa chỉ chiếm cả 2 cột */}
+                <TextField
+                  name="cccd"
+                  label="Số CCCD"
+                  value={form.cccd}
+                  onChange={handleChange}
+                  disabled={loading}
+                  placeholder="Nhập số căn cước công dân"
+                  sx={fieldSx}
+                />
+
+                <TextField
+                  name="basicSalary"
+                  type="number"
+                  label="Lương cơ bản"
+                  value={form.basicSalary}
+                  onChange={handleChange}
+                  disabled={loading}
+                  placeholder="Nhập lương cơ bản"
+                  sx={fieldSx}
+                />
+
+                <TextField
+                  name="salaryCoefficient"
+                  type="number"
+                  label="Hệ số lương"
+                  value={form.salaryCoefficient}
+                  onChange={handleChange}
+                  disabled={loading}
+                  placeholder="Nhập hệ số lương"
+                  sx={fieldSx}
+                />
+
                 <TextField
                   name="address"
                   label="Địa chỉ"
@@ -300,7 +337,6 @@ export default function AddLibrarian({ onSuccess, onCancel, open = true }) {
                   sx={{ ...fieldSx, gridColumn: { xs: "auto", md: "1 / span 2" } }}
                 />
 
-                {/* Ghi chú chiếm cả 2 cột */}
                 <TextField
                   name="note"
                   label="Ghi chú"
@@ -317,7 +353,7 @@ export default function AddLibrarian({ onSuccess, onCancel, open = true }) {
           </Card>
         </DialogContent>
 
-        {/* Actions */}
+        {/* Nút hành động */}
         <DialogActions
           sx={{
             px: 4,

@@ -8,8 +8,17 @@ export const getLibrarians = async () => {
 };
 
 // ➕ Thêm mới thủ thư
-export const createLibrarian = async (data) => {
-  const res = await api.post("/librarian", data);
+// export const createLibrarian = async (data) => {
+//   const res = await api.post("/librarian", data);
+//   return res.data;
+// };
+export const createLibrarian = async (token, data) => {
+  const res = await api.post("/librarian", data, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+  });
   return res.data;
 };
 
@@ -23,4 +32,16 @@ export const deleteLibrarian = async (id) => {
 export const updateLibrarian = async (id, data) => {
   const res = await api.put(`/librarian/${id}`, data);
   return res.data;
+};
+// 🔐 Đặt lại mật khẩu thủ công
+export const resetLibrarianPassword = async (id, newPassword, token) => {
+  const res = await fetch(`${import.meta.env.VITE_API_URL}/librarian/${id}/reset-password`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ newPassword }),
+  });
+  return await res.json();
 };

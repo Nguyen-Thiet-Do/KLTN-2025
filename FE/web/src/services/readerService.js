@@ -34,3 +34,16 @@ export const getReaderById = async (id) => {
   const res = await api.get(`/reader/${id}`);
   return res?.data?.reader ?? null;
 };
+
+// 🔐 Đặt lại mật khẩu thủ công
+export const resetReaderPassword = async (id, newPassword, token) => {
+  const res = await fetch(`${import.meta.env.VITE_API_URL}/reader/${id}/reset-password`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ newPassword }),
+  });
+  return await res.json();
+};

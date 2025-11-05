@@ -19,11 +19,11 @@ import {
   CardContent,
 } from "@mui/material";
 import { Close } from "@mui/icons-material";
-import { useSnackbar } from "notistack"; // ✅ Thêm notistack
+import { useSnackbar } from "notistack";
 import { updateReader } from "../../services/readerService";
 
 export default function EditReader({ open = true, reader = {}, onSuccess, onCancel }) {
-  const { enqueueSnackbar } = useSnackbar(); // ✅ Hook snackbar
+  const { enqueueSnackbar } = useSnackbar();
 
   const normalizeGender = (gender) => {
     if (gender == null) return "";
@@ -42,13 +42,16 @@ export default function EditReader({ open = true, reader = {}, onSuccess, onCanc
 
   const initial = useMemo(
     () => ({
+      email: reader?.email || "",
+      password: "",
       fullName: reader?.fullName || "",
       gender: normalizeGender(reader?.gender),
       dateOfBirth: reader?.dateOfBirth
         ? new Date(reader.dateOfBirth).toISOString().slice(0, 10)
         : "",
-      address: reader?.address || "",
       phoneNumber: reader?.phoneNumber || "",
+      cccd: reader?.cccd || "",
+      address: reader?.address || "",
       note: reader?.note || "",
     }),
     [reader]
@@ -68,12 +71,13 @@ export default function EditReader({ open = true, reader = {}, onSuccess, onCanc
   };
 
   const validate = () => {
-    if (!form.fullName.trim()) return "Vui lòng nhập họ tên";
+    if (!form.fullName.trim()) return "Vui lòng nhập họ tên.";
+    if (!form.email.trim()) return "Vui lòng nhập email.";
     return null;
   };
 
   const handleSubmit = async (e) => {
-    e?.preventDefault?.();
+    e.preventDefault();
     const msg = validate();
     if (msg) {
       setError(msg);
@@ -87,7 +91,7 @@ export default function EditReader({ open = true, reader = {}, onSuccess, onCanc
     try {
       const token = sessionStorage.getItem("accessToken");
       if (!token) {
-        enqueueSnackbar("⚠️ Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.", {
+        enqueueSnackbar("⚠️ Phiên đăng nhập hết hạn. Vui lòng đăng nhập lại.", {
           variant: "warning",
         });
         setLoading(false);
@@ -95,27 +99,30 @@ export default function EditReader({ open = true, reader = {}, onSuccess, onCanc
       }
 
       const payload = {
+        email: form.email,
+        password: form.password || undefined, // Không bắt buộc đổi
         fullName: form.fullName,
         gender: form.gender,
         dateOfBirth: form.dateOfBirth || null,
-        address: form.address,
         phoneNumber: form.phoneNumber,
+        cccd: form.cccd,
+        address: form.address,
         note: form.note,
       };
 
       const res = await updateReader(reader.readerId, payload, token);
 
       if (res.success) {
-        enqueueSnackbar("✅ Cập nhật thông tin thành công!", { variant: "success" });
+        enqueueSnackbar("✅ Cập nhật độc giả thành công!", { variant: "success" });
         onSuccess?.();
       } else {
         enqueueSnackbar(res.message || "❌ Cập nhật thất bại!", { variant: "error" });
-        setError(res.message || "Cập nhật thất bại");
+        setError(res.message || "Cập nhật thất bại.");
       }
     } catch (err) {
       console.error("❌ Lỗi khi cập nhật độc giả:", err);
       enqueueSnackbar("⚠️ Lỗi khi kết nối đến máy chủ!", { variant: "error" });
-      setError(err.response?.data?.message || "Lỗi khi cập nhật độc giả");
+      setError(err.response?.data?.message || "Lỗi khi cập nhật độc giả.");
     } finally {
       setLoading(false);
     }
@@ -161,7 +168,7 @@ export default function EditReader({ open = true, reader = {}, onSuccess, onCanc
         }}
       >
         <Typography variant="h5" fontWeight={700} textAlign="center">
-          Sửa Thông Tin Độc Giả
+          Chỉnh Sửa Thông Tin Độc Giả
         </Typography>
         <IconButton
           onClick={handleClose}
@@ -196,9 +203,9 @@ export default function EditReader({ open = true, reader = {}, onSuccess, onCanc
             </Alert>
           )}
 
-          {/* Section: Thông tin cá nhân */}
-          <Card elevation={0} sx={{ borderRadius: 0 }}>
-            <CardContent sx={{ p: 4 }}>
+          {/* Thông tin tài khoản */}
+          <Card elevation={0} sx={{ borderRadius: 0, borderBottom: "1px solid #e0e0e0" }}>
+            <CardContent sx={{ p: 4, pb: 3 }}>
               <Typography
                 variant="h6"
                 fontWeight={600}
@@ -209,6 +216,67 @@ export default function EditReader({ open = true, reader = {}, onSuccess, onCanc
                   alignItems: "center",
                   "&::before": {
                     content: '"1"',
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    width: 24,
+                    height: 24,
+                    backgroundColor: "#667EEA",
+                    color: "white",
+                    borderRadius: "50%",
+                    fontSize: "0.875rem",
+                    mr: 2,
+                  },
+                }}
+              >
+                Thông Tin Tài Khoản
+              </Typography>
+
+              <Box
+                sx={{
+                  display: "grid",
+                  gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" },
+                  gap: 3,
+                }}
+              >
+                <TextField
+                  name="email"
+                  type="email"
+                  label="Email đăng nhập"
+                  value={form.email}
+                  onChange={handleChange}
+                  required
+                  disabled={loading}
+                  placeholder="Nhập email đăng nhập"
+                  sx={fieldSx}
+                />
+                <TextField
+                  name="password"
+                  type="password"
+                  label="Mật khẩu (để trống nếu không đổi)"
+                  value={form.password}
+                  onChange={handleChange}
+                  disabled={loading}
+                  placeholder="Nhập mật khẩu mới (nếu có)"
+                  sx={fieldSx}
+                />
+              </Box>
+            </CardContent>
+          </Card>
+
+          {/* Thông tin cá nhân */}
+          <Card elevation={0} sx={{ borderRadius: 0 }}>
+            <CardContent sx={{ p: 4, pt: 3 }}>
+              <Typography
+                variant="h6"
+                fontWeight={600}
+                sx={{
+                  mb: 3,
+                  color: "#667EEA",
+                  display: "flex",
+                  alignItems: "center",
+                  "&::before": {
+                    content: '"2"',
                     display: "inline-flex",
                     alignItems: "center",
                     justifyContent: "center",
@@ -284,6 +352,16 @@ export default function EditReader({ open = true, reader = {}, onSuccess, onCanc
                 />
 
                 <TextField
+                  name="cccd"
+                  label="CCCD"
+                  value={form.cccd}
+                  onChange={handleChange}
+                  disabled={loading}
+                  placeholder="Nhập số CCCD"
+                  sx={fieldSx}
+                />
+
+                <TextField
                   name="address"
                   label="Địa chỉ"
                   value={form.address}
@@ -315,7 +393,7 @@ export default function EditReader({ open = true, reader = {}, onSuccess, onCanc
           </Card>
         </DialogContent>
 
-        {/* Footer buttons */}
+        {/* Footer */}
         <DialogActions
           sx={{
             px: 4,

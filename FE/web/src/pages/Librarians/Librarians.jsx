@@ -28,11 +28,11 @@ import {
   Edit as EditIcon,
   Delete as DeleteIcon,
   Refresh as RefreshIcon,
+  LockReset as ResetIcon, // ✅ thêm icon reset mật khẩu
 } from "@mui/icons-material";
-import { getLibrarians, deleteLibrarian } from "../../services/librarianService";
+import { getLibrarians, deleteLibrarian, resetLibrarianPassword } from "../../services/librarianService"; // ✅ thêm hàm resetLibrarianPassword
 import AddLibrarian from "./AddLibrarian";
 import EditLibrarian from "./EditLibrarian";
-
 import ButtonLoader from "../../components/Loading/ButtonLoader";
 
 export default function Librarians() {
@@ -41,11 +41,7 @@ export default function Librarians() {
   const [error, setError] = useState(null);
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingLibrarian, setEditingLibrarian] = useState(null);
-
-  // 🔍 Tìm kiếm
   const [searchQuery, setSearchQuery] = useState("");
-
-  // 🔢 Phân trang
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 5;
 
@@ -83,16 +79,12 @@ export default function Librarians() {
   // 👀 Hiển thị giới tính
   const getGenderDisplay = (gender) => {
     if (!gender) return "-";
-
     if (typeof gender === "object") {
-      const value =
-        gender?.data?.[0] ??
-        (gender instanceof Uint8Array ? gender[0] : undefined);
+      const value = gender?.data?.[0] ?? (gender instanceof Uint8Array ? gender[0] : undefined);
       if (value === 1) return "Nam";
       if (value === 0) return "Nữ";
       return "Khác";
     }
-
     const g = gender.toString().trim().toLowerCase();
     if (["male", "nam", "1"].includes(g)) return "Nam";
     if (["female", "nu", "nữ", "0"].includes(g)) return "Nữ";
@@ -109,11 +101,26 @@ export default function Librarians() {
       const token = sessionStorage.getItem("accessToken");
       const res = await deleteLibrarian(id, token);
       if (res.success) {
-        alert("Đã xóa thủ thư thành công!");
+        alert("✅ Đã xóa thủ thư thành công!");
         fetchData();
       } else alert(res.message || "Không thể xóa thủ thư.");
     } catch (err) {
       alert("Xóa thất bại: " + (err.response?.data?.message || err.message));
+    }
+  };
+
+  // 🔐 Đặt lại mật khẩu thủ thư
+  const handleResetPassword = async (librarian) => {
+    const newPassword = prompt(`Nhập mật khẩu mới cho "${librarian.fullName}":`);
+    if (!newPassword || newPassword.trim() === "") return alert("Mật khẩu không hợp lệ.");
+
+    try {
+      const token = sessionStorage.getItem("accessToken");
+      const res = await resetLibrarianPassword(librarian.librarianId, newPassword, token);
+      if (res.success) alert("✅ Đặt lại mật khẩu thành công!");
+      else alert(res.message || "Không thể đặt lại mật khẩu.");
+    } catch (err) {
+      alert("Lỗi khi đặt lại mật khẩu: " + (err.response?.data?.message || err.message));
     }
   };
 
@@ -137,15 +144,15 @@ export default function Librarians() {
     <Box sx={{ p: 3 }}>
       {/* Header */}
       <Box sx={{ mb: 4 }}>
-        <Typography 
-          variant="h4" 
-          fontWeight="700" 
+        <Typography
+          variant="h4"
+          fontWeight="700"
           gutterBottom
           sx={{
-            background: 'linear-gradient(135deg, #667EEA 0%, #764BA2 100%)',
-            backgroundClip: 'text',
-            WebkitBackgroundClip: 'text',
-            WebkitTextFillColor: 'transparent',
+            background: "linear-gradient(135deg, #667EEA 0%, #764BA2 100%)",
+            backgroundClip: "text",
+            WebkitBackgroundClip: "text",
+            WebkitTextFillColor: "transparent",
           }}
         >
           Quản lý Thủ thư
@@ -156,9 +163,14 @@ export default function Librarians() {
       </Box>
 
       {/* Thanh công cụ */}
-      <Card sx={{ mb: 3, borderRadius: 3, boxShadow: '0 8px 32px rgba(0,0,0,0.1)' }}>
+      <Card sx={{ mb: 3, borderRadius: 3, boxShadow: "0 8px 32px rgba(0,0,0,0.1)" }}>
         <CardContent>
-          <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} alignItems="center" justifyContent="space-between">
+          <Stack
+            direction={{ xs: "column", md: "row" }}
+            spacing={2}
+            alignItems="center"
+            justifyContent="space-between"
+          >
             <Stack direction="row" spacing={2}>
               <Button
                 variant="outlined"
@@ -166,12 +178,12 @@ export default function Librarians() {
                 onClick={fetchData}
                 sx={{
                   borderRadius: 2,
-                  borderColor: '#667EEA',
-                  color: '#667EEA',
+                  borderColor: "#667EEA",
+                  color: "#667EEA",
                   fontWeight: 600,
-                  '&:hover': {
-                    borderColor: '#5A67D8',
-                    backgroundColor: 'rgba(102,126,234,0.04)',
+                  "&:hover": {
+                    borderColor: "#5A67D8",
+                    backgroundColor: "rgba(102,126,234,0.04)",
                   },
                 }}
               >
@@ -183,13 +195,13 @@ export default function Librarians() {
                 onClick={() => setShowAddModal(true)}
                 sx={{
                   borderRadius: 2,
-                  background: 'linear-gradient(135deg, #667EEA 0%, #764BA2 100%)',
+                  background: "linear-gradient(135deg, #667EEA 0%, #764BA2 100%)",
                   fontWeight: 600,
-                  boxShadow: '0 4px 12px rgba(102,126,234,0.3)',
-                  '&:hover': {
-                    background: 'linear-gradient(135deg, #5A67D8 0%, #6B46C1 100%)',
-                    boxShadow: '0 6px 16px rgba(102,126,234,0.4)',
-                    transform: 'translateY(-1px)',
+                  boxShadow: "0 4px 12px rgba(102,126,234,0.3)",
+                  "&:hover": {
+                    background: "linear-gradient(135deg, #5A67D8 0%, #6B46C1 100%)",
+                    boxShadow: "0 6px 16px rgba(102,126,234,0.4)",
+                    transform: "translateY(-1px)",
                   },
                 }}
               >
@@ -197,7 +209,6 @@ export default function Librarians() {
               </Button>
             </Stack>
 
-            {/* Ô tìm kiếm */}
             <TextField
               placeholder="Tìm kiếm theo tên hoặc email..."
               value={searchQuery}
@@ -221,11 +232,9 @@ export default function Librarians() {
               }}
               sx={{
                 minWidth: 300,
-                '& .MuiOutlinedInput-root': {
+                "& .MuiOutlinedInput-root": {
                   borderRadius: 2,
-                  '&:hover fieldset': {
-                    borderColor: '#667EEA',
-                  },
+                  "&:hover fieldset": { borderColor: "#667EEA" },
                 },
               }}
             />
@@ -235,128 +244,99 @@ export default function Librarians() {
 
       {/* Loading và Error */}
       {loading && (
-        <Box sx={{ display: 'flex', justifyContent: 'center', my: 4 }}>
+        <Box sx={{ display: "flex", justifyContent: "center", my: 4 }}>
           <ButtonLoader inline size={350} />
         </Box>
       )}
-      
+
       {error && (
-        <Alert 
-          severity="error" 
-          sx={{ 
-            mb: 3,
-            borderRadius: 2,
-          }}
-        >
+        <Alert severity="error" sx={{ mb: 3, borderRadius: 2 }}>
           {error}
         </Alert>
       )}
 
       {/* Bảng dữ liệu */}
       {!loading && !error && (
-        <Card sx={{ borderRadius: 3, boxShadow: '0 8px 32px rgba(0,0,0,0.1)', overflow: 'hidden' }}>
+        <Card sx={{ borderRadius: 3, boxShadow: "0 8px 32px rgba(0,0,0,0.1)", overflow: "hidden" }}>
           <TableContainer>
             <Table>
               <TableHead>
-                <TableRow sx={{ backgroundColor: 'rgba(102,126,234,0.08)' }}>
-                  <TableCell sx={{ fontWeight: 700, color: '#2D3748' }}>Mã thủ thư</TableCell>
-                  <TableCell sx={{ fontWeight: 700, color: '#2D3748' }}>Họ tên</TableCell>
-                  <TableCell sx={{ fontWeight: 700, color: '#2D3748' }}>Giới tính</TableCell>
-                  <TableCell sx={{ fontWeight: 700, color: '#2D3748' }}>Ngày sinh</TableCell>
-                  <TableCell sx={{ fontWeight: 700, color: '#2D3748' }}>Email</TableCell>
-                  <TableCell sx={{ fontWeight: 700, color: '#2D3748', textAlign: 'center' }}>Hành động</TableCell>
+                <TableRow sx={{ backgroundColor: "rgba(102,126,234,0.08)" }}>
+                  <TableCell sx={{ fontWeight: 700 }}>Mã thủ thư</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>Họ tên</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>Giới tính</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>Ngày sinh</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>Số điện thoại</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>CCCD</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>Địa chỉ</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>Lương cơ bản</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>Email</TableCell>
+                  <TableCell sx={{ fontWeight: 700, textAlign: "center" }}>Hành động</TableCell>
                 </TableRow>
               </TableHead>
+
               <TableBody>
-                {currentLibrarians.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={6} sx={{ textAlign: 'center', py: 4 }}>
-                      <Typography variant="body1" color="text.secondary">
-                        Không có dữ liệu thủ thư
-                      </Typography>
+                {currentLibrarians.map((lib) => (
+                  <TableRow key={lib.librarianId}>
+                    <TableCell>
+                      <Chip
+                        label={lib.librarianCode || `TT${lib.librarianId}`}
+                        size="small"
+                        sx={{ backgroundColor: "rgba(102,126,234,0.1)", color: "#667EEA", fontWeight: 600 }}
+                      />
+                    </TableCell>
+                    <TableCell>{lib.fullName}</TableCell>
+                    <TableCell>
+                      <Chip label={getGenderDisplay(lib.gender)} size="small" variant="outlined" />
+                    </TableCell>
+                    <TableCell>
+                      {lib.dateOfBirth ? new Date(lib.dateOfBirth).toLocaleDateString("vi-VN") : "-"}
+                    </TableCell>
+                    <TableCell>{lib.phoneNumber || "-"}</TableCell>
+                    <TableCell>{lib.cccd || "-"}</TableCell>
+                    <TableCell>{lib.address || "-"}</TableCell>
+                    <TableCell>
+                      {lib.basicSalary ? lib.basicSalary.toLocaleString("vi-VN") + " ₫" : "-"}
+                    </TableCell>
+                    <TableCell>{lib.email || "-"}</TableCell>
+                    <TableCell sx={{ textAlign: "center" }}>
+                      <Stack direction="row" spacing={1} justifyContent="center">
+                        <IconButton
+                          size="small"
+                          onClick={() => setEditingLibrarian(lib)}
+                          sx={{ color: "#667EEA", "&:hover": { backgroundColor: "rgba(102,126,234,0.1)" } }}
+                        >
+                          <EditIcon />
+                        </IconButton>
+
+                        {/* ✅ Nút đặt lại mật khẩu */}
+                        <IconButton
+                          size="small"
+                          onClick={() => handleResetPassword(lib)}
+                          sx={{ color: "#ED8936", "&:hover": { backgroundColor: "rgba(237,137,54,0.1)" } }}
+                          title="Đặt lại mật khẩu"
+                        >
+                          <ResetIcon />
+                        </IconButton>
+
+                        <IconButton
+                          size="small"
+                          onClick={() => handleDelete(lib.librarianId, lib.fullName)}
+                          sx={{ color: "#E53E3E", "&:hover": { backgroundColor: "rgba(229,62,62,0.1)" } }}
+                        >
+                          <DeleteIcon />
+                        </IconButton>
+                      </Stack>
                     </TableCell>
                   </TableRow>
-                ) : (
-                  currentLibrarians.map((lib) => (
-                    <TableRow 
-                      key={lib.librarianId}
-                      sx={{ 
-                        '&:hover': {
-                          backgroundColor: 'rgba(102,126,234,0.02)',
-                        },
-                      }}
-                    >
-                      <TableCell>
-                        <Chip 
-                          label={lib.librarianCode || `TT${lib.librarianId}`}
-                          size="small"
-                          sx={{
-                            backgroundColor: 'rgba(102,126,234,0.1)',
-                            color: '#667EEA',
-                            fontWeight: 600,
-                          }}
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <Typography fontWeight={600}>
-                          {lib.fullName}
-                        </Typography>
-                      </TableCell>
-                      <TableCell>
-                        <Chip 
-                          label={getGenderDisplay(lib.gender)}
-                          size="small"
-                          variant="outlined"
-                          color={
-                            getGenderDisplay(lib.gender) === 'Nam' ? 'primary' : 
-                            getGenderDisplay(lib.gender) === 'Nữ' ? 'secondary' : 'default'
-                          }
-                        />
-                      </TableCell>
-                      <TableCell>
-                        {lib.dateOfBirth
-                          ? new Date(lib.dateOfBirth).toLocaleDateString("vi-VN")
-                          : "-"}
-                      </TableCell>
-                      <TableCell>{lib.email}</TableCell>
-                      <TableCell sx={{ textAlign: 'center' }}>
-                        <Stack direction="row" spacing={1} justifyContent="center">
-                          <IconButton
-                            size="small"
-                            onClick={() => setEditingLibrarian(lib)}
-                            sx={{
-                              color: '#667EEA',
-                              '&:hover': {
-                                backgroundColor: 'rgba(102,126,234,0.1)',
-                              },
-                            }}
-                          >
-                            <EditIcon />
-                          </IconButton>
-                          <IconButton
-                            size="small"
-                            onClick={() => handleDelete(lib.librarianId, lib.fullName)}
-                            sx={{
-                              color: '#E53E3E',
-                              '&:hover': {
-                                backgroundColor: 'rgba(229,62,62,0.1)',
-                              },
-                            }}
-                          >
-                            <DeleteIcon />
-                          </IconButton>
-                        </Stack>
-                      </TableCell>
-                    </TableRow>
-                  ))
-                )}
+                ))}
               </TableBody>
             </Table>
           </TableContainer>
 
           {/* Phân trang */}
           {totalPages > 1 && (
-            <Box sx={{ p: 2, display: 'flex', justifyContent: 'center' }}>
+            <Box sx={{ p: 2, display: "flex", justifyContent: "center" }}>
               <Pagination
                 count={totalPages}
                 page={currentPage}
@@ -365,13 +345,13 @@ export default function Librarians() {
                 showFirstButton
                 showLastButton
                 sx={{
-                  '& .MuiPaginationItem-root': {
+                  "& .MuiPaginationItem-root": {
                     borderRadius: 2,
                     fontWeight: 600,
                   },
-                  '& .MuiPaginationItem-root.Mui-selected': {
-                    background: 'linear-gradient(135deg, #667EEA 0%, #764BA2 100%)',
-                    color: 'white',
+                  "& .MuiPaginationItem-root.Mui-selected": {
+                    background: "linear-gradient(135deg, #667EEA 0%, #764BA2 100%)",
+                    color: "white",
                   },
                 }}
               />
