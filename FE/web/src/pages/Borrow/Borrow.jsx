@@ -34,14 +34,15 @@ import {
 } from "@mui/icons-material";
 import { fetchLoanSlips, getDocumentDetail } from "../../services/loanSlips";
 import AddLoanSlipDialog from "../Borrow/AddLoanSlipDialog";
+import ApproveReservationDialog from "./ApproveReservationDialog";
 
 /** Tabs theo chuẩn mới của BE */
 const TABS = [
-  { key: "PENDING",          label: "Chờ duyệt" },
-  { key: "PENDING_PAYMENT",  label: "Chờ thanh toán" },
-  { key: "BORROWING",        label: "Đang mượn" },
-  { key: "RETURNED",         label: "Đã trả" },
-  { key: "OVERDUE",          label: "Quá hạn" },
+  { key: "PENDING", label: "Chờ duyệt" },
+  { key: "PENDING_PAYMENT", label: "Chờ thanh toán" },
+  { key: "BORROWING", label: "Đang mượn" },
+  { key: "RETURNED", label: "Đã trả" },
+  { key: "OVERDUE", label: "Quá hạn" },
 ];
 
 const nf = new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 2 });
@@ -96,7 +97,7 @@ function Money({ value }) {
   return isNaN(n) ? String(value) : `${nf.format(n)}₫`;
 }
 
-function Row({ row, titleCache }) {
+function Row({ row, titleCache, onApprove }) {
   const [open, setOpen] = useState(false);
   const librarianName = row?.Librarian?.fullName || (row?.librarianId ? `#${row.librarianId}` : "-");
 
@@ -159,10 +160,22 @@ function Row({ row, titleCache }) {
             }}
           />
         </TableCell>
+        {/* NEW: Thao tác */}
+        <TableCell align="right">
+          {String(row.status).toUpperCase() === "PENDING" && (
+            <Button
+              size="small"
+              variant="contained"
+              onClick={() => onApprove?.(row)}
+            >
+              Duyệt
+            </Button>
+          )}
+        </TableCell>
       </TableRow>
 
       <TableRow>
-        <TableCell colSpan={8} sx={{ p: 0, border: 0 }}>
+        <TableCell colSpan={9} sx={{ p: 0, border: 0 }}>
           <Collapse in={open} timeout="auto" unmountOnExit>
             <Box sx={{ px: 2, py: 1.5, bgcolor: "rgba(0,0,0,0.02)" }}>
               <Stack
@@ -306,6 +319,13 @@ function Row({ row, titleCache }) {
 
 export default function Borrow() {
   const [openCreate, setOpenCreate] = useState(false);
+
+  // NEW: Approve dialog
+  const [openApprove, setOpenApprove] = useState(false);
+  const [selectedSlip, setSelectedSlip] = useState(null);
+
+  // TODO: Lấy từ auth/state thực tế
+  const librarianId = 1;
 
   // Mặc định đứng ở tab "Chờ duyệt"
   const [tab, setTab] = useState("PENDING");
@@ -589,12 +609,14 @@ export default function Borrow() {
                 <TableCell sx={{ fontWeight: 700, color: "#2D3748" }}>Hạn trả</TableCell>
                 <TableCell sx={{ fontWeight: 700, color: "#2D3748" }}>Trạng thái</TableCell>
                 <TableCell align="center" sx={{ fontWeight: 700, color: "#2D3748" }}>Số đầu mục</TableCell>
+                {/* NEW */}
+                <TableCell align="right" sx={{ fontWeight: 700, color: "#2D3748" }}>Thao tác</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
               {displayRows.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={8} align="center" sx={{ py: 6 }}>
+                  <TableCell colSpan={9} align="center" sx={{ py: 6 }}>
                     <Typography variant="body1" color="text.secondary">
                       {rows.length === 0 ? "Không có dữ liệu" : "Không tìm thấy kết quả phù hợp"}
                     </Typography>
@@ -602,7 +624,12 @@ export default function Borrow() {
                 </TableRow>
               ) : (
                 displayRows.map((r) => (
-                  <Row key={r.loanSlipId} row={r} titleCache={titleCache} />
+                  <Row
+                    key={r.loanSlipId}
+                    row={r}
+                    titleCache={titleCache}
+                    onApprove={(slip) => { setSelectedSlip(slip); setOpenApprove(true); }}
+                  />
                 ))
               )}
             </TableBody>
@@ -638,6 +665,15 @@ export default function Borrow() {
         open={openCreate}
         onClose={() => setOpenCreate(false)}
         onCreated={() => { setOpenCreate(false); load(); }}
+      />
+
+      {/* NEW: Dialog duyệt */}
+      <ApproveReservationDialog
+        open={openApprove}
+        onClose={() => { setOpenApprove(false); setSelectedSlip(null); }}
+        slip={selectedSlip}
+        librarianId={librarianId}
+        onApproved={() => { setOpenApprove(false); setSelectedSlip(null); load(); }}
       />
     </Box>
   );
