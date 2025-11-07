@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   Dialog, DialogTitle, DialogContent, DialogActions,
   Box, Grid, Stack, TextField, Button, MenuItem, Chip, IconButton, Tooltip,
-  Divider, InputAdornment, Alert, LinearProgress, Stepper, Step, StepLabel,
+  Alert, LinearProgress, Stepper, Step, StepLabel,
   Card, CardMedia, Typography, Paper, FormControl, InputLabel, Select, Avatar
 } from "@mui/material";
 import {
@@ -15,7 +15,8 @@ import {
   Category as CategoryIcon,
   LocalLibrary as LocalLibraryIcon,
   CheckCircle as CheckCircleIcon,
-  Delete as DeleteIcon
+  Delete as DeleteIcon,
+  Close as CloseIcon,             // ✅ nút X
 } from "@mui/icons-material";
 import Autocomplete from "@mui/material/Autocomplete";
 import { useSnackbar } from "notistack";
@@ -77,14 +78,13 @@ export default function EditBookDialog({ open, id, initialBook, onClose, onUpdat
     ebookViewUrl: undefined     // ""/null => xoá; undefined => giữ
   });
 
-  // local state riêng cho UI tác giả & thể loại (giúp người dùng chỉnh thoải mái
-  // đến khi submit mới chuyển thành form.authors/form.genres)
+  // local state riêng cho UI tác giả & thể loại
   const [authorsUI, setAuthorsUI] = useState([]); // [{fullName, role, ord}]
   const [genresUI, setGenresUI] = useState([]);   // [string]
   const [authorsTouched, setAuthorsTouched] = useState(false);
   const [genresTouched, setGenresTouched] = useState(false);
 
-  // preview ảnh bìa: ưu tiên file mới, sau đó URL coverUrl nhập, cuối cùng ảnh cũ
+  // preview ảnh bìa
   const coverPreview = useMemo(() => {
     if (form.coverFile) return URL.createObjectURL(form.coverFile);
     if (typeof form.coverUrl === "string" && form.coverUrl.trim()) return form.coverUrl.trim();
@@ -113,7 +113,7 @@ export default function EditBookDialog({ open, id, initialBook, onClose, onUpdat
   const rmAuthor = (i) => {
     setAuthorsUI((p) => {
       const next = p.filter((_, idx) => idx !== i)
-        .map((a, idx) => ({ ...a, ord: idx + 1 })); // re-order ord
+        .map((a, idx) => ({ ...a, ord: idx + 1 }));
       return next;
     });
     setAuthorsTouched(true);
@@ -162,8 +162,7 @@ export default function EditBookDialog({ open, id, initialBook, onClose, onUpdat
         if (!initialBook) {
           const full = await getBookById(id);
           setBase(full);
-          // map authors/genres sang UI
-          const au = (full.authors || []).slice().sort((x,y)=>(x.ord??0)-(y.ord??0))
+          const au = (full.authors || []).slice().sort((x, y) => (x.ord ?? 0) - (y.ord ?? 0))
             .map(a => ({ fullName: a.fullName || "", role: a.role || "main", ord: a.ord ?? 1 }));
           setAuthorsUI(au.length ? au : [{ fullName: "", role: "main", ord: 1 }]);
 
@@ -171,7 +170,7 @@ export default function EditBookDialog({ open, id, initialBook, onClose, onUpdat
           setGenresUI(ge);
         } else {
           setBase(initialBook);
-          const au = (initialBook.authors || []).slice().sort((x,y)=>(x.ord??0)-(y.ord??0))
+          const au = (initialBook.authors || []).slice().sort((x, y) => (x.ord ?? 0) - (y.ord ?? 0))
             .map(a => ({ fullName: a.fullName || "", role: a.role || "main", ord: a.ord ?? 1 }));
           setAuthorsUI(au.length ? au : [{ fullName: "", role: "main", ord: 1 }]);
 
@@ -195,11 +194,9 @@ export default function EditBookDialog({ open, id, initialBook, onClose, onUpdat
       setSaving(true);
       setError("");
 
-      // gom authors & genres nếu người dùng đã chạm
       const payload = { ...form };
 
       if (authorsTouched) {
-        // chuẩn hoá: bỏ hàng trống tên
         payload.authors = authorsUI
           .map((a, idx) => ({
             fullName: String(a.fullName || "").trim(),
@@ -212,14 +209,12 @@ export default function EditBookDialog({ open, id, initialBook, onClose, onUpdat
         payload.genres = (genresUI || []).map(g => String(g || "").trim()).filter(Boolean);
       }
 
-      // kiểm tra URL ebook nếu không upload file
       if (!payload.ebookFile && typeof payload.ebookViewUrl === "string" && payload.ebookViewUrl.trim()) {
         const u = payload.ebookViewUrl.trim().toLowerCase();
         if (!(u.endsWith(".pdf") || u.endsWith(".epub"))) {
           throw new Error("URL ebook phải là PDF hoặc EPUB (.pdf/.epub).");
         }
       }
-      // nếu có upload ebook file: kiểm mime/đuôi
       if (payload.ebookFile) {
         const f = payload.ebookFile;
         const name = (f.name || "").toLowerCase();
@@ -251,7 +246,8 @@ export default function EditBookDialog({ open, id, initialBook, onClose, onUpdat
 
   return (
     <Dialog open={open} onClose={handleClose} fullWidth maxWidth="lg" scroll="paper">
-      <DialogTitle>
+      {/* DialogTitle với nút X */}
+      <DialogTitle sx={{ position: "relative", pr: 6 }}>
         <Stack direction="row" alignItems="center" spacing={2}>
           <Avatar sx={{ bgcolor: "primary.main" }}>
             <LibraryBooksIcon />
@@ -265,6 +261,22 @@ export default function EditBookDialog({ open, id, initialBook, onClose, onUpdat
             </Typography>
           </Box>
         </Stack>
+
+        {/* Nút X góc phải */}
+        <IconButton
+          aria-label="Đóng"
+          onClick={handleClose}
+          disabled={saving}
+          size="small"
+          sx={{
+            position: "absolute",
+            right: 8,
+            top: 8,
+            color: (theme) => theme.palette.grey[500],
+          }}
+        >
+          <CloseIcon />
+        </IconButton>
       </DialogTitle>
 
       {saving && <LinearProgress />}
@@ -316,7 +328,7 @@ export default function EditBookDialog({ open, id, initialBook, onClose, onUpdat
 
                           <TextField
                             label="Tiêu đề sách"
-                            defaultValue={base.title || ""}
+                            value={form.title ?? base.title ?? ""}
                             onChange={(e) => setF("title", e.target.value)}
                             placeholder="(Để trống để giữ nguyên)"
                             fullWidth
@@ -328,7 +340,7 @@ export default function EditBookDialog({ open, id, initialBook, onClose, onUpdat
                                 <InputLabel>Ngôn ngữ</InputLabel>
                                 <Select
                                   label="Ngôn ngữ"
-                                  defaultValue={base.language || ""}
+                                  value={form.language ?? base.language ?? ""}
                                   onChange={(e) => setF("language", e.target.value)}
                                 >
                                   <MenuItem value=""><em>Giữ nguyên</em></MenuItem>
@@ -342,8 +354,11 @@ export default function EditBookDialog({ open, id, initialBook, onClose, onUpdat
                               <TextField
                                 label="Năm xuất bản"
                                 type="number"
-                                defaultValue={base.publicationYear ?? ""}
-                                onChange={(e) => setF("publicationYear", Number(e.target.value))}
+                                value={form.publicationYear ?? base.publicationYear ?? ""}
+                                onChange={(e) => {
+                                  const v = e.target.value;
+                                  setF("publicationYear", v === "" ? undefined : Number(v));
+                                }}
                                 fullWidth
                               />
                             </Grid>
@@ -354,11 +369,14 @@ export default function EditBookDialog({ open, id, initialBook, onClose, onUpdat
                               <TextField
                                 label="Giá bìa"
                                 type="number"
-                                defaultValue={base.coverPrice ?? ""}
-                                onChange={(e) => setF("coverPrice", Number(e.target.value))}
+                                value={form.coverPrice ?? base.coverPrice ?? ""}
+                                onChange={(e) => {
+                                  const v = e.target.value;
+                                  setF("coverPrice", v === "" ? undefined : Number(v));
+                                }}
                                 InputProps={{
                                   endAdornment: (
-                                    <InputAdornment position="end">VND</InputAdornment>
+                                    <Box component="span" sx={{ ml: 1 }}>VND</Box>
                                   ),
                                 }}
                                 fullWidth
@@ -367,7 +385,7 @@ export default function EditBookDialog({ open, id, initialBook, onClose, onUpdat
                             <Grid item xs={12} sm={6}>
                               <TextField
                                 label="Vị trí kệ"
-                                defaultValue={base.shelfLocation || ""}
+                                value={form.shelfLocation ?? base.shelfLocation ?? ""}
                                 onChange={(e) => setF("shelfLocation", e.target.value)}
                                 placeholder="Ví dụ: A1.02"
                                 fullWidth
@@ -379,7 +397,7 @@ export default function EditBookDialog({ open, id, initialBook, onClose, onUpdat
                             label="Mô tả"
                             multiline
                             rows={3}
-                            defaultValue={base.description || ""}
+                            value={form.description ?? base.description ?? ""}
                             onChange={(e) => setF("description", e.target.value)}
                             placeholder="(Để trống để giữ nguyên)"
                             fullWidth
@@ -405,7 +423,7 @@ export default function EditBookDialog({ open, id, initialBook, onClose, onUpdat
                             isOptionEqualToValue={strEqual}
                             openOnFocus
                             slotProps={autoSlots}
-                            defaultValue={base.publisher?.name || ""}
+                            inputValue={form.publisherName ?? (base?.publisher?.name || "")}
                             onInputChange={(_, val) => setF("publisherName", val)}
                             renderInput={(params) => (
                               <TextField
@@ -441,7 +459,7 @@ export default function EditBookDialog({ open, id, initialBook, onClose, onUpdat
                 </Grid>
               )}
 
-              {/* Step 2: Chi tiết & Tác giả (giống Create) */}
+              {/* Step 2: Chi tiết & Tác giả */}
               {activeStep === 1 && (
                 <Grid container spacing={3}>
                   <Grid item xs={12} md={8}>
@@ -461,7 +479,7 @@ export default function EditBookDialog({ open, id, initialBook, onClose, onUpdat
                             <Grid item xs={12} sm={4}>
                               <TextField
                                 label="ISBN"
-                                defaultValue={base.book?.isbn || ""}
+                                value={form.bookData?.isbn ?? base.book?.isbn ?? ""}
                                 onChange={(e) => setBD("isbn", e.target.value)}
                                 placeholder="(Để trống để giữ nguyên; rỗng để xoá)"
                                 fullWidth
@@ -471,8 +489,11 @@ export default function EditBookDialog({ open, id, initialBook, onClose, onUpdat
                               <TextField
                                 label="Lần tái bản"
                                 type="number"
-                                defaultValue={base.book?.edition ?? ""}
-                                onChange={(e) => setBD("edition", Number(e.target.value))}
+                                value={form.bookData?.edition ?? base.book?.edition ?? ""}
+                                onChange={(e) => {
+                                  const v = e.target.value;
+                                  setBD("edition", v === "" ? undefined : Number(v));
+                                }}
                                 fullWidth
                               />
                             </Grid>
@@ -480,8 +501,11 @@ export default function EditBookDialog({ open, id, initialBook, onClose, onUpdat
                               <TextField
                                 label="Số trang"
                                 type="number"
-                                defaultValue={base.book?.pageCount ?? ""}
-                                onChange={(e) => setBD("pageCount", Number(e.target.value))}
+                                value={form.bookData?.pageCount ?? base.book?.pageCount ?? ""}
+                                onChange={(e) => {
+                                  const v = e.target.value;
+                                  setBD("pageCount", v === "" ? undefined : Number(v));
+                                }}
                                 fullWidth
                               />
                             </Grid>
@@ -489,7 +513,7 @@ export default function EditBookDialog({ open, id, initialBook, onClose, onUpdat
                         </Stack>
                       </Card>
 
-                      {/* Tác giả (object) */}
+                      {/* Tác giả */}
                       <Card elevation={1} sx={{ p: 3, borderRadius: 2 }}>
                         <Stack spacing={2}>
                           <Typography
@@ -591,7 +615,7 @@ export default function EditBookDialog({ open, id, initialBook, onClose, onUpdat
                         </Stack>
                       </Card>
 
-                      {/* Thể loại (chips) */}
+                      {/* Thể loại */}
                       <Card elevation={1} sx={{ p: 3, borderRadius: 2 }}>
                         <Stack spacing={2}>
                           <Typography
@@ -741,6 +765,7 @@ export default function EditBookDialog({ open, id, initialBook, onClose, onUpdat
                                   <TextField
                                     size="small"
                                     label="Hoặc URL ảnh (trống = giữ nguyên, rỗng = xoá)"
+                                    value={form.coverUrl ?? ""}
                                     onChange={(e) => setF("coverUrl", e.target.value)}
                                     placeholder="https://example.com/cover.jpg"
                                     sx={{ flexGrow: 1, minWidth: 200 }}
@@ -801,6 +826,7 @@ export default function EditBookDialog({ open, id, initialBook, onClose, onUpdat
                                   <TextField
                                     size="small"
                                     label="Hoặc URL PDF/EPUB (trống = giữ, rỗng = xoá)"
+                                    value={form.ebookViewUrl ?? ""}
                                     onChange={(e) => setF("ebookViewUrl", e.target.value)}
                                     placeholder="https://example.com/ebook.pdf | .epub"
                                     sx={{ flexGrow: 1, minWidth: 200 }}

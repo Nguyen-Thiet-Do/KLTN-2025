@@ -8,7 +8,7 @@ import {
 } from "@mui/material";
 import {
     Add, Delete, QrCode2, Save, Close,
-    Search as SearchIcon, InfoOutlined
+    InfoOutlined
 } from "@mui/icons-material";
 
 import { useAuth } from "../../contexts/AuthContext"; // đổi path nếu cần
@@ -17,7 +17,7 @@ import {
     createLoanSlip,
     createLoanSlipPaymentQR,
     confirmLoanSlipPaymentBySlip, // thêm hàm này trong loanSlips service
-    getCopyWithDeposit  
+    getCopyWithDeposit
 } from "../../services/loanSlips";
 
 const Transition = (props) => <Slide direction="up" {...props} />;
@@ -32,10 +32,9 @@ function Money({ value }) {
 /**
  * Dialog tạo phiếu mượn (PENDING_PAYMENT) + Thanh toán qua QR
  *
- * Props:
- *  - open: boolean
- *  - onClose: () => void
- *  - onCreated?: (payload) => void // gọi sau khi xác nhận thanh toán để reload list
+ * Thay đổi theo yêu cầu:
+ * 1) Ô nhập ID độc giả và ID bản sao KHÔNG còn biểu tượng tìm
+ * 2) Tự động tra cứu LIÊN TỤC khi người dùng gõ (debounce)
  */
 export default function AddLoanSlipDialog({ open, onClose, onCreated }) {
     const { user } = useAuth();
@@ -68,8 +67,6 @@ export default function AddLoanSlipDialog({ open, onClose, onCreated }) {
     // Tự điền librarianId khi mở dialog theo user đăng nhập
     useEffect(() => {
         if (open && user) {
-            // Đổi field theo dữ liệu thực tế của bạn:
-            // ví dụ user.librarianId hoặc user.accountId
             const derivedId = user?.librarianId ?? user?.accountId ?? user?.id ?? "";
             setLibrarianId(derivedId || "");
         }
@@ -104,7 +101,6 @@ export default function AddLoanSlipDialog({ open, onClose, onCreated }) {
         if (!id) { setReaderInfo(null); return; }
         try {
             const data = await getReaderById(id);
-            // BE có thể trả {success,data} hoặc object
             const reader = data?.data ?? data;
             setReaderInfo(reader || null);
             if (!reader) setError("Không tìm thấy độc giả theo ID đã nhập.");
@@ -117,7 +113,10 @@ export default function AddLoanSlipDialog({ open, onClose, onCreated }) {
     // ---- Fetch copy + document + deposit cho 1 dòng ----
     const fetchCopyForRow = async (idx) => {
         const id = items[idx]?.documentCopyId;
-        if (!id) return;
+        if (!id) {
+            setItems(prev => prev.map((it, i) => (i === idx ? { ...it, copyDoc: null } : it)));
+            return;
+        }
         try {
             const data = await getCopyWithDeposit(id, { withDoc: 1, withAuthors: 1, withSubtype: 1 });
             const st = String(data?.copy?.status || "").toUpperCase();
@@ -154,6 +153,20 @@ export default function AddLoanSlipDialog({ open, onClose, onCreated }) {
             setError(e?.message || "Không lấy được thông tin bản sao");
             setItems(prev => prev.map((it, i) => (i === idx ? { ...it, copyDoc: null } : it)));
         }
+    };
+    // ---- Input handlers (Enter or blur to fetch) ----
+    const onReaderIdChange = (val) => {
+        setReaderId(val);
+    };
+    const onReaderIdCommit = () => {
+        fetchReader(readerId);
+    };
+
+    const handleCopyIdChange = (idx, val) => {
+        setItems(prev => prev.map((it, i) => (i === idx ? { ...it, documentCopyId: val } : it)));
+    };
+    const handleCopyIdCommit = (idx) => {
+        fetchCopyForRow(idx);
     };
 
     // ---- Validate ----
@@ -276,21 +289,15 @@ export default function AddLoanSlipDialog({ open, onClose, onCreated }) {
                     <CardHeader title="Thông tin chung" sx={{ pb: 0 }} />
                     <CardContent>
                         <Grid container spacing={2}>
-                            {/* ID độc giả + nút tra */}
+                            {/* ID độc giả - tự tra cứu khi gõ */}
                             <Grid item xs={12} md={3}>
                                 <TextField
                                     label="ID độc giả"
                                     type="number"
                                     value={readerId}
-                                    onChange={(e) => setReaderId(e.target.value)}
-                                    onBlur={() => fetchReader(readerId)}
-                                    InputProps={{
-                                        endAdornment: (
-                                            <IconButton size="small" onClick={() => fetchReader(readerId)}>
-                                                <SearchIcon />
-                                            </IconButton>
-                                        )
-                                    }}
+                                    onChange={(e) => onReaderIdChange(e.target.value)}
+                                    onKeyDown={(e) => { if (e.key === 'Enter') onReaderIdCommit(); }}
+                                    onBlur={onReaderIdCommit}
                                     fullWidth
                                 />
                             </Grid>
@@ -352,7 +359,7 @@ export default function AddLoanSlipDialog({ open, onClose, onCreated }) {
                                     </Stack>
                                 ) : (
                                     <Typography variant="body2" color="text.secondary">
-                                        Nhập ID độc giả rồi nhấn biểu tượng tra cứu để xem thông tin.
+                                        Nhập ID độc giả để tự tra cứu.
                                     </Typography>
                                 )}
                             </Grid>
@@ -384,22 +391,16 @@ export default function AddLoanSlipDialog({ open, onClose, onCreated }) {
                                     <TableRow key={idx} hover>
                                         <TableCell>{idx + 1}</TableCell>
 
-                                        {/* copyId + tra cứu */}
+                                        {/* copyId - tự tra cứu liên tục */}
                                         <TableCell>
                                             <TextField
                                                 placeholder="VD: 130010"
                                                 fullWidth
                                                 type="number"
                                                 value={it.documentCopyId}
-                                                onChange={(e) => updateItem(idx, "documentCopyId", e.target.value)}
-                                                onBlur={() => fetchCopyForRow(idx)}
-                                                InputProps={{
-                                                    endAdornment: (
-                                                        <IconButton size="small" onClick={() => fetchCopyForRow(idx)}>
-                                                            <SearchIcon fontSize="small" />
-                                                        </IconButton>
-                                                    )
-                                                }}
+                                                onChange={(e) => handleCopyIdChange(idx, e.target.value)}
+                                                onKeyDown={(e) => { if (e.key === 'Enter') handleCopyIdCommit(idx); }}
+                                                onBlur={() => handleCopyIdCommit(idx)}
                                             />
                                         </TableCell>
 
