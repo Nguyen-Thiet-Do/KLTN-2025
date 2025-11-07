@@ -21,7 +21,7 @@ const metadataRoutes = require("./route/metadataRoutes");
 const documentAdminRoutes = require('./route/documentAdminRoutes');
 const adminLoanSlipRoutes = require('./route/adminLoanSlip.routes');
 const readerLoanSlipRoutes = require('./route/readerLoanSlip.routes');
-
+const statisticRoutes = require('./route/statisticRoutes');
 const app = express();
 const port = process.env.PORT || 8080;
 
@@ -79,7 +79,7 @@ app.use('/api/documents/admin', documentAdminRoutes);
 app.use('/api/loans/admin', adminLoanSlipRoutes);
 app.use('/api/loans/reader', readerLoanSlipRoutes);
 
-
+app.use('/api/statistics', statisticRoutes);
 
 
 // ============================================================
