@@ -31,16 +31,17 @@ import {
   ExpandLess,
   Refresh as RefreshIcon,
   Search as SearchIcon,
-  FilterList as FilterIcon,
 } from "@mui/icons-material";
 import { fetchLoanSlips, getDocumentDetail } from "../../services/loanSlips";
 import AddLoanSlipDialog from "../Borrow/AddLoanSlipDialog";
 
+/** Tabs theo chuẩn mới của BE */
 const TABS = [
-  { key: "PENDING", label: "Chờ duyệt" },
-  { key: "OPEN", label: "Đang mượn" },
-  { key: "CLOSED", label: "Đã trả" },
-  { key: "OVERDUE", label: "Quá hạn" },
+  { key: "PENDING",          label: "Chờ duyệt" },
+  { key: "PENDING_PAYMENT",  label: "Chờ thanh toán" },
+  { key: "BORROWING",        label: "Đang mượn" },
+  { key: "RETURNED",         label: "Đã trả" },
+  { key: "OVERDUE",          label: "Quá hạn" },
 ];
 
 const nf = new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 2 });
@@ -52,14 +53,17 @@ function formatDate(d) {
   return isNaN(dt.getTime()) ? String(d) : dt.toLocaleString("vi-VN");
 }
 
+/** Hiển thị chip cho trạng thái Phiếu (LoanSlip.status) */
 function chipForSlipStatus(status) {
   switch (status) {
     case "PENDING":
       return <Chip color="warning" label="Chờ duyệt" size="small" sx={{ fontWeight: 600 }} />;
-    case "OPEN":
+    case "PENDING_PAYMENT":
+      return <Chip color="info" label="Chờ thanh toán" size="small" sx={{ fontWeight: 600 }} />;
+    case "BORROWING":
       return <Chip color="primary" label="Đang mượn" size="small" sx={{ fontWeight: 600 }} />;
-    case "CLOSED":
-      return <Chip color="success" label="Đã đóng" size="small" sx={{ fontWeight: 600 }} />;
+    case "RETURNED":
+      return <Chip color="success" label="Đã trả" size="small" sx={{ fontWeight: 600 }} />;
     case "OVERDUE":
       return <Chip color="error" label="Quá hạn" size="small" sx={{ fontWeight: 600 }} />;
     default:
@@ -67,6 +71,7 @@ function chipForSlipStatus(status) {
   }
 }
 
+/** Hiển thị chip cho trạng thái Chi tiết (LoanDetail.status) */
 function chipForDetailStatus(status) {
   switch (status) {
     case "PENDING":
@@ -93,7 +98,6 @@ function Money({ value }) {
 
 function Row({ row, titleCache }) {
   const [open, setOpen] = useState(false);
-
   const librarianName = row?.Librarian?.fullName || (row?.librarianId ? `#${row.librarianId}` : "-");
 
   return (
@@ -103,10 +107,7 @@ function Row({ row, titleCache }) {
           <IconButton
             size="small"
             onClick={() => setOpen((v) => !v)}
-            sx={{
-              color: "#667EEA",
-              "&:hover": { backgroundColor: "rgba(102,126,234,0.08)" }
-            }}
+            sx={{ color: "#667EEA", "&:hover": { backgroundColor: "rgba(102,126,234,0.08)" } }}
           >
             {open ? <ExpandLess /> : <ExpandMore />}
           </IconButton>
@@ -120,11 +121,9 @@ function Row({ row, titleCache }) {
           <Stack direction="row" spacing={1} alignItems="center">
             <Avatar
               sx={{
-                width: 24,
-                height: 24,
+                width: 24, height: 24,
                 background: "linear-gradient(135deg, #667EEA 0%, #764BA2 100%)",
-                fontSize: 12,
-                fontWeight: 600
+                fontSize: 12, fontWeight: 600
               }}
             >
               {(row.Reader?.fullName || "?").slice(0, 1)}
@@ -176,11 +175,7 @@ function Row({ row, titleCache }) {
                 <Typography variant="subtitle2" fontWeight={700}>
                   Chi tiết phiếu
                 </Typography>
-                <Stack
-                  direction="row"
-                  spacing={2}
-                  divider={<Divider orientation="vertical" flexItem />}
-                >
+                <Stack direction="row" spacing={2} divider={<Divider orientation="vertical" flexItem />}>
                   <Typography variant="caption" color="text.secondary">
                     Tạo lúc: {formatDate(row.created_at)}
                   </Typography>
@@ -250,9 +245,7 @@ function Row({ row, titleCache }) {
                       return (
                         <TableRow key={d.loanDetailId} hover>
                           <TableCell>
-                            <Typography variant="body2" fontWeight={600}>
-                              {d.loanDetailId}
-                            </Typography>
+                            <Typography variant="body2" fontWeight={600}>{d.loanDetailId}</Typography>
                           </TableCell>
                           <TableCell>
                             <Typography variant="body2" fontFamily="monospace">
@@ -270,17 +263,9 @@ function Row({ row, titleCache }) {
                                 src={cover}
                                 alt={title}
                                 loading="lazy"
-                                style={{
-                                  width: 36,
-                                  height: 48,
-                                  objectFit: "cover",
-                                  borderRadius: 4,
-                                  display: "block"
-                                }}
+                                style={{ width: 36, height: 48, objectFit: "cover", borderRadius: 4, display: "block" }}
                               />
-                            ) : (
-                              "-"
-                            )}
+                            ) : "-"}
                           </TableCell>
                           <TableCell>
                             <Typography variant="body2" fontFamily="monospace">
@@ -289,42 +274,21 @@ function Row({ row, titleCache }) {
                           </TableCell>
                           <TableCell>{chipForDetailStatus(d.status)}</TableCell>
                           <TableCell>
-                            <Typography variant="body2">
-                              {formatDate(d.returnDate)}
-                            </Typography>
+                            <Typography variant="body2">{formatDate(d.returnDate)}</Typography>
                           </TableCell>
                           <TableCell>
-                            <Typography variant="body2" fontWeight={600}>
-                              <Money value={d.depositAmount} />
-                            </Typography>
+                            <Typography variant="body2" fontWeight={600}><Money value={d.depositAmount} /></Typography>
                           </TableCell>
                           <TableCell>
-                            <Typography variant="body2" fontWeight={600}>
-                              <Money value={d.fineAmount} />
-                            </Typography>
+                            <Typography variant="body2" fontWeight={600}><Money value={d.fineAmount} /></Typography>
                           </TableCell>
-                          <TableCell>
-                            <Typography variant="body2">
-                              {d.conditionBorrow || "-"}
-                            </Typography>
-                          </TableCell>
-                          <TableCell>
-                            <Typography variant="body2">
-                              {d.conditionReturn || "-"}
-                            </Typography>
-                          </TableCell>
+                          <TableCell><Typography variant="body2">{d.conditionBorrow || "-"}</Typography></TableCell>
+                          <TableCell><Typography variant="body2">{d.conditionReturn || "-"}</Typography></TableCell>
                           <TableCell align="center">
-                            <Chip
-                              label={d.renewalCount ?? 0}
-                              size="small"
-                              color="primary"
-                              sx={{ fontWeight: 600 }}
-                            />
+                            <Chip label={d.renewalCount ?? 0} size="small" color="primary" sx={{ fontWeight: 600 }} />
                           </TableCell>
                           <TableCell>
-                            <Typography variant="caption" color="text.secondary">
-                              {d.note || "-"}
-                            </Typography>
+                            <Typography variant="caption" color="text.secondary">{d.note || "-"}</Typography>
                           </TableCell>
                         </TableRow>
                       );
@@ -342,6 +306,8 @@ function Row({ row, titleCache }) {
 
 export default function Borrow() {
   const [openCreate, setOpenCreate] = useState(false);
+
+  // Mặc định đứng ở tab "Chờ duyệt"
   const [tab, setTab] = useState("PENDING");
   const [page, setPage] = useState(1);
   const [limit] = useState(10);
@@ -357,6 +323,7 @@ export default function Borrow() {
   // cache tiêu đề tài liệu cho các chi tiết PENDING
   const [titleCache, setTitleCache] = useState(() => new Map());
 
+  // BE nhận đúng key theo tab
   const apiStatus = useMemo(() => tab, [tab]);
 
   const load = async () => {
@@ -365,7 +332,7 @@ export default function Borrow() {
       const res = await fetchLoanSlips({
         page,
         limit,
-        status: apiStatus,
+        status: apiStatus,        // 'PENDING'|'PENDING_PAYMENT'|'BORROWING'|'RETURNED'|'OVERDUE'
         sortBy: "loanDate",
         sortDir: "DESC",
       });
@@ -423,7 +390,7 @@ export default function Borrow() {
   const filteredRows = useMemo(() => {
     let result = [...rows];
 
-    // Filter by search query (reader name)
+    // Filter theo từ khóa (tên độc giả hoặc ID)
     if (searchQuery.trim()) {
       const kw = searchQuery.trim().toLowerCase();
       result = result.filter((r) => {
@@ -433,7 +400,7 @@ export default function Borrow() {
       });
     }
 
-    // Filter by date range
+    // Filter theo khoảng ngày (loanDate)
     if (startDate || endDate) {
       result = result.filter((r) => {
         if (!r.loanDate) return false;
@@ -486,9 +453,7 @@ export default function Borrow() {
                     fontWeight: 600,
                     textTransform: "none",
                     minHeight: 48,
-                    "&.Mui-selected": {
-                      color: "#667EEA",
-                    }
+                    "&.Mui-selected": { color: "#667EEA" }
                   },
                   "& .MuiTabs-indicator": {
                     background: "linear-gradient(135deg, #667EEA 0%, #764BA2 100%)",
@@ -501,9 +466,11 @@ export default function Borrow() {
                   <Tab key={t.key} value={t.key} label={t.label} />
                 ))}
               </Tabs>
+
               <Button variant="contained" onClick={() => setOpenCreate(true)} sx={{ borderRadius: 2, fontWeight: 700 }}>
                 Tạo phiếu mượn
               </Button>
+
               <Button
                 variant="outlined"
                 startIcon={<RefreshIcon />}
@@ -513,10 +480,7 @@ export default function Borrow() {
                   borderColor: "#667EEA",
                   color: "#667EEA",
                   fontWeight: 600,
-                  "&:hover": {
-                    borderColor: "#5A67D8",
-                    backgroundColor: "rgba(102,126,234,0.04)"
-                  },
+                  "&:hover": { borderColor: "#5A67D8", backgroundColor: "rgba(102,126,234,0.04)" },
                 }}
               >
                 Làm mới
@@ -526,11 +490,7 @@ export default function Borrow() {
             <Divider />
 
             {/* Filters */}
-            <Stack
-              direction={{ xs: "column", md: "row" }}
-              spacing={2}
-              alignItems="center"
-            >
+            <Stack direction={{ xs: "column", md: "row" }} spacing={2} alignItems="center">
               <TextField
                 placeholder="Tìm theo tên độc giả, ID..."
                 value={searchQuery}
@@ -600,10 +560,7 @@ export default function Borrow() {
                     color: "#E53E3E",
                     fontWeight: 600,
                     minWidth: { xs: "100%", md: "auto" },
-                    "&:hover": {
-                      borderColor: "#C53030",
-                      backgroundColor: "rgba(229,62,62,0.04)"
-                    },
+                    "&:hover": { borderColor: "#C53030", backgroundColor: "rgba(229,62,62,0.04)" },
                   }}
                 >
                   Xóa bộ lọc
@@ -617,11 +574,7 @@ export default function Borrow() {
       <Card sx={{ borderRadius: 3, boxShadow: "0 8px 32px rgba(0,0,0,0.1)", overflow: "hidden" }}>
         {loading && (
           <LinearProgress
-            sx={{
-              "& .MuiLinearProgress-bar": {
-                background: "linear-gradient(135deg, #667EEA 0%, #764BA2 100%)",
-              }
-            }}
+            sx={{ "& .MuiLinearProgress-bar": { background: "linear-gradient(135deg, #667EEA 0%, #764BA2 100%)" } }}
           />
         )}
         <TableContainer component={Paper} elevation={0}>
@@ -670,10 +623,7 @@ export default function Borrow() {
               showFirstButton
               showLastButton
               sx={{
-                "& .MuiPaginationItem-root": {
-                  borderRadius: 2,
-                  fontWeight: 600
-                },
+                "& .MuiPaginationItem-root": { borderRadius: 2, fontWeight: 600 },
                 "& .MuiPaginationItem-root.Mui-selected": {
                   background: "linear-gradient(135deg, #667EEA 0%, #764BA2 100%)",
                   color: "white",
@@ -683,12 +633,12 @@ export default function Borrow() {
           </Box>
         )}
       </Card>
+
       <AddLoanSlipDialog
         open={openCreate}
         onClose={() => setOpenCreate(false)}
         onCreated={() => { setOpenCreate(false); load(); }}
       />
     </Box>
-
   );
 }

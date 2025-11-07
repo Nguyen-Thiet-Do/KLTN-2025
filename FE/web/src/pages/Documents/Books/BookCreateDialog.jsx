@@ -28,6 +28,7 @@ import {
   InputLabel,
   Select,
   Avatar,
+  Paper as MuiPaper,
 } from "@mui/material";
 import {
   Add as AddIcon,
@@ -40,6 +41,7 @@ import {
   Category as CategoryIcon,
   LocalLibrary as LocalLibraryIcon,
   CheckCircle as CheckCircleIcon,
+  Close as CloseIcon, // ✅ nút X
 } from "@mui/icons-material";
 import Autocomplete from "@mui/material/Autocomplete";
 import { useSnackbar } from "notistack";
@@ -289,7 +291,8 @@ export default function BookCreateDialog({ open, onClose, onCreated }) {
 
   return (
     <Dialog open={open} onClose={handleClose} fullWidth maxWidth="lg" scroll="paper">
-      <DialogTitle>
+      {/* DialogTitle với nút X đóng form */}
+      <DialogTitle sx={{ position: "relative", pr: 6 }}>
         <Stack direction="row" alignItems="center" spacing={2}>
           <Avatar sx={{ bgcolor: "primary.main" }}>
             <LibraryBooksIcon />
@@ -303,13 +306,29 @@ export default function BookCreateDialog({ open, onClose, onCreated }) {
             </Typography>
           </Box>
         </Stack>
+
+        {/* ❌ Nút X góc phải */}
+        <IconButton
+          aria-label="Đóng"
+          onClick={handleClose}
+          disabled={saving}
+          size="small"
+          sx={{
+            position: "absolute",
+            right: 8,
+            top: 8,
+            color: (theme) => theme.palette.grey[500],
+          }}
+        >
+          <CloseIcon />
+        </IconButton>
       </DialogTitle>
 
       {saving && <LinearProgress />}
 
       <DialogContent dividers sx={{ p: 0 }}>
         {/* Stepper */}
-        <Paper elevation={0} sx={{ px: 3, py: 2, borderBottom: 1, borderColor: "divider" }}>
+        <MuiPaper elevation={0} sx={{ px: 3, py: 2, borderBottom: 1, borderColor: "divider" }}>
           <Stepper activeStep={activeStep} alternativeLabel>
             {STEPS.map((label, index) => (
               <Step key={label}>
@@ -319,7 +338,7 @@ export default function BookCreateDialog({ open, onClose, onCreated }) {
               </Step>
             ))}
           </Stepper>
-        </Paper>
+        </MuiPaper>
 
         {!!error && (
           <Alert severity="error" sx={{ m: 2, mb: 0 }} onClose={() => setError("")}>

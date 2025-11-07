@@ -1,4 +1,3 @@
-// src/pages/Documents/Books/EditBookDialog.jsx
 import { useEffect, useMemo, useState } from "react";
 import {
   Dialog, DialogTitle, DialogContent, DialogActions,
@@ -16,11 +15,11 @@ import {
   LocalLibrary as LocalLibraryIcon,
   CheckCircle as CheckCircleIcon,
   Delete as DeleteIcon,
-  Close as CloseIcon,             // ✅ nút X
+  Close as CloseIcon,
 } from "@mui/icons-material";
 import Autocomplete from "@mui/material/Autocomplete";
 import { useSnackbar } from "notistack";
-import { getBookById, updateBook } from "../../../services/bookService";
+import { getNewspaperById, updateNewspaper } from "../../../services/newpaperService";
 import { getAllAuthors, getAllGenres, getAllPublishers } from "../../../services/metadataService";
 
 const STEPS = ["Thông tin cơ bản", "Chi tiết & Tác giả", "Media"];
@@ -42,11 +41,11 @@ const isSupportedEbook = (file) => {
   return okMime || okExt;
 };
 
-export default function EditBookDialog({ open, id, initialBook, onClose, onUpdated }) {
+export default function NewspaperEditDialog({ open, id, initialItem, onClose, onUpdated }) {
   const { enqueueSnackbar } = useSnackbar();
 
   // dữ liệu gốc để hiện preview
-  const [base, setBase] = useState(initialBook || null);
+  const [base, setBase] = useState(initialItem || null);
 
   // metadata
   const [genresOpt, setGenresOpt] = useState([]);
@@ -59,7 +58,7 @@ export default function EditBookDialog({ open, id, initialBook, onClose, onUpdat
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
-  // form sửa – chỉ field thay đổi mới set giá trị, còn lại để undefined
+  // form sửa – chỉ field thay đổi mới gửi
   const [form, setForm] = useState({
     title: undefined,
     language: undefined,
@@ -67,15 +66,14 @@ export default function EditBookDialog({ open, id, initialBook, onClose, onUpdat
     coverPrice: undefined,
     description: undefined,
     shelfLocation: undefined,
-    publisherName: undefined,   // ""/null => xoá; undefined => giữ nguyên
-    // Authors & Genres giống Create:
-    authors: undefined,         // [{ fullName, role, ord }] — [] => xoá hết; undefined => giữ nguyên
-    genres: undefined,          // [string] — [] => xoá hết; undefined => giữ nguyên
-    bookData: undefined,        // { isbn?, edition?, pageCount? }
-    coverFile: undefined,       // file
-    ebookFile: undefined,       // file
-    coverUrl: undefined,        // ""/null => xoá; undefined => giữ
-    ebookViewUrl: undefined     // ""/null => xoá; undefined => giữ
+    publisherName: undefined,
+    authors: undefined,         // [] để xoá hết
+    genres: undefined,          // [] để xoá hết
+    newspaperData: undefined,   // { issn?, issueDate?, issueNumber? }
+    coverFile: undefined,
+    ebookFile: undefined,
+    coverUrl: undefined,        // ""/null để xoá
+    ebookViewUrl: undefined,    // ""/null để xoá
   });
 
   // local state riêng cho UI tác giả & thể loại
@@ -99,8 +97,8 @@ export default function EditBookDialog({ open, id, initialBook, onClose, onUpdat
   );
 
   const setF = (k, v) => setForm((p) => ({ ...p, [k]: v }));
-  const setBD = (k, v) =>
-    setForm((p) => ({ ...p, bookData: { ...(p.bookData || {}), [k]: v } }));
+  const setNP = (k, v) =>
+    setForm((p) => ({ ...p, newspaperData: { ...(p.newspaperData || {}), [k]: v } }));
 
   // helpers cho authors UI
   const addAuthor = () => {
@@ -139,7 +137,7 @@ export default function EditBookDialog({ open, id, initialBook, onClose, onUpdat
           publisherName: undefined,
           authors: undefined,
           genres: undefined,
-          bookData: undefined,
+          newspaperData: undefined,
           coverFile: undefined,
           ebookFile: undefined,
           coverUrl: undefined,
@@ -159,31 +157,37 @@ export default function EditBookDialog({ open, id, initialBook, onClose, onUpdat
         setAuthorsOpt(a.map((x) => (typeof x === "string" ? x : x?.fullName)).filter(Boolean));
         setPubsOpt(p.map((x) => (typeof x === "string" ? x : x?.name)).filter(Boolean));
 
-        if (!initialBook) {
-          const full = await getBookById(id);
+        if (!initialItem) {
+          const full = await getNewspaperById(id);
           setBase(full);
-          const au = (full.authors || []).slice().sort((x, y) => (x.ord ?? 0) - (y.ord ?? 0))
+
+          const au = (full.authors || [])
+            .slice()
+            .sort((x, y) => (x.ord ?? 0) - (y.ord ?? 0))
             .map(a => ({ fullName: a.fullName || "", role: a.role || "main", ord: a.ord ?? 1 }));
           setAuthorsUI(au.length ? au : [{ fullName: "", role: "main", ord: 1 }]);
 
           const ge = (full.genres || []).map(g => g.name || g).filter(Boolean);
           setGenresUI(ge);
         } else {
-          setBase(initialBook);
-          const au = (initialBook.authors || []).slice().sort((x, y) => (x.ord ?? 0) - (y.ord ?? 0))
+          setBase(initialItem);
+
+          const au = (initialItem.authors || [])
+            .slice()
+            .sort((x, y) => (x.ord ?? 0) - (y.ord ?? 0))
             .map(a => ({ fullName: a.fullName || "", role: a.role || "main", ord: a.ord ?? 1 }));
           setAuthorsUI(au.length ? au : [{ fullName: "", role: "main", ord: 1 }]);
 
-          const ge = (initialBook.genres || []).map(g => g.name || g).filter(Boolean);
+          const ge = (initialItem.genres || []).map(g => g.name || g).filter(Boolean);
           setGenresUI(ge);
         }
       } catch (e) {
-        setError(e.message || "Không tải được dữ liệu sách.");
+        setError(e.message || "Không tải được dữ liệu báo.");
       } finally {
         setLoading(false);
       }
     })();
-  }, [open, id, initialBook]);
+  }, [open, id, initialItem]);
 
   const handleNext = () => setActiveStep((s) => Math.min(s + 1, STEPS.length - 1));
   const handleBack = () => setActiveStep((s) => Math.max(s - 1, 0));
@@ -225,10 +229,10 @@ export default function EditBookDialog({ open, id, initialBook, onClose, onUpdat
         }
       }
 
-      const res = await updateBook(id, payload);
+      const res = await updateNewspaper(id, payload);
       if (!res?.ok) throw new Error(res?.message || "Cập nhật thất bại.");
 
-      enqueueSnackbar("Cập nhật sách thành công!", { variant: "success" });
+      enqueueSnackbar("Cập nhật báo thành công!", { variant: "success" });
       onUpdated?.(res.data);
       onClose?.();
     } catch (e) {
@@ -246,7 +250,6 @@ export default function EditBookDialog({ open, id, initialBook, onClose, onUpdat
 
   return (
     <Dialog open={open} onClose={handleClose} fullWidth maxWidth="lg" scroll="paper">
-      {/* DialogTitle với nút X */}
       <DialogTitle sx={{ position: "relative", pr: 6 }}>
         <Stack direction="row" alignItems="center" spacing={2}>
           <Avatar sx={{ bgcolor: "primary.main" }}>
@@ -254,7 +257,7 @@ export default function EditBookDialog({ open, id, initialBook, onClose, onUpdat
           </Avatar>
           <Box>
             <Typography variant="h6" fontWeight={700}>
-              Sửa thông tin sách
+              Sửa thông tin báo
             </Typography>
             <Typography variant="body2" color="text.secondary">
               Chỉ sửa những mục bạn muốn thay đổi — mục trống sẽ giữ nguyên
@@ -262,18 +265,12 @@ export default function EditBookDialog({ open, id, initialBook, onClose, onUpdat
           </Box>
         </Stack>
 
-        {/* Nút X góc phải */}
         <IconButton
           aria-label="Đóng"
           onClick={handleClose}
           disabled={saving}
           size="small"
-          sx={{
-            position: "absolute",
-            right: 8,
-            top: 8,
-            color: (theme) => theme.palette.grey[500],
-          }}
+          sx={{ position: "absolute", right: 8, top: 8, color: (theme) => theme.palette.grey[500] }}
         >
           <CloseIcon />
         </IconButton>
@@ -282,7 +279,6 @@ export default function EditBookDialog({ open, id, initialBook, onClose, onUpdat
       {saving && <LinearProgress />}
 
       <DialogContent dividers sx={{ p: 0 }}>
-        {/* Stepper */}
         <Paper elevation={0} sx={{ px: 3, py: 2, borderBottom: 1, borderColor: "divider" }}>
           <Stepper activeStep={activeStep} alternativeLabel>
             {STEPS.map((label, index) => (
@@ -310,24 +306,20 @@ export default function EditBookDialog({ open, id, initialBook, onClose, onUpdat
 
           {base && !loading && (
             <>
-              {/* Step 1: Thông tin cơ bản */}
+              {/* Step 1 */}
               {activeStep === 0 && (
                 <Grid container spacing={3}>
                   <Grid item xs={12} md={8}>
                     <Stack spacing={3}>
                       <Card elevation={1} sx={{ p: 3, borderRadius: 2 }}>
                         <Stack spacing={2}>
-                          <Typography
-                            variant="h6"
-                            fontWeight={600}
-                            sx={{ display: "flex", alignItems: "center", gap: 1 }}
-                          >
+                          <Typography variant="h6" fontWeight={600} sx={{ display: "flex", alignItems: "center", gap: 1 }}>
                             <LibraryBooksIcon color="primary" />
                             Thông tin cơ bản
                           </Typography>
 
                           <TextField
-                            label="Tiêu đề sách"
+                            label="Tiêu đề"
                             value={form.title ?? base.title ?? ""}
                             onChange={(e) => setF("title", e.target.value)}
                             placeholder="(Để trống để giữ nguyên)"
@@ -374,11 +366,7 @@ export default function EditBookDialog({ open, id, initialBook, onClose, onUpdat
                                   const v = e.target.value;
                                   setF("coverPrice", v === "" ? undefined : Number(v));
                                 }}
-                                InputProps={{
-                                  endAdornment: (
-                                    <Box component="span" sx={{ ml: 1 }}>VND</Box>
-                                  ),
-                                }}
+                                InputProps={{ endAdornment: <Box component="span" sx={{ ml: 1 }}>VND</Box> }}
                                 fullWidth
                               />
                             </Grid>
@@ -407,11 +395,7 @@ export default function EditBookDialog({ open, id, initialBook, onClose, onUpdat
 
                       <Card elevation={1} sx={{ p: 3, borderRadius: 2 }}>
                         <Stack spacing={2}>
-                          <Typography
-                            variant="h6"
-                            fontWeight={600}
-                            sx={{ display: "flex", alignItems: "center", gap: 1 }}
-                          >
+                          <Typography variant="h6" fontWeight={600} sx={{ display: "flex", alignItems: "center", gap: 1 }}>
                             <LocalLibraryIcon color="primary" />
                             Thông tin xuất bản
                           </Typography>
@@ -444,68 +428,56 @@ export default function EditBookDialog({ open, id, initialBook, onClose, onUpdat
                         <Typography variant="h6" fontWeight={600} color="primary">
                           Gợi ý
                         </Typography>
-                        <Typography variant="body2" color="text.secondary">
-                          • Chỉ nhập các trường muốn thay đổi.
-                        </Typography>
-                        <Typography variant="body2" color="text.secondary">
-                          • Để trống: giữ nguyên giá trị cũ.
-                        </Typography>
-                        <Typography variant="body2" color="text.secondary">
-                          • Một số trường hỗ trợ xoá bằng cách gửi chuỗi rỗng.
-                        </Typography>
+                        <Typography variant="body2" color="text.secondary">• Chỉ nhập các trường muốn thay đổi.</Typography>
+                        <Typography variant="body2" color="text.secondary">• Để trống: giữ nguyên.</Typography>
+                        <Typography variant="body2" color="text.secondary">• Một số trường có thể xoá bằng chuỗi rỗng.</Typography>
                       </Stack>
                     </Card>
                   </Grid>
                 </Grid>
               )}
 
-              {/* Step 2: Chi tiết & Tác giả */}
+              {/* Step 2 */}
               {activeStep === 1 && (
                 <Grid container spacing={3}>
                   <Grid item xs={12} md={8}>
                     <Stack spacing={3}>
                       <Card elevation={1} sx={{ p: 3, borderRadius: 2 }}>
                         <Stack spacing={2}>
-                          <Typography
-                            variant="h6"
-                            fontWeight={600}
-                            sx={{ display: "flex", alignItems: "center", gap: 1 }}
-                          >
+                          <Typography variant="h6" fontWeight={600} sx={{ display: "flex", alignItems: "center", gap: 1 }}>
                             <DescriptionIcon color="primary" />
-                            Thông tin chi tiết
+                            Chi tiết phát hành
                           </Typography>
 
                           <Grid container spacing={2}>
                             <Grid item xs={12} sm={4}>
                               <TextField
-                                label="ISBN"
-                                value={form.bookData?.isbn ?? base.book?.isbn ?? ""}
-                                onChange={(e) => setBD("isbn", e.target.value)}
+                                label="ISSN"
+                                value={form.newspaperData?.issn ?? base.newspaper?.issn ?? ""}
+                                onChange={(e) => setNP("issn", e.target.value)}
                                 placeholder="(Để trống để giữ nguyên; rỗng để xoá)"
                                 fullWidth
                               />
                             </Grid>
                             <Grid item xs={12} sm={4}>
                               <TextField
-                                label="Lần tái bản"
+                                label="Số phát hành"
                                 type="number"
-                                value={form.bookData?.edition ?? base.book?.edition ?? ""}
+                                value={form.newspaperData?.issueNumber ?? base.newspaper?.issueNumber ?? ""}
                                 onChange={(e) => {
                                   const v = e.target.value;
-                                  setBD("edition", v === "" ? undefined : Number(v));
+                                  setNP("issueNumber", v === "" ? undefined : Number(v));
                                 }}
                                 fullWidth
                               />
                             </Grid>
                             <Grid item xs={12} sm={4}>
                               <TextField
-                                label="Số trang"
-                                type="number"
-                                value={form.bookData?.pageCount ?? base.book?.pageCount ?? ""}
-                                onChange={(e) => {
-                                  const v = e.target.value;
-                                  setBD("pageCount", v === "" ? undefined : Number(v));
-                                }}
+                                label="Ngày phát hành"
+                                type="date"
+                                value={(form.newspaperData?.issueDate ?? base.newspaper?.issueDate ?? "").slice(0, 10)}
+                                onChange={(e) => setNP("issueDate", e.target.value)}
+                                InputLabelProps={{ shrink: true }}
                                 fullWidth
                               />
                             </Grid>
@@ -516,11 +488,7 @@ export default function EditBookDialog({ open, id, initialBook, onClose, onUpdat
                       {/* Tác giả */}
                       <Card elevation={1} sx={{ p: 3, borderRadius: 2 }}>
                         <Stack spacing={2}>
-                          <Typography
-                            variant="h6"
-                            fontWeight={600}
-                            sx={{ display: "flex", alignItems: "center", gap: 1 }}
-                          >
+                          <Typography variant="h6" fontWeight={600} sx={{ display: "flex", alignItems: "center", gap: 1 }}>
                             <PersonIcon color="primary" />
                             Tác giả & Đóng góp
                           </Typography>
@@ -543,11 +511,7 @@ export default function EditBookDialog({ open, id, initialBook, onClose, onUpdat
                                       }
                                       onInputChange={(_, val) => upAuthor(i, "fullName", val)}
                                       renderInput={(params) => (
-                                        <TextField
-                                          {...params}
-                                          label="Họ tên tác giả"
-                                          placeholder="Nhập tên tác giả..."
-                                        />
+                                        <TextField {...params} label="Họ tên tác giả" placeholder="Nhập tên tác giả..." />
                                       )}
                                     />
                                   </Grid>
@@ -599,12 +563,7 @@ export default function EditBookDialog({ open, id, initialBook, onClose, onUpdat
                               </Paper>
                             ))}
 
-                            <Button
-                              variant="outlined"
-                              startIcon={<CheckCircleIcon />}
-                              onClick={addAuthor}
-                              sx={{ alignSelf: "flex-start" }}
-                            >
+                            <Button variant="outlined" startIcon={<CheckCircleIcon />} onClick={addAuthor} sx={{ alignSelf: "flex-start" }}>
                               Thêm tác giả
                             </Button>
 
@@ -618,11 +577,7 @@ export default function EditBookDialog({ open, id, initialBook, onClose, onUpdat
                       {/* Thể loại */}
                       <Card elevation={1} sx={{ p: 3, borderRadius: 2 }}>
                         <Stack spacing={2}>
-                          <Typography
-                            variant="h6"
-                            fontWeight={600}
-                            sx={{ display: "flex", alignItems: "center", gap: 1 }}
-                          >
+                          <Typography variant="h6" fontWeight={600} sx={{ display: "flex", alignItems: "center", gap: 1 }}>
                             <CategoryIcon color="primary" />
                             Thể loại
                           </Typography>
@@ -641,20 +596,11 @@ export default function EditBookDialog({ open, id, initialBook, onClose, onUpdat
                               setGenresTouched(true);
                             }}
                             renderInput={(params) => (
-                              <TextField
-                                {...params}
-                                label="Thể loại sách"
-                                placeholder="Nhập thể loại và Enter..."
-                              />
+                              <TextField {...params} label="Thể loại báo" placeholder="Nhập thể loại và Enter..." />
                             )}
                             renderTags={(value, getTagProps) =>
                               value.map((option, index) => (
-                                <Chip
-                                  {...getTagProps({ index })}
-                                  key={index}
-                                  label={option}
-                                  variant="outlined"
-                                />
+                                <Chip {...getTagProps({ index })} key={index} label={option} variant="outlined" />
                               ))
                             }
                           />
@@ -672,30 +618,22 @@ export default function EditBookDialog({ open, id, initialBook, onClose, onUpdat
                         <Typography variant="h6" fontWeight={600} color="primary">
                           Lưu ý
                         </Typography>
-                        <Typography variant="body2" color="text.secondary">
-                          • Thứ tự tác giả (ord) sẽ lưu đúng như bạn nhập.
-                        </Typography>
-                        <Typography variant="body2" color="text.secondary">
-                          • Tên tác giả/thể loại mới sẽ được tạo nếu chưa tồn tại.
-                        </Typography>
+                        <Typography variant="body2" color="text.secondary">• Thứ tự tác giả (ord) sẽ lưu đúng như bạn nhập.</Typography>
+                        <Typography variant="body2" color="text.secondary">• Tên tác giả/thể loại mới sẽ được tạo nếu chưa tồn tại.</Typography>
                       </Stack>
                     </Card>
                   </Grid>
                 </Grid>
               )}
 
-              {/* Step 3: Media */}
+              {/* Step 3 */}
               {activeStep === 2 && (
                 <Grid container spacing={3}>
                   <Grid item xs={12} md={8}>
                     <Stack spacing={3}>
                       <Card elevation={1} sx={{ p: 3, borderRadius: 2 }}>
                         <Stack spacing={3}>
-                          <Typography
-                            variant="h6"
-                            fontWeight={600}
-                            sx={{ display: "flex", alignItems: "center", gap: 1 }}
-                          >
+                          <Typography variant="h6" fontWeight={600} sx={{ display: "flex", alignItems: "center", gap: 1 }}>
                             <ImageIcon color="primary" />
                             Ảnh bìa & Tài liệu số
                           </Typography>
@@ -704,9 +642,7 @@ export default function EditBookDialog({ open, id, initialBook, onClose, onUpdat
                             {/* Ảnh bìa */}
                             <Grid item xs={12} md={6}>
                               <Stack spacing={2}>
-                                <Typography variant="subtitle1" fontWeight={600}>
-                                  Ảnh bìa
-                                </Typography>
+                                <Typography variant="subtitle1" fontWeight={600}>Ảnh bìa</Typography>
 
                                 {coverPreview ? (
                                   <Box sx={{ position: "relative" }}>
@@ -744,9 +680,7 @@ export default function EditBookDialog({ open, id, initialBook, onClose, onUpdat
                                   >
                                     <Stack alignItems="center" spacing={1}>
                                       <ImageIcon sx={{ fontSize: 48, color: "grey.400" }} />
-                                      <Typography color="grey.500" variant="body2">
-                                        Chưa có ảnh bìa
-                                      </Typography>
+                                      <Typography color="grey.500" variant="body2">Chưa có ảnh bìa</Typography>
                                     </Stack>
                                   </Card>
                                 )}
@@ -764,7 +698,7 @@ export default function EditBookDialog({ open, id, initialBook, onClose, onUpdat
 
                                   <TextField
                                     size="small"
-                                    label="Hoặc URL ảnh (trống = giữ nguyên, rỗng = xoá)"
+                                    label="Hoặc URL ảnh (trống = giữ, rỗng = xoá)"
                                     value={form.coverUrl ?? ""}
                                     onChange={(e) => setF("coverUrl", e.target.value)}
                                     placeholder="https://example.com/cover.jpg"
@@ -777,9 +711,7 @@ export default function EditBookDialog({ open, id, initialBook, onClose, onUpdat
                             {/* Ebook */}
                             <Grid item xs={12} md={6}>
                               <Stack spacing={2}>
-                                <Typography variant="subtitle1" fontWeight={600}>
-                                  Tài liệu số (PDF/EPUB)
-                                </Typography>
+                                <Typography variant="subtitle1" fontWeight={600}>Tài liệu số (PDF/EPUB)</Typography>
 
                                 <Card
                                   variant="outlined"
@@ -846,12 +778,8 @@ export default function EditBookDialog({ open, id, initialBook, onClose, onUpdat
                         <Typography variant="h6" fontWeight={600} color="primary">
                           Hoàn tất
                         </Typography>
-                        <Typography variant="body2" color="text.secondary">
-                          • Nếu không nhập gì, dữ liệu sẽ giữ nguyên.
-                        </Typography>
-                        <Typography variant="body2" color="text.secondary">
-                          • Một số trường có thể xoá bằng cách gửi chuỗi rỗng.
-                        </Typography>
+                        <Typography variant="body2" color="text.secondary">• Nếu không nhập gì, dữ liệu sẽ giữ nguyên.</Typography>
+                        <Typography variant="body2" color="text.secondary">• Một số trường có thể xoá bằng cách gửi chuỗi rỗng.</Typography>
                       </Stack>
                     </Card>
                   </Grid>

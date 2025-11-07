@@ -6,7 +6,7 @@ import api from "./api";
  * @param {{
  *  page?: number,
  *  limit?: number,
- *  status?: 'PENDING'|'OPEN'|'CLOSED'|'OVERDUE',
+ *  status?: 'PENDING'|'PENDING_PAYMENT'|'BORROWING'|'RETURNED'|'OVERDUE',
  *  readerId?: number,
  *  librarianId?: number,
  *  fromDate?: string, // YYYY-MM-DD
@@ -18,7 +18,6 @@ import api from "./api";
  */
 export async function fetchLoanSlips(params = {}) {
     const res = await api.get("/loans/admin/loans", { params });
-    // BE trả { success, pagination, data }
     return res?.data ?? { success: false, pagination: null, data: [] };
 }
 
@@ -30,7 +29,6 @@ export async function fetchLoanSlips(params = {}) {
  */
 export async function getDocumentDetail(documentId) {
     const res = await api.get(`/documents/reader/${documentId}`);
-    // BE có thể trả {success, data} hoặc trả thẳng object
     const data = res?.data?.data ?? res?.data ?? null;
     return data;
 }
@@ -38,13 +36,11 @@ export async function getDocumentDetail(documentId) {
 export async function createLoanSlip(payload) {
     // payload: { readerId, librarianId, loanDate?, dueDate?, items:[{documentCopyId, depositAmount?, note?}], totalAmount? }
     const res = await api.post("/loans/admin/loans", payload);
-    // BE trả về { loanSlip, items, payment }
     return res?.data ?? null;
 }
 
 export async function createLoanSlipPaymentQR({ loanSlipId, amount, description }) {
     const res = await api.post(`/loans/admin/loans/${loanSlipId}/payment/qr`, { amount, description });
-    // BE trả { paymentId, amount, status, transactionCode, qr, qrPayloadExample }
     return res?.data ?? null;
 }
 
@@ -65,6 +61,5 @@ export async function getCopyWithDeposit(copyId, {
         `/documents/admin/copies/${copyId}`,
         { params: { withDoc, withAuthors, withSubtype } }
     );
-    // BE trả { copy: {...}, document: {...} }
     return res?.data ?? null;
 }
