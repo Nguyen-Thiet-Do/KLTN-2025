@@ -8,6 +8,8 @@ import ProtectedRoute from "./ProtectedRoute";
 import Newspaper from "../pages/Documents/Newspapers/Newspaper";
 import Magazine from "../pages/Documents/Magazines/Magazine";
 
+import AdminDashboard from "../pages/AdminDashboard/AdminDashboard";
+
 export const adminRoutes = {
   path: "/admin",
   element: <ProtectedRoute allowedRoles={[1]} />,
@@ -21,6 +23,7 @@ export const adminRoutes = {
         { path: "documents/books", element: <Book /> },
         { path: "documents/newspapers", element: <Newspaper/> },
         { path: "documents/magazines", element: <Magazine/>  },
+        { path: "dashboard", element: <AdminDashboard /> }, 
         { path: "borrow", element: <Borrow /> },
       ],
     },

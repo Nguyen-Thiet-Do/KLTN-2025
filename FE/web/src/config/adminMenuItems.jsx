@@ -17,5 +17,5 @@ export const adminMenuItems = [
   },
 
   { path: "/admin/borrow", icon: FaExchangeAlt, label: "Mượn trả" },
-  { path: "/admin/statistics", icon: FaChartBar, label: "Thống kê" },
+  { path: "/admin/dashboard", icon: FaChartBar, label: "Thống kê" },
 ];
