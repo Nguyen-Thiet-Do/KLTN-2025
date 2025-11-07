@@ -625,10 +625,58 @@ async function approveReservationService(payload) {
   });
 }
 
+/** ---------------------------------------------
+ *  NEW: Lấy danh sách bản sao có thể mượn (AVAILABLE)
+ *  ---------------------------------------------
+ * Query mở rộng (tùy chọn): page, limit, q (tìm theo barcode), excludeCopyIds[]
+ */
+async function getBorrowableCopiesService(documentId, options = {}) {
+  const docId = Number(documentId);
+  if (!docId) { const e = new Error('documentId không hợp lệ'); e.status = 400; throw e; }
+
+  const page = Math.max(1, Number(options.page || 1));
+  const limit = Math.min(100, Math.max(1, Number(options.limit || 20)));
+  const offset = (page - 1) * limit;
+  const { q, excludeCopyIds } = options;
+
+  // Xác thực document tồn tại
+  const doc = await Document.findByPk(docId, { attributes: ['documentId', 'deleted'] });
+  if (!doc || doc.deleted) { const e = new Error('Không tìm thấy tài liệu'); e.status = 404; throw e; }
+
+  const where = { documentId: docId, deleted: false, status: 'AVAILABLE' };
+
+  if (Array.isArray(excludeCopyIds) && excludeCopyIds.length) {
+    where.documentCopyId = { [Op.notIn]: excludeCopyIds.map(Number) };
+  }
+  if (q && String(q).trim()) {
+    where.barCode = { [Op.like]: `%${q.trim()}%` };
+  }
+
+  const result = await DocumentCopy.findAndCountAll({
+    where,
+    limit,
+    offset,
+    order: [['documentCopyId', 'ASC']],
+    attributes: ['documentCopyId', 'documentId', 'barCode', 'status'],
+  });
+
+  return {
+    pagination: {
+      page,
+      limit,
+      total: result.count,
+      totalPages: Math.ceil(result.count / limit),
+    },
+    data: result.rows,
+  };
+}
+
 module.exports = {
   getAllLoanSlipsService,
   createLoanSlipService,
   createLoanSlipPaymentQRService,
   confirmLoanSlipPaymentService,
   approveReservationService,
+  // NEW:
+  getBorrowableCopiesService,
 };

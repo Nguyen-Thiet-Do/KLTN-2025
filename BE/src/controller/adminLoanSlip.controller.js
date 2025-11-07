@@ -5,6 +5,7 @@ const {
   createLoanSlipPaymentQRService,
   confirmLoanSlipPaymentService,
   approveReservationService,
+  getBorrowableCopiesService,
 } = require('../service/adminLoanSlip.service');
 
 exports.getAllLoanSlips = async (req, res) => {
@@ -12,7 +13,8 @@ exports.getAllLoanSlips = async (req, res) => {
     const payload = await getAllLoanSlipsService(req.query);
     return res.json({ success: true, ...payload });
   } catch (err) {
-    return res.status(500).json({
+    const code = err.status || 500;
+    return res.status(code).json({
       success: false,
       message: 'Lỗi lấy danh sách phiếu mượn',
       error: err.message,
@@ -102,6 +104,37 @@ exports.approveReservation = async (req, res) => {
     return res.status(code).json({
       success: false,
       message: 'Lỗi duyệt phiếu đặt trước',
+      error: err.message,
+    });
+  }
+};
+
+/**
+ * NEW: Lấy danh sách bản sao có thể mượn (AVAILABLE) của 1 document
+ * Query hỗ trợ: ?page=1&limit=20&q=barcode&exclude=10,11
+ */
+exports.getBorrowableCopies = async (req, res) => {
+  try {
+    const { documentId } = req.params;
+    const { page, limit, q, exclude } = req.query;
+
+    const excludeCopyIds = typeof exclude === 'string' && exclude.trim()
+      ? exclude.split(',').map(s => Number(s.trim())).filter(n => !Number.isNaN(n))
+      : [];
+
+    const data = await getBorrowableCopiesService(documentId, {
+      page,
+      limit,
+      q,
+      excludeCopyIds,
+    });
+
+    return res.json({ success: true, ...data });
+  } catch (err) {
+    const code = err.status || 500;
+    return res.status(code).json({
+      success: false,
+      message: 'Lỗi lấy danh sách bản sao AVAILABLE',
       error: err.message,
     });
   }

@@ -41,4 +41,13 @@ router.post(
     controller.approveReservation
 );
 
+// NEW: Lấy danh sách bản sao AVAILABLE để mượn cho 1 tài liệu
+// Ví dụ: GET /api/loans/admin/documents/12/copies?page=1&limit=20&q=BC00&exclude=101,103
+router.get(
+    '/documents/:documentId/copies',
+    requireAuth,
+    requireRole([1, 2]),
+    controller.getBorrowableCopies
+);
+
 module.exports = router;
