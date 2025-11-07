@@ -1,8 +1,14 @@
 const readerService = require("../service/readerService");
 
+// Helper quyền: Admin (1) hoặc Thủ thư (2)
+const isStaff = (req) => [1, 2].includes(req.user?.roleId);
+
 // ✅ Lấy danh sách tất cả độc giả (Admin + Thủ thư)
 const getAllReaders = async (req, res) => {
   try {
+    if (!isStaff(req)) {
+      return res.status(403).json({ success: false, message: "Chỉ Admin/Thủ thư được truy cập" });
+    }
     const readers = await readerService.getAllReaders();
     res.json({ success: true, readers });
   } catch (err) {
@@ -11,7 +17,7 @@ const getAllReaders = async (req, res) => {
   }
 };
 
-// ✅ Lấy thông tin độc giả theo accountId
+// ✅ Lấy thông tin độc giả theo accountId (cho chính người dùng đăng nhập)
 const getReaderByAccountId = async (req, res) => {
   try {
     const accountId = req.user.accountId;
@@ -24,11 +30,11 @@ const getReaderByAccountId = async (req, res) => {
   }
 };
 
-// ✅ Thêm độc giả mới (Admin)
+// ✅ Thêm độc giả mới (Admin + Thủ thư)
 const createReader = async (req, res) => {
   try {
-    if (req.user.roleId !== 1) {
-      return res.status(403).json({ success: false, message: "Chỉ Admin được thêm độc giả" });
+    if (!isStaff(req)) {
+      return res.status(403).json({ success: false, message: "Chỉ Admin/Thủ thư được thêm độc giả" });
     }
     const data = req.body;
     const newReader = await readerService.createReader(data);
@@ -39,9 +45,12 @@ const createReader = async (req, res) => {
   }
 };
 
-// ✅ Cập nhật độc giả (Admin hoặc Thủ thư)
+// ✅ Cập nhật độc giả (Admin + Thủ thư)
 const updateReader = async (req, res) => {
   try {
+    if (!isStaff(req)) {
+      return res.status(403).json({ success: false, message: "Chỉ Admin/Thủ thư được cập nhật độc giả" });
+    }
     const { id } = req.params;
     const result = await readerService.updateReader(id, req.body);
     res.json({ success: true, message: "Cập nhật độc giả thành công", result });
@@ -51,9 +60,12 @@ const updateReader = async (req, res) => {
   }
 };
 
-// ✅ Đặt lại mật khẩu độc giả
+// ✅ Đặt lại mật khẩu độc giả (Admin + Thủ thư)
 const resetReaderPassword = async (req, res) => {
   try {
+    if (!isStaff(req)) {
+      return res.status(403).json({ success: false, message: "Chỉ Admin/Thủ thư được đặt lại mật khẩu" });
+    }
     const { id } = req.params;
     const { newPassword } = req.body;
     const result = await readerService.resetReaderPassword(id, newPassword);
@@ -64,11 +76,11 @@ const resetReaderPassword = async (req, res) => {
   }
 };
 
-// ✅ Xóa độc giả (Admin)
+// ✅ Xóa độc giả (Admin + Thủ thư)
 const deleteReader = async (req, res) => {
   try {
-    if (req.user.roleId !== 1) {
-      return res.status(403).json({ success: false, message: "Chỉ Admin được xóa độc giả" });
+    if (!isStaff(req)) {
+      return res.status(403).json({ success: false, message: "Chỉ Admin/Thủ thư được xóa độc giả" });
     }
     const { id } = req.params;
     const result = await readerService.deleteReader(id);
@@ -81,9 +93,13 @@ const deleteReader = async (req, res) => {
   }
 };
 
-// ✅ Lấy độc giả theo ID
+// ✅ Lấy độc giả theo ID (Admin + Thủ thư)
 const getReaderById = async (req, res) => {
   try {
+    if (!isStaff(req)) {
+      return res.status(403).json({ success: false, message: "Chỉ Admin/Thủ thư được xem chi tiết độc giả" });
+    }
+
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id <= 0) {
       return res.status(400).json({ success: false, message: "readerId không hợp lệ" });
@@ -107,5 +123,5 @@ module.exports = {
   updateReader,
   deleteReader,
   getReaderById,
-  resetReaderPassword, // ✅ thêm export
+  resetReaderPassword,
 };

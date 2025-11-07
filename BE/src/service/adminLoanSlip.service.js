@@ -32,6 +32,12 @@ function parseDateOnly(str) {
 function fmtToday() {
   return new Date().toISOString().slice(0, 10);
 }
+function addDaysDateOnly(dateStr, days) {
+  const d = parseDateOnly(dateStr);
+  if (!d) return null;
+  const nd = new Date(d.getTime() + days * ONE_DAY_MS);
+  return nd.toISOString().slice(0, 10);
+}
 function daysDiff(a, b) {
   // số ngày b - a (date-only)
   const da = parseDateOnly(a);
@@ -448,13 +454,15 @@ async function confirmLoanSlipPaymentService({ loanSlipId, paymentId, transactio
 
 /**
  * Duyệt phiếu đặt trước -> WAITING_FOR_PICKUP
- * (theo yêu cầu: không áp ràng buộc hạn trả và quota ở bước duyệt)
+ * (KHÔNG dùng borrowForm. Điều kiện:
+ *  - Slip.status === 'PENDING'
+ *  - Có LoanDetail.status='PENDING' & documentCopyId IS NULL)
  */
 async function approveReservationService(payload) {
   const {
     loanSlipId,
     librarianId,
-    dueDate,         // có thể bỏ trống, nếu truyền sẽ set cho slip
+    dueDate,                  // có thể bỏ trống; nếu trống & slip chưa có dueDate thì BE tự set +30 ngày từ hôm nay
     pricingMode = 'AUTO_MIN', // 'AUTO_MIN' | 'AUTO_MAX' | 'MANUAL'
     deposits = [],            // [{ loanDetailId, depositAmount }]
     assignments = [],         // [{ loanDetailId, documentCopyId }]
@@ -475,9 +483,10 @@ async function approveReservationService(payload) {
     const slip = await LoanSlip.findByPk(Number(loanSlipId), { transaction: t, lock: t.LOCK.UPDATE });
     if (!slip) { const e = new Error('Không tìm thấy phiếu'); e.status = 404; throw e; }
 
+    // Chỉ yêu cầu đang PENDING
     const status = String(slip.status || '').toUpperCase();
-    if (status !== 'PENDING' || String(slip.borrowForm || '') !== 'RESERVATION') {
-      const e = new Error('Chỉ duyệt phiếu đặt trước đang ở trạng thái PENDING (borrowForm=RESERVATION)');
+    if (status !== 'PENDING') {
+      const e = new Error('Chỉ duyệt phiếu đang ở trạng thái PENDING');
       e.status = 409; throw e;
     }
 
@@ -553,6 +562,7 @@ async function approveReservationService(payload) {
       }
     }
 
+    // Tính cọc & cập nhật detail + hold copy
     let totalDeposit = 0;
 
     for (const d of pendingDetails) {
@@ -586,11 +596,18 @@ async function approveReservationService(payload) {
       );
     }
 
-    // Cập nhật thông tin phiếu; dueDate nếu có truyền thì set, nếu không thì giữ nguyên
+    // Cập nhật thông tin phiếu; nếu không truyền dueDate:
+    // - nếu slip đã có dueDate thì giữ nguyên
+    // - nếu chưa có, BE tự set +30 ngày từ hôm nay
+    let newDueDate = dueDate || slip.dueDate;
+    if (!newDueDate) {
+      newDueDate = addDaysDateOnly(fmtToday(), 30);
+    }
+
     await slip.update({
       librarianId: Number(librarianId),
-      dueDate: dueDate || slip.dueDate,
-      status: 'WAITING_FOR_PICKUP',
+      dueDate: newDueDate,
+      status: 'PENDING_PAYMENT',
     }, { transaction: t });
 
     let payment = null;
@@ -611,9 +628,9 @@ async function approveReservationService(payload) {
     }
 
     return {
-      message: 'Duyệt phiếu đặt trước thành công. Đang chờ độc giả đến lấy.',
+      message: 'Duyệt phiếu thành công. Đang chờ độc giả đến lấy.',
       loanSlipId: slip.loanSlipId,
-      slipStatus: 'WAITING_FOR_PICKUP',
+      slipStatus: 'PENDING_PAYMENT',
       totalDeposit,
       payment: payment ? {
         paymentId: payment.paymentId,
