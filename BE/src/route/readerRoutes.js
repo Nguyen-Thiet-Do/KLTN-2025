@@ -13,13 +13,13 @@ router.get("/", requireAuth, requireRole([1, 2]), readerController.getAllReaders
 // router.get("/me", requireAuth, requireRole([3]), readerController.getCurrentReader);
 
 // ✅ Thêm độc giả mới (Admin)
-router.post("/", requireAuth, requireRole([1]), readerController.createReader);
+router.post("/", requireAuth, requireRole([1,2]), readerController.createReader);
 
 // ✅ Cập nhật độc giả (Admin hoặc Thủ thư)
 router.put("/:id", requireAuth, requireRole([1, 2]), readerController.updateReader);
 // ✅ Đặt lại mật khẩu độc giả (Admin + Thủ thư)
 router.put("/:id/reset-password", requireAuth, requireRole([1, 2]), readerController.resetReaderPassword);
 // ✅ Xóa độc giả theo ID (Admin)
-router.delete("/:id", requireAuth, requireRole([1]), readerController.deleteReader);
+router.delete("/:id", requireAuth, requireRole([1,2]), readerController.deleteReader);
 
 module.exports = router;
