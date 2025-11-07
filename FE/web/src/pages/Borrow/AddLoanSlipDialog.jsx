@@ -375,7 +375,7 @@ export default function AddLoanSlipDialog({ open, onClose, onCreated }) {
                         WebkitTextFillColor: "transparent",
                     }}
                 >
-                    Tạo phiếu mượn (PENDING_PAYMENT)
+                    Tạo phiếu mượn
                 </Typography>
                 <IconButton onClick={handleCloseAll}><Close /></IconButton>
             </DialogTitle>

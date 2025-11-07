@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   Box, Typography, Button, TextField, InputAdornment,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
-  Card, CardContent, Paper, IconButton, Alert, Pagination, Stack, Tooltip,
+  Card, CardContent, Paper, IconButton, Alert, Pagination, Stack,
   Link as MuiLink, Chip, Collapse, LinearProgress, Menu, MenuItem, Divider
 } from "@mui/material";
 import {
@@ -11,12 +11,13 @@ import {
   KeyboardArrowUp as ArrowUpIcon, MoreVert as MoreVertIcon,
 } from "@mui/icons-material";
 import { useSnackbar } from "notistack";
-import { getAllBooks, getBookCopies, addBookCopies } from "../../../services/bookService";
+import { getAllBooks, getBookCopies, addBookCopies, deleteBook } from "../../../services/bookService";
 import ButtonLoader from "../../../components/Loading/ButtonLoader";
 import BookDetailPanel from "./BookDetailPanel";
 import BookCreateDialog from "./BookCreateDialog";
 import AddCopyDialog from "./AddCopyDialog";
 import EditBookDialog from "./EditBookDialog";
+import DeleteBookDialog from "./DeleteBookDialog";
 
 const ITEMS_PER_PAGE = 5;
 
@@ -72,6 +73,10 @@ export default function Book() {
   // Add-copy dialog
   const [addDlgOpen, setAddDlgOpen] = useState(false);
 
+  // Delete dialog
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteRow, setDeleteRow] = useState(null);
+
   const fetchAll = async () => {
     try {
       setLoading(true);
@@ -124,7 +129,7 @@ export default function Book() {
 
   // Row menu
   const openMenu = (event, row) => { setMenuAnchor(event.currentTarget); setMenuRow(row); };
-  const closeMenu = () => { setMenuAnchor(null); /* giữ menuRow cho AddCopy & Edit */ };
+  const closeMenu = () => { setMenuAnchor(null); };
 
   const onMenuViewEbook = () => {
     closeMenu();
@@ -138,7 +143,11 @@ export default function Book() {
     setEditOpen(true);
     closeMenu();
   };
-  const onMenuDelete = () => { enqueueSnackbar("Chức năng xoá đang phát triển.", { variant: "info" }); closeMenu(); };
+  const onMenuDelete = () => {
+    setDeleteRow(menuRow);
+    setDeleteOpen(true);
+    closeMenu();
+  };
 
   // === Optimistic update cho thêm bản sao ===
   const handleAddCopiesSubmit = async (copies) => {
@@ -207,6 +216,27 @@ export default function Book() {
         };
       });
       enqueueSnackbar(e?.response?.data?.message || e.message || 'Thêm bản sao thất bại', { variant: 'error' });
+    }
+  };
+
+  // === Delete book (confirm-only, always cascade all) ===
+  const handleDeleteConfirm = async () => {
+    if (!deleteRow?.documentId) return;
+    const id = deleteRow.documentId;
+    const opts = { cascadeSubtype: 1, cascadeCopies: 1, cascadeMaps: 1 };
+
+    try {
+      await deleteBook(id, opts);
+      setBooks(prev => prev.filter(b => b.documentId !== id));
+      setCopiesMap(prev => { const p = { ...prev }; delete p[id]; return p; });
+      if (selectedId === id) { setDetailOpen(false); setSelectedId(null); setSelectedBook(null); }
+      enqueueSnackbar('Đã xoá sách thành công.', { variant: 'success' });
+    } catch (e) {
+      enqueueSnackbar(e?.response?.data?.message || e.message || 'Xoá sách thất bại', { variant: 'error' });
+      throw e;
+    } finally {
+      setDeleteOpen(false);
+      setDeleteRow(null);
     }
   };
 
@@ -390,7 +420,6 @@ export default function Book() {
         open={createOpen}
         onClose={() => setCreateOpen(false)}
         onCreated={(newBook) => {
-          // Không reload: thêm ngay vào đầu danh sách
           setBooks(prev => [newBook, ...prev]);
         }}
       />
@@ -403,18 +432,24 @@ export default function Book() {
         onSubmit={handleAddCopiesSubmit}
       />
 
-      {/* Dialog sửa sách (ĐÃ DI CHUYỂN RA NGOÀI FragmentRow) */}
+      {/* Dialog sửa sách */}
       <EditBookDialog
         open={editOpen}
         id={editRow?.documentId}
         initialBook={editRow}
         onClose={() => setEditOpen(false)}
         onUpdated={(updated) => {
-          // cập nhật ngay item trong bảng
           setBooks(prev => prev.map(b => b.documentId === updated.documentId ? { ...b, ...updated } : b));
-          // nếu đang mở panel chi tiết, đồng bộ luôn
           if (selectedId === updated.documentId) setSelectedBook(updated);
         }}
+      />
+
+      {/* Dialog xoá mềm sách */}
+      <DeleteBookDialog
+        open={deleteOpen}
+        onClose={() => setDeleteOpen(false)}
+        onConfirm={handleDeleteConfirm}
+        book={deleteRow}
       />
     </Box>
   );

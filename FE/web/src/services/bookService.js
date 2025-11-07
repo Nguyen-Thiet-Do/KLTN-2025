@@ -1,4 +1,4 @@
-// bookService.js
+// bookService.js — FULL FILE (with soft-delete helpers)
 
 import api from "./api";
 
@@ -28,14 +28,14 @@ export async function getAllBooks({ pageSize = 100 } = {}) {
 
 /** Lấy chi tiết sách theo ID (dùng cho panel) */
 export async function getBookById(id) {
-    // nếu endpoint khác, chỉ cần đổi URL dưới đây
+    if (!id && id !== 0) throw new Error("Thiếu id sách");
     const { data } = await api.get(`/documents/reader/books/${id}`);
-    console.log(data);
-    
     return data;
 }
 
+/** Lấy danh sách bản sao của một sách */
 export async function getBookCopies(id) {
+    if (!id && id !== 0) throw new Error("Thiếu id sách");
     const { data } = await api.get(`/documents/admin/${id}/copies`);
     // Kết quả mẫu:
     // { documentId, coverPrice, depositRate, copies: [...], summary: {minDeposit,maxDeposit,avgDeposit}}
@@ -123,6 +123,7 @@ export async function createBook(payload) {
     }
 }
 
+/** Thêm nhiều bản sao cho 1 sách */
 export async function addBookCopies(documentId, copies = []) {
     if (!documentId) throw new Error("documentId là bắt buộc");
     if (!Array.isArray(copies)) throw new Error("copies phải là một mảng");
@@ -139,9 +140,7 @@ export async function addBookCopies(documentId, copies = []) {
     return data; // { ok: true, createdCount, numberOfCopy } theo controller
 }
 
-
-/**
- * Cập nhật sách (PUT /documents/admin/books/:id)
+/** Cập nhật sách (PUT /documents/admin/books/:id)
  * payload: chỉ gửi TRƯỜNG CẦN SỬA.
  * - Nếu có file: multipart (cover, ebook) + các field text
  * - Nếu không file: JSON
@@ -208,4 +207,27 @@ export async function updateBook(id, payload = {}) {
         const { data } = await api.put(`/documents/admin/books/${id}`, body);
         return data; // { ok:true, data: <bookMapped> }
     }
+}
+
+// ============================
+// Soft Delete helpers (NEW)
+// ============================
+/**
+ * Xoá mềm tài liệu theo ID
+ * - cascadeSubtype: 0|1 (mặc định 1) — xoá Book/Magazine/Newspaper
+ * - cascadeCopies : 0|1 (mặc định 0) — xoá toàn bộ bản sao (cấm nếu có copy bị chặn)
+ * - cascadeMaps   : 0|1 (mặc định 0) — xoá liên kết tác giả/thể loại
+ */
+export async function deleteBook(documentId, { cascadeSubtype = 1, cascadeCopies = 0, cascadeMaps = 0 } = {}) {
+    if (!documentId && documentId !== 0) throw new Error("Thiếu documentId");
+    const params = { cascadeSubtype, cascadeCopies, cascadeMaps };
+    const { data } = await api.delete(`/documents/admin/${documentId}`, { params });
+    return data; // tuỳ BE: { success: true } hoặc entity đã xoá
+}
+
+/** Xoá mềm một bản sao theo ID */
+export async function deleteCopy(copyId) {
+    if (!copyId && copyId !== 0) throw new Error("Thiếu copyId");
+    const { data } = await api.delete(`/documents/admin/copies/${copyId}`);
+    return data; // tuỳ BE
 }
