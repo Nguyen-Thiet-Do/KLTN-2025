@@ -15,6 +15,31 @@ const {
 
 const { getDocumentDetailWithDeposit } = require('./documentService');
 
+/** Cấu hình giới hạn */
+const MAX_ITEMS_PER_SLIP = 3;
+// Đặt biến môi trường để thay đổi tổng số tài liệu tối đa một độc giả được giữ/đang mượn/chờ thanh toán
+const MAX_BORROWED_PER_READER = Number(process.env.MAX_BORROWED_PER_READER || 3);
+
+/** Helpers: xử lý ngày */
+const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+
+function parseDateOnly(str) {
+  // Chấp nhận đúng định dạng YYYY-MM-DD
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(str || ''))) return null;
+  const d = new Date(`${str}T00:00:00Z`);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+function fmtToday() {
+  return new Date().toISOString().slice(0, 10);
+}
+function daysDiff(a, b) {
+  // số ngày b - a (date-only)
+  const da = parseDateOnly(a);
+  const db = parseDateOnly(b);
+  if (!da || !db) return NaN;
+  return Math.round((db.getTime() - da.getTime()) / ONE_DAY_MS);
+}
+
 /**
  * Lấy danh sách phiếu mượn
  */
@@ -98,10 +123,20 @@ async function getAllLoanSlipsService(query) {
  * Body:
  * {
  *   readerId, librarianId,
- *   loanDate?: 'YYYY-MM-DD', dueDate?: 'YYYY-MM-DD',
+ *   loanDate?: 'YYYY-MM-DD',
+ *   dueDate: 'YYYY-MM-DD' (bắt buộc),
  *   items: [{ documentCopyId, depositAmount?, note? }],
  *   totalAmount?: number
  * }
+ *
+ * RÀNG BUỘC:
+ * - Mỗi phiếu tối đa 3 bản sao
+ * - dueDate bắt buộc, đúng định dạng, > loanDate và <= loanDate + 30 ngày
+ * - Không trùng documentCopyId trong items
+ * - Không mượn 2 bản sao của cùng một đầu sách
+ * - Không vượt quá tổng số tài liệu active của độc giả:
+ *   + Slip active: BORROWING, PENDING_PAYMENT, WAITING_FOR_PICKUP
+ *   + Detail active: BORROWED, PENDING_PAYMENT
  */
 async function createLoanSlipService(body) {
   const {
@@ -115,6 +150,46 @@ async function createLoanSlipService(body) {
 
   if (!readerId || !librarianId || !Array.isArray(items) || items.length === 0) {
     const e = new Error('Thiếu dữ liệu: readerId, librarianId, items');
+    e.status = 400; throw e;
+  }
+
+  // Giới hạn số tài liệu trên 1 phiếu
+  if (items.length > MAX_ITEMS_PER_SLIP) {
+    const e = new Error(`Mỗi phiếu chỉ được mượn tối đa ${MAX_ITEMS_PER_SLIP} tài liệu`);
+    e.status = 400; throw e;
+  }
+
+  // dueDate bắt buộc
+  if (!dueDate) {
+    const e = new Error('Hạn trả (dueDate) là bắt buộc');
+    e.status = 400; throw e;
+  }
+
+  // Chuẩn hoá và kiểm tra ngày
+  const loanDateStr = loanDate || fmtToday();
+  const loanD = parseDateOnly(loanDateStr);
+  const dueD = parseDateOnly(dueDate);
+
+  if (!loanD || !dueD) {
+    const e = new Error('Định dạng ngày không hợp lệ (YYYY-MM-DD)');
+    e.status = 400; throw e;
+  }
+
+  const dd = daysDiff(loanDateStr, dueDate);
+  if (!(dd > 0)) {
+    const e = new Error('Hạn trả phải sau ngày mượn');
+    e.status = 400; throw e;
+  }
+  if (dd > 30) {
+    const e = new Error('Hạn trả không được quá 30 ngày kể từ ngày mượn');
+    e.status = 400; throw e;
+  }
+
+  // 1) Chặn trùng documentCopyId trong items
+  const requestedCopyIds = items.map(i => Number(i.documentCopyId));
+  const uniqueRequestedCopyIds = new Set(requestedCopyIds);
+  if (uniqueRequestedCopyIds.size !== items.length) {
+    const e = new Error('Danh sách items có bản sao tài liệu bị trùng (documentCopyId)');
     e.status = 400; throw e;
   }
 
@@ -136,15 +211,57 @@ async function createLoanSlipService(body) {
     if (!reader) { const e = new Error('Không tìm thấy độc giả'); e.status = 404; throw e; }
     if (!librarian) { const e = new Error('Không tìm thấy thủ thư'); e.status = 404; throw e; }
 
-    const copyIds = items.map(i => i.documentCopyId);
+    // --- Kiểm tra quota active của độc giả ---
+    const activeSlipStatuses = ['BORROWING', 'PENDING_PAYMENT', 'WAITING_FOR_PICKUP'];
+    const activeDetailStatuses = ['BORROWED', 'PENDING_PAYMENT'];
+
+    // Lấy danh sách slip active của độc giả
+    const activeSlips = await LoanSlip.findAll({
+      where: { readerId, deleted: false, status: activeSlipStatuses },
+      attributes: ['loanSlipId'],
+      transaction: t,
+      lock: t.LOCK.UPDATE,
+    });
+
+    const activeSlipIds = activeSlips.map(s => s.loanSlipId);
+
+    // Đếm số dòng mượn active (đã mượn hoặc đang chờ thanh toán)
+    const currentActiveCount = activeSlipIds.length
+      ? await LoanDetail.count({
+        where: {
+          loanSlipId: activeSlipIds,
+          status: activeDetailStatuses,
+        },
+        transaction: t,
+      })
+      : 0;
+
+    const remaining = MAX_BORROWED_PER_READER - currentActiveCount;
+    if (remaining <= 0 || items.length > remaining) {
+      const e = new Error(
+        `Độc giả đang có ${currentActiveCount} tài liệu đang mượn/giữ/chờ thanh toán. ` +
+        `Giới hạn tối đa là ${MAX_BORROWED_PER_READER}. ` +
+        `Chỉ còn có thể mượn thêm tối đa ${Math.max(0, remaining)} tài liệu.`
+      );
+      e.status = 400; throw e;
+    }
+    // --- Hết kiểm tra quota ---
+
+    const copyIds = requestedCopyIds;
+
+    // Lấy thêm documentId để kiểm tra "không cùng 1 đầu sách"
     const copies = await DocumentCopy.findAll({
       where: { documentCopyId: copyIds },
+      attributes: ['documentCopyId', 'documentId', 'status'],
       transaction: t,
+      lock: t.LOCK.UPDATE,
     });
+
     if (copies.length !== items.length) {
       const e = new Error('Có bản sao tài liệu không tồn tại');
       e.status = 400; throw e;
     }
+
     for (const c of copies) {
       const st = String(c.status || '').toUpperCase();
       if (st !== 'AVAILABLE') {
@@ -153,12 +270,19 @@ async function createLoanSlipService(body) {
       }
     }
 
-    const today = new Date().toISOString().slice(0, 10);
+    // 2) Chặn mượn 2 bản sao thuộc cùng một đầu sách
+    const docIds = copies.map(c => Number(c.documentId));
+    const uniqueDocIds = new Set(docIds);
+    if (uniqueDocIds.size !== copies.length) {
+      const e = new Error('Không được mượn 2 bản sao của cùng một đầu sách');
+      e.status = 400; throw e;
+    }
+
     const slip = await LoanSlip.create({
       readerId,
       librarianId,
-      loanDate: loanDate || today,
-      dueDate: dueDate || null,
+      loanDate: loanDateStr,
+      dueDate, // đã hợp lệ
       status: 'PENDING_PAYMENT',
       deleted: false,
     }, { transaction: t });
@@ -305,7 +429,7 @@ async function confirmLoanSlipPaymentService({ loanSlipId, paymentId, transactio
       });
     }
 
-    await slip.update({ status: 'OPEN' }, { transaction: t });
+    await slip.update({ status: 'BORROWING' }, { transaction: t });
 
     const details = await LoanDetail.findAll({ where: { loanSlipId: slip.loanSlipId }, transaction: t });
     for (const d of details) {
@@ -324,16 +448,13 @@ async function confirmLoanSlipPaymentService({ loanSlipId, paymentId, transactio
 
 /**
  * Duyệt phiếu đặt trước -> WAITING_FOR_PICKUP
- * - Gán DocumentCopy AVAILABLE cho từng LoanDetail (hoặc theo chỉ định)
- * - Chốt depositAmount cho từng LoanDetail
- * - Set librarianId, dueDate; ON_HOLD các copy
- * - (tuỳ chọn) tạo Payment PENDING tổng cọc
+ * (theo yêu cầu: không áp ràng buộc hạn trả và quota ở bước duyệt)
  */
 async function approveReservationService(payload) {
   const {
     loanSlipId,
     librarianId,
-    dueDate,
+    dueDate,         // có thể bỏ trống, nếu truyền sẽ set cho slip
     pricingMode = 'AUTO_MIN', // 'AUTO_MIN' | 'AUTO_MAX' | 'MANUAL'
     deposits = [],            // [{ loanDetailId, depositAmount }]
     assignments = [],         // [{ loanDetailId, documentCopyId }]
@@ -465,6 +586,7 @@ async function approveReservationService(payload) {
       );
     }
 
+    // Cập nhật thông tin phiếu; dueDate nếu có truyền thì set, nếu không thì giữ nguyên
     await slip.update({
       librarianId: Number(librarianId),
       dueDate: dueDate || slip.dueDate,
