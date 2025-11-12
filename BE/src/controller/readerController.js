@@ -92,6 +92,22 @@ const deleteReader = async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 };
+// ✅ Khôi phục độc giả (Admin + Thủ thư)
+const restoreReader = async (req, res) => {
+  try {
+    if (!isStaff(req)) {
+      return res.status(403).json({ success: false, message: "Chỉ Admin/Thủ thư được khôi phục độc giả" });
+    }
+    const { id } = req.params;
+    const result = await readerService.restoreReader(id);
+    if (!result)
+      return res.status(404).json({ success: false, message: "Không tìm thấy độc giả để khôi phục." });
+    res.json({ success: true, message: "Khôi phục độc giả thành công." });
+  } catch (err) {
+    console.error("❌ Lỗi khi khôi phục độc giả:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
 
 // ✅ Lấy độc giả theo ID (Admin + Thủ thư)
 const getReaderById = async (req, res) => {
@@ -122,6 +138,7 @@ module.exports = {
   createReader,
   updateReader,
   deleteReader,
+  restoreReader,
   getReaderById,
   resetReaderPassword,
 };

@@ -21,5 +21,6 @@ router.put("/:id", requireAuth, requireRole([1, 2]), readerController.updateRead
 router.put("/:id/reset-password", requireAuth, requireRole([1, 2]), readerController.resetReaderPassword);
 // ✅ Xóa độc giả theo ID (Admin)
 router.delete("/:id", requireAuth, requireRole([1,2]), readerController.deleteReader);
-
+// ✅ ♻️ Khôi phục độc giả (Admin + Thủ thư)
+router.put("/:id/restore", requireAuth, requireRole([1, 2]), readerController.restoreReader);
 module.exports = router;

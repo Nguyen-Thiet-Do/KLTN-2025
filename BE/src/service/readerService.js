@@ -10,10 +10,9 @@ const getAllReaders = async () => {
       include: [
         {
           model: Account,
-          attributes: ["email", "phoneNumber", "status"],
+          attributes: ["email", "phoneNumber", "status", "deleted"],
         },
       ],
-      where: { deleted: false },
       order: [["readerId", "ASC"]],
     });
 
@@ -26,6 +25,7 @@ const getAllReaders = async () => {
       address: r.address,
       email: r.Account?.email || null,
       phoneNumber: r.Account?.phoneNumber || null,
+      deleted: r.deleted || false,
     }));
   } catch (error) {
     console.error("❌ Lỗi getAllReaders:", error);
@@ -49,27 +49,36 @@ const getReaderByAccountId = async (accountId) => {
 };
 
 // ============================================================
-// 🔹 THÊM ĐỘC GIẢ MỚI (CHO ADMIN)
+// 🔹 THÊM ĐỘC GIẢ MỚI (KIỂM TRA EMAIL TRÙNG)
 // ============================================================
 const createReader = async (data) => {
   const { fullName, email, password, gender, dateOfBirth, phoneNumber, address, cccd } = data;
+
   if (!fullName || !email || !password) throw new Error("Thiếu thông tin bắt buộc");
 
   const transaction = await Reader.sequelize.transaction();
   try {
+    // 🔍 Kiểm tra email trùng trong bảng accounts
+    const existingAccount = await Account.findOne({ where: { email } });
+    if (existingAccount) {
+      throw new Error("Email đã tồn tại trong hệ thống");
+    }
+
     const passwordHash = await bcrypt.hash(password, 10);
 
+    // 1️⃣ Tạo tài khoản
     const account = await Account.create(
       {
         email,
         phoneNumber: phoneNumber || null,
         passwordHash,
         status: "active",
-        roleId: 3,
+        roleId: 3, // role 3 = độc giả
       },
       { transaction }
     );
 
+    // 2️⃣ Tạo độc giả
     const reader = await Reader.create(
       {
         accountId: account.accountId,
@@ -84,10 +93,15 @@ const createReader = async (data) => {
     );
 
     await transaction.commit();
-    return { readerId: reader.readerId, accountId: account.accountId, fullName, email };
+    return {
+      readerId: reader.readerId,
+      accountId: account.accountId,
+      fullName,
+      email,
+    };
   } catch (err) {
     await transaction.rollback();
-    console.error("❌ Lỗi createReader:", err);
+    console.error("❌ Lỗi createReader:", err.message);
     throw err;
   }
 };
@@ -106,7 +120,14 @@ const updateReader = async (id, data) => {
     await reader.update({ fullName, gender, dateOfBirth, address, cccd }, { transaction });
 
     const updates = {};
-    if (email) updates.email = email;
+
+    // 🔍 Kiểm tra nếu email mới trùng với email của người khác
+    if (email && email !== reader.Account.email) {
+      const existing = await Account.findOne({ where: { email } });
+      if (existing) throw new Error("Email này đã được sử dụng bởi tài khoản khác");
+      updates.email = email;
+    }
+
     if (phoneNumber) updates.phoneNumber = phoneNumber;
     if (password && password.trim() !== "") {
       updates.passwordHash = await bcrypt.hash(password, 10);
@@ -126,7 +147,7 @@ const updateReader = async (id, data) => {
 };
 
 // ============================================================
-// 🔐 ĐẶT LẠI MẬT KHẨU THỦ CÔNG
+// 🔐 ĐẶT LẠI MẬT KHẨU
 // ============================================================
 const resetReaderPassword = async (readerId, newPassword) => {
   try {
@@ -145,7 +166,7 @@ const resetReaderPassword = async (readerId, newPassword) => {
 };
 
 // ============================================================
-// 🗑️ XÓA ĐỘC GIẢ
+// 🗑️ XÓA MỀM ĐỘC GIẢ
 // ============================================================
 const deleteReader = async (readerId) => {
   const transaction = await Reader.sequelize.transaction();
@@ -156,14 +177,38 @@ const deleteReader = async (readerId) => {
       return false;
     }
 
-    await Reader.destroy({ where: { readerId } }, { transaction });
-    await Account.destroy({ where: { accountId: reader.accountId } }, { transaction });
+    await Reader.update({ deleted: true }, { where: { readerId }, transaction });
+    await Account.update({ deleted: true }, { where: { accountId: reader.accountId }, transaction });
 
     await transaction.commit();
     return true;
   } catch (err) {
     await transaction.rollback();
     console.error("❌ Lỗi deleteReader:", err);
+    throw err;
+  }
+};
+
+// ============================================================
+// ♻️ KHÔI PHỤC ĐỘC GIẢ
+// ============================================================
+const restoreReader = async (readerId) => {
+  const transaction = await Reader.sequelize.transaction();
+  try {
+    const reader = await Reader.findByPk(readerId);
+    if (!reader) {
+      await transaction.rollback();
+      return false;
+    }
+
+    await Reader.update({ deleted: false }, { where: { readerId }, transaction });
+    await Account.update({ deleted: false }, { where: { accountId: reader.accountId }, transaction });
+
+    await transaction.commit();
+    return true;
+  } catch (err) {
+    await transaction.rollback();
+    console.error("❌ Lỗi restoreReader:", err);
     throw err;
   }
 };
@@ -202,6 +247,7 @@ module.exports = {
   createReader,
   updateReader,
   deleteReader,
+  restoreReader,
   getReaderById,
-  resetReaderPassword, // ✅ thêm export
+  resetReaderPassword,
 };

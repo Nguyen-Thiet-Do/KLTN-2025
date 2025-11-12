@@ -36,7 +36,7 @@ const createLibrarian = async (req, res) => {
   }
 };
 
-// ✅ Sửa thủ thư
+// ✅ Cập nhật thủ thư
 const updateLibrarian = async (req, res) => {
   try {
     const { id } = req.params;
@@ -47,6 +47,7 @@ const updateLibrarian = async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 };
+
 // ✅ Đặt lại mật khẩu 
 const resetLibrarianPassword = async (req, res) => {
   try {
@@ -60,17 +61,30 @@ const resetLibrarianPassword = async (req, res) => {
   }
 };
 
-// ✅ Xóa thủ thư
+// ✅ Xóa mềm thủ thư
 const deleteLibrarian = async (req, res) => {
   try {
     const { id } = req.params;
     const result = await librarianService.deleteLibrarian(id);
-    if (!result) {
+    if (!result)
       return res.status(404).json({ success: false, message: "Không tìm thấy thủ thư." });
-    }
-    res.json({ success: true, message: "Đã xóa thủ thư thành công." });
+    res.json({ success: true, message: "Đã xóa mềm thủ thư thành công." });
   } catch (err) {
     console.error("❌ Lỗi khi xóa thủ thư:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// ✅ Khôi phục thủ thư
+const restoreLibrarian = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await librarianService.restoreLibrarian(id);
+    if (!result)
+      return res.status(404).json({ success: false, message: "Không tìm thấy thủ thư để khôi phục." });
+    res.json({ success: true, message: "Khôi phục thủ thư thành công." });
+  } catch (err) {
+    console.error("❌ Lỗi khi khôi phục thủ thư:", err);
     res.status(500).json({ success: false, message: err.message });
   }
 };
@@ -81,5 +95,6 @@ module.exports = {
   createLibrarian,
   updateLibrarian,
   deleteLibrarian,
+  restoreLibrarian,
   resetLibrarianPassword,
 };

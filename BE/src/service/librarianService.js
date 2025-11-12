@@ -1,5 +1,5 @@
-const { Librarian, Account } = require('../model');
-const bcrypt = require('bcrypt');
+const { Librarian, Account } = require("../model");
+const bcrypt = require("bcrypt");
 
 // ============================================================
 // 🔹 LẤY DANH SÁCH TẤT CẢ THỦ THƯ
@@ -10,14 +10,12 @@ const getAllLibrarians = async () => {
       include: [
         {
           model: Account,
-          attributes: ['email', 'phoneNumber', 'status'],
+          attributes: ["email", "phoneNumber", "status", "deleted"],
         },
       ],
-      where: { deleted: false },
-      order: [['librarianId', 'ASC']],
+      order: [["librarianId", "ASC"]],
     });
 
-    // ✅ Chuẩn hóa output cho FE
     return librarians.map((l) => ({
       librarianId: l.librarianId,
       fullName: l.fullName,
@@ -29,22 +27,23 @@ const getAllLibrarians = async () => {
       salaryCoefficient: l.salaryCoefficient || null,
       email: l.Account?.email || null,
       phoneNumber: l.Account?.phoneNumber || null,
+      deleted: l.deleted || false,
     }));
   } catch (error) {
-    console.error('❌ Lỗi getAllLibrarians:', error);
+    console.error("❌ Lỗi getAllLibrarians:", error);
     throw error;
   }
 };
 
 // ============================================================
-// 🔹 LẤY THÔNG TIN THỦ THƯ THEO ACCOUNT ID
+// 🔹 LẤY THỦ THƯ THEO ACCOUNT ID
 // ============================================================
 const getLibrarianByAccountId = async (accountId) => {
   return await Librarian.findOne({
     include: [
       {
         model: Account,
-        attributes: ['email', 'phoneNumber', 'status'],
+        attributes: ["email", "phoneNumber", "status"],
       },
     ],
     where: { accountId, deleted: false },
@@ -52,29 +51,45 @@ const getLibrarianByAccountId = async (accountId) => {
 };
 
 // ============================================================
-// 🔹 THÊM THỦ THƯ MỚI (CHO ADMIN)
+// 🔹 THÊM THỦ THƯ MỚI (kiểm tra trùng email)
 // ============================================================
 const createLibrarian = async (data) => {
-  const { fullName, email, password, gender, dateOfBirth, phoneNumber, address, cccd, basicSalary } = data;
-  if (!fullName || !email || !password) throw new Error('Thiếu thông tin bắt buộc');
+  const {
+    fullName,
+    email,
+    password,
+    gender,
+    dateOfBirth,
+    phoneNumber,
+    address,
+    cccd,
+    basicSalary,
+  } = data;
+
+  if (!fullName || !email || !password)
+    throw new Error("Thiếu thông tin bắt buộc.");
 
   const transaction = await Librarian.sequelize.transaction();
   try {
+    // 🔍 Kiểm tra email trùng
+    const existing = await Account.findOne({ where: { email } });
+    if (existing) {
+      throw new Error("Email đã tồn tại trong hệ thống.");
+    }
+
     const passwordHash = await bcrypt.hash(password, 10);
 
-    // 1️⃣ Tạo tài khoản
     const account = await Account.create(
       {
         email,
         phoneNumber: phoneNumber || null,
         passwordHash,
-        status: 'active',
+        status: "active",
         roleId: 2,
       },
       { transaction }
     );
 
-    // 2️⃣ Tạo thủ thư
     const librarian = await Librarian.create(
       {
         accountId: account.accountId,
@@ -90,15 +105,21 @@ const createLibrarian = async (data) => {
     );
 
     await transaction.commit();
-    return { librarianId: librarian.librarianId, accountId: account.accountId, fullName, email };
+    return {
+      librarianId: librarian.librarianId,
+      accountId: account.accountId,
+      fullName,
+      email,
+    };
   } catch (err) {
     await transaction.rollback();
+    console.error("❌ Lỗi createLibrarian:", err.message);
     throw err;
   }
 };
 
 // ============================================================
-// 🔹 CẬP NHẬT THÔNG TIN THỦ THƯ
+// 🔹 CẬP NHẬT THỦ THƯ
 // ============================================================
 const updateLibrarian = async (id, data) => {
   const {
@@ -115,11 +136,9 @@ const updateLibrarian = async (id, data) => {
 
   const transaction = await Librarian.sequelize.transaction();
   try {
-    // 🔍 Tìm thủ thư hiện tại để lấy accountId
     const librarian = await Librarian.findByPk(id);
     if (!librarian) throw new Error("Không tìm thấy thủ thư.");
 
-    // 1️⃣ Cập nhật Librarian
     await Librarian.update(
       {
         fullName,
@@ -134,7 +153,6 @@ const updateLibrarian = async (id, data) => {
       { where: { librarianId: id }, transaction }
     );
 
-    // 2️⃣ Cập nhật số điện thoại trong Account (nếu có)
     if (phoneNumber) {
       await Account.update(
         { phoneNumber },
@@ -152,25 +170,27 @@ const updateLibrarian = async (id, data) => {
 };
 
 // ============================================================
-// 🔐 ĐẶT LẠI MẬT KHẨU THỦ CÔNG
+// 🔐 ĐẶT LẠI MẬT KHẨU
 // ============================================================
 const resetLibrarianPassword = async (librarianId, newPassword) => {
   try {
-    if (!newPassword || newPassword.trim() === "") throw new Error("Mật khẩu mới không hợp lệ");
+    if (!newPassword || newPassword.trim() === "")
+      throw new Error("Mật khẩu mới không hợp lệ.");
     const librarian = await Librarian.findByPk(librarianId);
-    if (!librarian) throw new Error("Không tìm thấy thủ thư");
+    if (!librarian) throw new Error("Không tìm thấy thủ thư.");
 
     const passwordHash = await bcrypt.hash(newPassword, 10);
     await Account.update({ passwordHash }, { where: { accountId: librarian.accountId } });
 
-    return { success: true, message: "Đặt lại mật khẩu thành công" };
+    return { success: true, message: "Đặt lại mật khẩu thành công." };
   } catch (error) {
     console.error("❌ Lỗi resetLibrarianPassword:", error);
     return { success: false, message: error.message };
   }
 };
+
 // ============================================================
-// 🗑️ XÓA THỦ THƯ (XÓA CẢ ACCOUNT LIÊN KẾT)
+// 🗑️ XÓA MỀM THỦ THƯ
 // ============================================================
 const deleteLibrarian = async (librarianId) => {
   const transaction = await Librarian.sequelize.transaction();
@@ -181,13 +201,38 @@ const deleteLibrarian = async (librarianId) => {
       return false;
     }
 
-    await Librarian.destroy({ where: { librarianId } }, { transaction });
-    await Account.destroy({ where: { accountId: librarian.accountId } }, { transaction });
+    await Librarian.update({ deleted: true }, { where: { librarianId }, transaction });
+    await Account.update({ deleted: true }, { where: { accountId: librarian.accountId }, transaction });
 
     await transaction.commit();
     return true;
   } catch (err) {
     await transaction.rollback();
+    console.error("❌ Lỗi deleteLibrarian:", err);
+    throw err;
+  }
+};
+
+// ============================================================
+// ♻️ KHÔI PHỤC THỦ THƯ
+// ============================================================
+const restoreLibrarian = async (librarianId) => {
+  const transaction = await Librarian.sequelize.transaction();
+  try {
+    const librarian = await Librarian.findByPk(librarianId);
+    if (!librarian) {
+      await transaction.rollback();
+      return false;
+    }
+
+    await Librarian.update({ deleted: false }, { where: { librarianId }, transaction });
+    await Account.update({ deleted: false }, { where: { accountId: librarian.accountId }, transaction });
+
+    await transaction.commit();
+    return true;
+  } catch (err) {
+    await transaction.rollback();
+    console.error("❌ Lỗi restoreLibrarian:", err);
     throw err;
   }
 };
@@ -198,5 +243,6 @@ module.exports = {
   createLibrarian,
   updateLibrarian,
   deleteLibrarian,
-  resetLibrarianPassword
+  restoreLibrarian,
+  resetLibrarianPassword,
 };
