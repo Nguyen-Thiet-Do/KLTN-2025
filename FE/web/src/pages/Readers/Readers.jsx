@@ -28,9 +28,15 @@ import {
   Delete as DeleteIcon,
   Refresh as RefreshIcon,
   LockReset as ResetIcon,
+  Restore as RestoreIcon,
 } from "@mui/icons-material";
 
-import { getReaders, deleteReader, resetReaderPassword } from "../../services/readerService";
+import {
+  getReaders,
+  deleteReader,
+  resetReaderPassword,
+  restoreReader,
+} from "../../services/readerService";
 import AddReader from "./AddReader";
 import EditReader from "./EditReader";
 
@@ -88,6 +94,7 @@ export default function Readers() {
     return "-";
   };
 
+  // 🗑️ Xóa mềm độc giả
   const handleDelete = async (id, name) => {
     const confirmed = window.confirm(`Bạn có chắc chắn muốn xóa độc giả "${name}" không?`);
     if (!confirmed) return;
@@ -102,6 +109,24 @@ export default function Readers() {
       }
     } catch (err) {
       alert("Xóa thất bại: " + (err.response?.data?.message || err.message));
+    }
+  };
+
+  // ♻️ Khôi phục độc giả
+  const handleRestore = async (id, name) => {
+    const confirmed = window.confirm(`Khôi phục độc giả "${name}"?`);
+    if (!confirmed) return;
+    try {
+      const token = sessionStorage.getItem("accessToken");
+      const res = await restoreReader(id, token);
+      if (res.success) {
+        alert("Đã khôi phục độc giả thành công!");
+        fetchData();
+      } else {
+        alert(res.message || "Không thể khôi phục độc giả.");
+      }
+    } catch (err) {
+      alert("Lỗi khi khôi phục: " + (err.response?.data?.message || err.message));
     }
   };
 
@@ -123,7 +148,9 @@ export default function Readers() {
     const keyword = searchQuery.trim().toLowerCase();
     if (!keyword) return readers;
     return readers.filter(
-      (r) => r.fullName?.toLowerCase().includes(keyword) || r.email?.toLowerCase().includes(keyword)
+      (r) =>
+        r.fullName?.toLowerCase().includes(keyword) ||
+        r.email?.toLowerCase().includes(keyword)
     );
   }, [readers, searchQuery]);
 
@@ -274,7 +301,10 @@ export default function Readers() {
                   currentReaders.map((r) => (
                     <TableRow
                       key={r.readerId}
-                      sx={{ "&:hover": { backgroundColor: "rgba(102,126,234,0.02)" } }}
+                      sx={{
+                        "&:hover": { backgroundColor: "rgba(102,126,234,0.02)" },
+                        opacity: r.deleted ? 0.6 : 1,
+                      }}
                     >
                       <TableCell>
                         <Chip
@@ -314,40 +344,58 @@ export default function Readers() {
 
                       <TableCell sx={{ textAlign: "center" }}>
                         <Stack direction="row" spacing={1} justifyContent="center">
-                          <IconButton
-                            size="small"
-                            onClick={() => setEditingReader(r)}
-                            sx={{
-                              color: "#667EEA",
-                              "&:hover": { backgroundColor: "rgba(102,126,234,0.1)" },
-                            }}
-                          >
-                            <EditIcon />
-                          </IconButton>
+                          {!r.deleted && (
+                            <IconButton
+                              size="small"
+                              onClick={() => setEditingReader(r)}
+                              sx={{
+                                color: "#667EEA",
+                                "&:hover": { backgroundColor: "rgba(102,126,234,0.1)" },
+                              }}
+                            >
+                              <EditIcon />
+                            </IconButton>
+                          )}
 
-                          {/* ✅ Nút đặt lại mật khẩu */}
-                          <IconButton
-                            size="small"
-                            onClick={() => handleResetPassword(r)}
-                            sx={{
-                              color: "#ED8936",
-                              "&:hover": { backgroundColor: "rgba(237,137,54,0.1)" },
-                            }}
-                            title="Đặt lại mật khẩu"
-                          >
-                            <ResetIcon />
-                          </IconButton>
+                          {!r.deleted && (
+                            <IconButton
+                              size="small"
+                              onClick={() => handleResetPassword(r)}
+                              sx={{
+                                color: "#ED8936",
+                                "&:hover": { backgroundColor: "rgba(237,137,54,0.1)" },
+                              }}
+                              title="Đặt lại mật khẩu"
+                            >
+                              <ResetIcon />
+                            </IconButton>
+                          )}
 
-                          <IconButton
-                            size="small"
-                            onClick={() => handleDelete(r.readerId, r.fullName)}
-                            sx={{
-                              color: "#E53E3E",
-                              "&:hover": { backgroundColor: "rgba(229,62,62,0.1)" },
-                            }}
-                          >
-                            <DeleteIcon />
-                          </IconButton>
+                          {r.deleted ? (
+                            <IconButton
+                              size="small"
+                              onClick={() => handleRestore(r.readerId, r.fullName)}
+                              sx={{
+                                color: "#38A169",
+                                "&:hover": { backgroundColor: "rgba(56,161,105,0.1)" },
+                              }}
+                              title="Khôi phục độc giả"
+                            >
+                              <RestoreIcon />
+                            </IconButton>
+                          ) : (
+                            <IconButton
+                              size="small"
+                              onClick={() => handleDelete(r.readerId, r.fullName)}
+                              sx={{
+                                color: "#E53E3E",
+                                "&:hover": { backgroundColor: "rgba(229,62,62,0.1)" },
+                              }}
+                              title="Xóa độc giả"
+                            >
+                              <DeleteIcon />
+                            </IconButton>
+                          )}
                         </Stack>
                       </TableCell>
                     </TableRow>

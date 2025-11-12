@@ -28,9 +28,14 @@ import {
   Edit as EditIcon,
   Delete as DeleteIcon,
   Refresh as RefreshIcon,
-  LockReset as ResetIcon, // ✅ thêm icon reset mật khẩu
+  LockReset as ResetIcon,
 } from "@mui/icons-material";
-import { getLibrarians, deleteLibrarian, resetLibrarianPassword } from "../../services/librarianService"; // ✅ thêm hàm resetLibrarianPassword
+import {
+  getLibrarians,
+  deleteLibrarian,
+  resetLibrarianPassword,
+  restoreLibrarian, // ✅ thêm API khôi phục
+} from "../../services/librarianService";
 import AddLibrarian from "./AddLibrarian";
 import EditLibrarian from "./EditLibrarian";
 import ButtonLoader from "../../components/Loading/ButtonLoader";
@@ -92,7 +97,7 @@ export default function Librarians() {
     return "-";
   };
 
-  // 🗑️ Xóa thủ thư
+  // 🗑️ Xóa mềm thủ thư
   const handleDelete = async (id, name) => {
     const confirmed = window.confirm(`Bạn có chắc chắn muốn xóa thủ thư "${name}" không?`);
     if (!confirmed) return;
@@ -101,11 +106,28 @@ export default function Librarians() {
       const token = sessionStorage.getItem("accessToken");
       const res = await deleteLibrarian(id, token);
       if (res.success) {
-        alert("✅ Đã xóa thủ thư thành công!");
+        alert("✅ Đã xóa mềm thủ thư thành công!");
         fetchData();
       } else alert(res.message || "Không thể xóa thủ thư.");
     } catch (err) {
       alert("Xóa thất bại: " + (err.response?.data?.message || err.message));
+    }
+  };
+
+  // ♻️ Khôi phục thủ thư
+  const handleRestore = async (id, name) => {
+    const confirmed = window.confirm(`Bạn có chắc chắn muốn khôi phục thủ thư "${name}" không?`);
+    if (!confirmed) return;
+
+    try {
+      const token = sessionStorage.getItem("accessToken");
+      const res = await restoreLibrarian(id, token);
+      if (res.success) {
+        alert("✅ Khôi phục thủ thư thành công!");
+        fetchData();
+      } else alert(res.message || "Không thể khôi phục thủ thư.");
+    } catch (err) {
+      alert("Lỗi khi khôi phục: " + (err.response?.data?.message || err.message));
     }
   };
 
@@ -242,13 +264,12 @@ export default function Librarians() {
         </CardContent>
       </Card>
 
-      {/* Loading và Error */}
+      {/* Loading / Error */}
       {loading && (
         <Box sx={{ display: "flex", justifyContent: "center", my: 4 }}>
           <ButtonLoader inline size={350} />
         </Box>
       )}
-
       {error && (
         <Alert severity="error" sx={{ mb: 3, borderRadius: 2 }}>
           {error}
@@ -277,12 +298,22 @@ export default function Librarians() {
 
               <TableBody>
                 {currentLibrarians.map((lib) => (
-                  <TableRow key={lib.librarianId}>
+                  <TableRow
+                    key={lib.librarianId}
+                    sx={{
+                      opacity: lib.deleted ? 0.5 : 1,
+                      backgroundColor: lib.deleted ? "rgba(255,0,0,0.03)" : "inherit",
+                    }}
+                  >
                     <TableCell>
                       <Chip
                         label={lib.librarianCode || `TT${lib.librarianId}`}
                         size="small"
-                        sx={{ backgroundColor: "rgba(102,126,234,0.1)", color: "#667EEA", fontWeight: 600 }}
+                        sx={{
+                          backgroundColor: "rgba(102,126,234,0.1)",
+                          color: "#667EEA",
+                          fontWeight: 600,
+                        }}
                       />
                     </TableCell>
                     <TableCell>{lib.fullName}</TableCell>
@@ -299,33 +330,48 @@ export default function Librarians() {
                       {lib.basicSalary ? lib.basicSalary.toLocaleString("vi-VN") + " ₫" : "-"}
                     </TableCell>
                     <TableCell>{lib.email || "-"}</TableCell>
+
+                    {/* Nút hành động */}
                     <TableCell sx={{ textAlign: "center" }}>
                       <Stack direction="row" spacing={1} justifyContent="center">
                         <IconButton
                           size="small"
                           onClick={() => setEditingLibrarian(lib)}
-                          sx={{ color: "#667EEA", "&:hover": { backgroundColor: "rgba(102,126,234,0.1)" } }}
+                          sx={{ color: "#667EEA" }}
+                          disabled={lib.deleted}
                         >
                           <EditIcon />
                         </IconButton>
 
-                        {/* ✅ Nút đặt lại mật khẩu */}
                         <IconButton
                           size="small"
                           onClick={() => handleResetPassword(lib)}
-                          sx={{ color: "#ED8936", "&:hover": { backgroundColor: "rgba(237,137,54,0.1)" } }}
+                          sx={{ color: "#ED8936" }}
                           title="Đặt lại mật khẩu"
+                          disabled={lib.deleted}
                         >
                           <ResetIcon />
                         </IconButton>
 
-                        <IconButton
-                          size="small"
-                          onClick={() => handleDelete(lib.librarianId, lib.fullName)}
-                          sx={{ color: "#E53E3E", "&:hover": { backgroundColor: "rgba(229,62,62,0.1)" } }}
-                        >
-                          <DeleteIcon />
-                        </IconButton>
+                        {!lib.deleted ? (
+                          <IconButton
+                            size="small"
+                            onClick={() => handleDelete(lib.librarianId, lib.fullName)}
+                            sx={{ color: "#E53E3E" }}
+                            title="Xóa mềm thủ thư"
+                          >
+                            <DeleteIcon />
+                          </IconButton>
+                        ) : (
+                          <IconButton
+                            size="small"
+                            onClick={() => handleRestore(lib.librarianId, lib.fullName)}
+                            sx={{ color: "#38A169" }}
+                            title="Khôi phục thủ thư"
+                          >
+                            <RefreshIcon />
+                          </IconButton>
+                        )}
                       </Stack>
                     </TableCell>
                   </TableRow>
@@ -344,23 +390,13 @@ export default function Librarians() {
                 color="primary"
                 showFirstButton
                 showLastButton
-                sx={{
-                  "& .MuiPaginationItem-root": {
-                    borderRadius: 2,
-                    fontWeight: 600,
-                  },
-                  "& .MuiPaginationItem-root.Mui-selected": {
-                    background: "linear-gradient(135deg, #667EEA 0%, #764BA2 100%)",
-                    color: "white",
-                  },
-                }}
               />
             </Box>
           )}
         </Card>
       )}
 
-      {/* Modal thêm thủ thư */}
+      {/* Modal thêm */}
       {showAddModal && (
         <AddLibrarian
           open={showAddModal}
@@ -372,7 +408,7 @@ export default function Librarians() {
         />
       )}
 
-      {/* Modal sửa thủ thư */}
+      {/* Modal sửa */}
       {editingLibrarian && (
         <EditLibrarian
           librarian={editingLibrarian}

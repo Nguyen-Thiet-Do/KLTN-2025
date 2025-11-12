@@ -47,3 +47,14 @@ export const resetReaderPassword = async (id, newPassword, token) => {
   });
   return await res.json();
 };
+//khoiphuc doc gia
+export const restoreReader = async (id, token) => {
+  const res = await api.put(
+    `/reader/${id}/restore`,
+    {}, 
+    {
+      headers: { Authorization: `Bearer ${token}` },
+    }
+  );
+  return res.data;
+};
