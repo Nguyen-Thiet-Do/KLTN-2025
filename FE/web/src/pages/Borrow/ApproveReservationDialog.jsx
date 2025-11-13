@@ -1,14 +1,20 @@
+// src/components/Borrow/ApproveReservationDialog.jsx
 import { useEffect, useMemo, useState } from "react";
 import {
     Alert,
     Box,
     Button,
     Chip,
+    CircularProgress,
     Dialog,
     DialogActions,
     DialogContent,
     DialogTitle,
     Divider,
+    FormControl,
+    InputLabel,
+    MenuItem,
+    Select,
     Stack,
     Table,
     TableBody,
@@ -20,7 +26,7 @@ import {
 } from "@mui/material";
 import { useSnackbar } from "notistack";
 import { approveReservation, fetchBorrowableCopies } from "../../services/loanSlips";
-import { useAuth } from "../../contexts/AuthContext"; // Lấy thủ thư từ context
+import { useAuth } from "../../contexts/AuthContext";
 
 function parseRequestedDocumentId(note) {
     const m = String(note || "").match(/REQUEST_DOCUMENT_ID=(\d+)/i);
@@ -40,13 +46,13 @@ export default function ApproveReservationDialog({
     open,
     onClose,
     slip,
-    librarianId: librarianIdProp, // vẫn giữ để tương thích, nhưng ưu tiên context
+    librarianId: librarianIdProp,
     onApproved,
 }) {
     const { enqueueSnackbar } = useSnackbar();
     const { user } = useAuth();
 
-    // Ưu tiên id từ context (merge account + profile đã lưu trong sessionStorage)
+    // Prefer librarianId from logged-in user
     const contextLibrarianId = useMemo(() => {
         return (
             Number(user?.librarianId) ||
@@ -61,55 +67,57 @@ export default function ApproveReservationDialog({
         return contextLibrarianId || idFromProp || null;
     }, [contextLibrarianId, librarianIdProp]);
 
-    // LUÔN dùng AUTO_MIN theo yêu cầu (không hiển thị UI chọn)
+    // Fixed pricing mode per requirements
     const PRICING_MODE = "AUTO_MIN";
-
-    const [assignmentMap, setAssignmentMap] = useState({});   // loanDetailId -> documentCopyId
-    const [loadingCopies, setLoadingCopies] = useState(false);
-    const [copiesByDoc, setCopiesByDoc] = useState({});       // documentId -> {success, data, pagination}
-    const [error, setError] = useState("");
-    const [submitting, setSubmitting] = useState(false);
-
-    // Hạn trả mặc định = hôm nay + 30 ngày (không hiển thị input)
     const defaultDueDate = useMemo(() => todayPlus(30), [open]);
 
     const pendingDetails = useMemo(() => {
-        return (slip?.details || []).filter(d => String(d.status).toUpperCase() === "PENDING");
+        return (slip?.details || []).filter((d) => String(d.status).toUpperCase() === "PENDING");
     }, [slip]);
 
     const rows = useMemo(() => {
-        return pendingDetails.map(d => ({
+        return pendingDetails.map((d) => ({
             loanDetailId: d.loanDetailId,
             requestedDocumentId: parseRequestedDocumentId(d.note),
             note: d.note || "",
         }));
     }, [pendingDetails]);
 
+    const [assignmentMap, setAssignmentMap] = useState({}); // loanDetailId -> copyId
+    const [copiesByDoc, setCopiesByDoc] = useState({});     // documentId -> response
+    const [loadingByDoc, setLoadingByDoc] = useState({});   // documentId -> boolean
+    const [error, setError] = useState("");
+    const [submitting, setSubmitting] = useState(false);
+
     useEffect(() => {
         if (open) {
             setAssignmentMap({});
             setCopiesByDoc({});
+            setLoadingByDoc({});
             setError("");
         }
     }, [open, slip]);
 
     const loadCopiesForDoc = async (documentId) => {
-        setLoadingCopies(true);
+        if (!documentId) return;
+        // Avoid reloading if already loaded
+        if (copiesByDoc[documentId]) return;
         try {
+            setLoadingByDoc((s) => ({ ...s, [documentId]: true }));
             const res = await fetchBorrowableCopies(documentId, { page: 1, limit: 50 });
-            setCopiesByDoc(prev => ({ ...prev, [documentId]: res }));
+            setCopiesByDoc((prev) => ({ ...prev, [documentId]: res }));
         } catch (e) {
-            setError(e?.message || "Không tải được danh sách bản sao khả dụng");
+            setError("Không tải được danh sách bản sao khả dụng. Vui lòng thử lại.");
         } finally {
-            setLoadingCopies(false);
+            setLoadingByDoc((s) => ({ ...s, [documentId]: false }));
         }
     };
 
-    // Nạp danh sách bản sao cho mọi DocID ngay khi mở
+    // Preload copies for all requested doc IDs when dialog opens
     useEffect(() => {
         if (!open) return;
         const uniqDocIds = Array.from(
-            new Set(rows.map(r => r.requestedDocumentId).filter(Boolean))
+            new Set(rows.map((r) => r.requestedDocumentId).filter(Boolean))
         );
         if (!uniqDocIds.length) return;
         (async () => {
@@ -121,17 +129,19 @@ export default function ApproveReservationDialog({
     }, [open, rows.length]);
 
     const handleAssignCopy = (loanDetailId, documentCopyId) => {
-        setAssignmentMap(prev => ({ ...prev, [loanDetailId]: Number(documentCopyId) || undefined }));
+        setAssignmentMap((prev) => ({
+            ...prev,
+            [loanDetailId]: Number(documentCopyId) || undefined,
+        }));
     };
 
     const handleSubmit = async () => {
+        setError("");
+        setSubmitting(true);
         try {
-            setSubmitting(true);
-            setError("");
-
             const lid = Number(effectiveLibrarianId);
             if (!Number.isFinite(lid) || lid <= 0) {
-                const msg = "Không xác định được thủ thư hiện tại (librarianId). Vui lòng kiểm tra đăng nhập.";
+                const msg = "Không xác định được thủ thư. Vui lòng kiểm tra tài khoản đăng nhập.";
                 setError(msg);
                 enqueueSnackbar(msg, { variant: "warning" });
                 setSubmitting(false);
@@ -149,17 +159,17 @@ export default function ApproveReservationDialog({
                 loanSlipId: slip.loanSlipId,
                 librarianId: lid,
                 dueDate: defaultDueDate,
-                pricingMode: PRICING_MODE, // cố định AUTO_MIN
-                createPayment: false,      // không tạo Payment khi duyệt
-                assignments,               // nếu trống, BE tự chọn AVAILABLE
+                pricingMode: PRICING_MODE,
+                createPayment: false,
+                assignments,
             };
 
             await approveReservation(body);
-            enqueueSnackbar("Duyệt phiếu đặt trước thành công.", { variant: "success" });
+            enqueueSnackbar("Duyệt đặt trước thành công.", { variant: "success" });
             onApproved?.();
             onClose();
         } catch (e) {
-            const msg = e?.message || "Có lỗi xảy ra khi duyệt phiếu";
+            const msg = e?.response?.data?.message || e?.message || "Có lỗi xảy ra khi duyệt phiếu.";
             setError(msg);
             enqueueSnackbar(msg, { variant: "error" });
         } finally {
@@ -169,23 +179,28 @@ export default function ApproveReservationDialog({
 
     return (
         <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
-            <DialogTitle sx={{ fontWeight: 800 }}>Duyệt phiếu đặt trước</DialogTitle>
+            <DialogTitle sx={{ fontWeight: 800 }}>
+                Duyệt đặt trước
+            </DialogTitle>
+
             <DialogContent dividers>
-                {!!error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+                {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
 
                 {!effectiveLibrarianId && (
                     <Alert severity="warning" sx={{ mb: 2 }}>
-                        Không tìm thấy <b>librarianId</b> từ tài khoản đăng nhập. Hãy chắc chắn tài khoản của bạn là thủ thư
-                        và đã có bản ghi trong bảng <code>Librarians</code>.
+                        Không xác định được thông tin thủ thư — bạn cần đăng nhập bằng tài khoản thủ thư để duyệt.
                     </Alert>
                 )}
 
                 <Stack spacing={2}>
-                    <Typography variant="body2" color="text.secondary">
-                        Phiếu #{slip?.loanSlipId} · Độc giả #{slip?.readerId} 
-                    </Typography>
-
-                    {/* Không còn UI "Chế độ tiền cọc" */}
+                    <Box>
+                        <Typography variant="subtitle2" color="text.secondary">
+                            Phiếu #{slip?.loanSlipId} • Độc giả #{slip?.readerId}
+                        </Typography>
+                        <Typography variant="body1" sx={{ mt: 0.5 }}>
+                            Số dòng chờ duyệt: <strong>{rows.length}</strong>
+                        </Typography>
+                    </Box>
 
                     <Divider />
 
@@ -193,61 +208,88 @@ export default function ApproveReservationDialog({
                         <Table size="small">
                             <TableHead>
                                 <TableRow>
-                                    <TableCell sx={{ fontWeight: 700 }}>#Chi tiết</TableCell>
+                                    <TableCell sx={{ fontWeight: 700 }}>#</TableCell>
                                     <TableCell sx={{ fontWeight: 700 }}>DocID yêu cầu</TableCell>
-                                    <TableCell sx={{ fontWeight: 700 }}>Bản sao (chọn thủ công)</TableCell>
+                                    <TableCell sx={{ fontWeight: 700 }}>Bản sao (chọn)</TableCell>
                                     <TableCell sx={{ fontWeight: 700 }}>Ghi chú</TableCell>
                                 </TableRow>
                             </TableHead>
+
                             <TableBody>
                                 {rows.length === 0 ? (
                                     <TableRow>
-                                        <TableCell colSpan={4} align="center">Không có dòng mượn PENDING</TableCell>
+                                        <TableCell colSpan={4} align="center">
+                                            Không có dòng cần duyệt.
+                                        </TableCell>
                                     </TableRow>
-                                ) : rows.map(r => {
-                                    const docId = r.requestedDocumentId;
-                                    const copies = copiesByDoc[docId]?.data ?? [];
-                                    return (
-                                        <TableRow key={r.loanDetailId} hover>
-                                            <TableCell>#{r.loanDetailId}</TableCell>
-                                            <TableCell>
-                                                <Chip size="small" label={docId ?? "-"} />
-                                            </TableCell>
-                                            <TableCell>
-                                                {docId ? (
-                                                    <Stack spacing={0.5}>
-                                                        {/* Không có ô tìm barcode, chỉ dropdown chọn bản sao */}
-                                                        <Box>
-                                                            <select
-                                                                style={{ width: "100%", padding: "8px", borderRadius: 6, border: "1px solid #e0e0e0" }}
-                                                                value={assignmentMap[r.loanDetailId] ?? ""}
-                                                                onChange={(e) => handleAssignCopy(r.loanDetailId, e.target.value)}
-                                                            >
-                                                                <option value="">Chọn bản sao</option>
-                                                                {copies.map(c => (
-                                                                    <option key={c.documentCopyId} value={c.documentCopyId}>
-                                                                        #{c.documentCopyId} · {c.barCode}
-                                                                    </option>
-                                                                ))}
-                                                            </select>
-                                                        </Box>
-                                                        <Typography variant="caption" color="text.secondary">
-                                                            {(copiesByDoc[docId]?.pagination?.total ?? 0)} bản sao khả dụng
-                                                            {loadingCopies && " · đang tải..."}
-                                                        </Typography>
-                                                    </Stack>
-                                                ) : (
-                                                    <Typography variant="caption" color="text.secondary">Không có DocID</Typography>
-                                                )}
-                                            </TableCell>
-                                            <TableCell>
-                                                <Typography variant="caption" color="text.secondary">
-                                                    {r.note || "-"}
-                                                </Typography>
-                                            </TableCell>
-                                        </TableRow>
-                                    );
-                                })}
+                                ) : (
+                                    rows.map((r) => {
+                                        const docId = r.requestedDocumentId;
+                                        const copiesResp = copiesByDoc[docId] ?? {};
+                                        const copies = copiesResp?.data ?? [];
+                                        const totalAvail = copiesResp?.pagination?.total ?? copies.length ?? 0;
+                                        const loading = !!loadingByDoc[docId];
+
+                                        return (
+                                            <TableRow key={r.loanDetailId} hover>
+                                                <TableCell>#{r.loanDetailId}</TableCell>
+
+                                                <TableCell>
+                                                    <Chip label={docId ?? "-"} size="small" />
+                                                </TableCell>
+
+                                                <TableCell>
+                                                    {docId ? (
+                                                        <Stack spacing={0.5}>
+                                                            <FormControl fullWidth size="small">
+                                                                <InputLabel id={`select-copy-${r.loanDetailId}`}>Chọn bản sao</InputLabel>
+                                                                <Select
+                                                                    labelId={`select-copy-${r.loanDetailId}`}
+                                                                    value={assignmentMap[r.loanDetailId] ?? ""}
+                                                                    label="Chọn bản sao"
+                                                                    onChange={(e) => handleAssignCopy(r.loanDetailId, e.target.value)}
+                                                                    renderValue={(val) => (val ? `#${val}` : "Chọn bản sao")}
+                                                                    sx={{ borderRadius: 1 }}
+                                                                >
+                                                                    <MenuItem value="">
+                                                                        <em>Giao tự động (hệ thống chọn)</em>
+                                                                    </MenuItem>
+
+                                                                    {loading ? (
+                                                                        <MenuItem disabled>
+                                                                            <CircularProgress size={20} />
+                                                                            <Box component="span" sx={{ ml: 1 }}>Đang tải...</Box>
+                                                                        </MenuItem>
+                                                                    ) : copies.length === 0 ? (
+                                                                        <MenuItem disabled>Không có bản sao khả dụng</MenuItem>
+                                                                    ) : (
+                                                                        copies.map((c) => (
+                                                                            <MenuItem key={c.documentCopyId} value={c.documentCopyId}>
+                                                                                #{c.documentCopyId} · {c.barCode || "(no barcode)"}
+                                                                            </MenuItem>
+                                                                        ))
+                                                                    )}
+                                                                </Select>
+                                                            </FormControl>
+
+                                                            <Typography variant="caption" color="text.secondary">
+                                                                {loading ? "Đang tải danh sách bản sao..." : `${totalAvail} bản sao khả dụng`}
+                                                            </Typography>
+                                                        </Stack>
+                                                    ) : (
+                                                        <Typography variant="caption" color="text.secondary">Không có DocID</Typography>
+                                                    )}
+                                                </TableCell>
+
+                                                <TableCell>
+                                                    <Typography variant="caption" color="text.secondary">
+                                                        {r.note || "-"}
+                                                    </Typography>
+                                                </TableCell>
+                                            </TableRow>
+                                        );
+                                    })
+                                )}
                             </TableBody>
                         </Table>
                     </TableContainer>
@@ -255,13 +297,13 @@ export default function ApproveReservationDialog({
             </DialogContent>
 
             <DialogActions>
-                <Button onClick={onClose}>HUỶ</Button>
+                <Button onClick={onClose}>Hủy</Button>
                 <Button
                     onClick={handleSubmit}
                     variant="contained"
                     disabled={submitting || !effectiveLibrarianId}
                 >
-                    {submitting ? "ĐANG DUYỆT..." : "DUYỆT"}
+                    {submitting ? "Đang duyệt..." : "Duyệt"}
                 </Button>
             </DialogActions>
         </Dialog>

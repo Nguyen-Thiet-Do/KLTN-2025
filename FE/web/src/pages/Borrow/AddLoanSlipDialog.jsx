@@ -4,22 +4,22 @@ import {
     Box, Button, Card, CardContent, CardHeader, Grid, IconButton, Stack,
     TextField, Typography, Alert, Dialog, DialogTitle, DialogContent,
     DialogActions, Table, TableBody, TableCell, TableHead, TableRow, Paper, Slide,
-    Avatar, Tooltip
+    Avatar
 } from "@mui/material";
-import { Add, Delete, Close, InfoOutlined } from "@mui/icons-material";
+import { Add, Delete, Close } from "@mui/icons-material";
 import { useSnackbar } from "notistack";
 
 import { useAuth } from "../../contexts/AuthContext";
 import { getReaderById } from "../../services/readerService";
 import {
     createLoanSlip,
-    getCopyWithDeposit // keep name for backward compat with API; service may map it to proper endpoint
+    getCopyWithDeposit // tên giữ nguyên cho backward compat
 } from "../../services/loanSlips";
 
 const Transition = (props) => <Slide direction="up" {...props} />;
 
 /* ===========================
-   Helpers lấy message / error
+   Helpers để hiển thị lỗi/thông báo (giữ nguyên logic)
    =========================== */
 const valToText = (v) => {
     if (!v) return "";
@@ -84,6 +84,9 @@ const useNotify = () => {
     };
 };
 
+/* ===========================
+   Component
+   =========================== */
 export default function AddLoanSlipDialog({ open, onClose, onCreated }) {
     const notify = useNotify();
     const { user } = useAuth();
@@ -96,7 +99,7 @@ export default function AddLoanSlipDialog({ open, onClose, onCreated }) {
     const [loanDate, setLoanDate] = useState(() => new Date().toISOString().slice(0, 10));
     const [dueDate, setDueDate] = useState("");
 
-    // Mỗi item: { documentCopyId, note, copyDoc }
+    // items: { documentCopyId, note, copyDoc }
     const [items, setItems] = useState([
         { documentCopyId: "", note: "", copyDoc: null },
     ]);
@@ -135,7 +138,7 @@ export default function AddLoanSlipDialog({ open, onClose, onCreated }) {
             const reader = data?.data ?? data;
             setReaderInfo(reader || null);
             if (!reader) {
-                const msg = "Không tìm thấy độc giả theo ID đã nhập.";
+                const msg = "Không tìm thấy độc giả với ID đã nhập.";
                 setError(msg);
                 notify.warn(msg);
             }
@@ -147,7 +150,7 @@ export default function AddLoanSlipDialog({ open, onClose, onCreated }) {
         }
     };
 
-    // ---- Fetch copy + document cho 1 dòng (không còn deposit) ----
+    // ---- Fetch copy + document cho 1 dòng ----
     const fetchCopyForRow = async (idx) => {
         const id = items[idx]?.documentCopyId;
         if (!id) {
@@ -158,7 +161,7 @@ export default function AddLoanSlipDialog({ open, onClose, onCreated }) {
             const data = await getCopyWithDeposit(id, { withDoc: 1, withAuthors: 1, withSubtype: 1 });
             const st = String(data?.copy?.status || "").toUpperCase();
             if (st && st !== "AVAILABLE") {
-                throw { response: { data: { error: `Bản sao #${id} đang ở trạng thái ${st}` } } };
+                throw { response: { data: { error: `Bản sao #${id} hiện không khả dụng (${st}).` } } };
             }
 
             setItems(prev => prev.map((it, i) => {
@@ -175,9 +178,9 @@ export default function AddLoanSlipDialog({ open, onClose, onCreated }) {
                 };
             }));
         } catch (e) {
-            const msg = serverErrorMsg(e, "Không lấy được thông tin bản sao");
+            const msg = serverErrorMsg(e, "Không lấy được thông tin bản sao.");
             setError(msg);
-            notify.err(e, "Không lấy được thông tin bản sao");
+            notify.err(e, "Không lấy được thông tin bản sao.");
             setItems(prev => prev.map((it, i) => (i === idx ? { ...it, copyDoc: null } : it)));
         }
     };
@@ -199,6 +202,9 @@ export default function AddLoanSlipDialog({ open, onClose, onCreated }) {
         for (const [i, it] of items.entries()) {
             if (!it.documentCopyId) {
                 const msg = `Hàng #${i + 1}: thiếu ID bản sao.`; setError(msg); notify.warn(msg); return false;
+            }
+            if (!it.copyDoc) {
+                const msg = `Hàng #${i + 1}: thông tin bản sao chưa được lấy (nhấn Enter hoặc rời ô để tải).`; setError(msg); notify.warn(msg); return false;
             }
         }
         setError("");
@@ -246,6 +252,9 @@ export default function AddLoanSlipDialog({ open, onClose, onCreated }) {
         onClose && onClose();
     };
 
+    const totalItems = items.length;
+    const readerDisplayName = readerInfo?.fullName ? `${readerInfo.fullName}` : "";
+
     return (
         <Dialog
             open={open}
@@ -256,16 +265,7 @@ export default function AddLoanSlipDialog({ open, onClose, onCreated }) {
             keepMounted
         >
             <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                <Typography
-                    variant="h6"
-                    fontWeight={800}
-                    sx={{
-                        background: "linear-gradient(135deg, #667EEA 0%, #764BA2 100%)",
-                        backgroundClip: "text",
-                        WebkitBackgroundClip: "text",
-                        WebkitTextFillColor: "transparent",
-                    }}
-                >
+                <Typography variant="h6" fontWeight={800} sx={{ color: "primary.main" }}>
                     Tạo phiếu mượn
                 </Typography>
                 <IconButton onClick={handleCloseAll}><Close /></IconButton>
@@ -280,10 +280,10 @@ export default function AddLoanSlipDialog({ open, onClose, onCreated }) {
 
                 {/* Thông tin chung */}
                 <Card variant="outlined" sx={{ mb: 2, borderRadius: 2 }}>
-                    <CardHeader title="Thông tin chung" sx={{ pb: 0 }} />
+                    <CardHeader title="Thông tin phiếu" subheader="Nhập ID độc giả và chọn bản sao mượn" />
                     <CardContent>
                         <Grid container spacing={2}>
-                            <Grid item xs={12} md={3}>
+                            <Grid item xs={12} md={4}>
                                 <TextField
                                     label="ID độc giả"
                                     type="number"
@@ -295,18 +295,18 @@ export default function AddLoanSlipDialog({ open, onClose, onCreated }) {
                                 />
                             </Grid>
 
-                            <Grid item xs={12} md={3}>
+                            <Grid item xs={12} md={4}>
                                 <TextField
-                                    label="ID thủ thư (đang đăng nhập)"
-                                    type="number"
-                                    value={librarianId}
+                                    label="Thủ thư (đã đăng nhập)"
+                                    type="text"
+                                    value={String(librarianId || "")}
                                     disabled
-                                    helperText={user?.fullName ? `Bạn: ${user.fullName}` : "Lấy từ phiên đăng nhập"}
+                                    helperText={user?.fullName ? `Bạn: ${user.fullName}` : ""}
                                     fullWidth
                                 />
                             </Grid>
 
-                            <Grid item xs={12} md={3}>
+                            <Grid item xs={6} md={2}>
                                 <TextField
                                     label="Ngày tạo"
                                     type="date"
@@ -316,9 +316,9 @@ export default function AddLoanSlipDialog({ open, onClose, onCreated }) {
                                     InputLabelProps={{ shrink: true }}
                                 />
                             </Grid>
-                            <Grid item xs={12} md={3}>
+                            <Grid item xs={6} md={2}>
                                 <TextField
-                                    label="Hạn trả (tuỳ chọn)"
+                                    label="Hạn trả"
                                     type="date"
                                     value={dueDate}
                                     onChange={(e) => setDueDate(e.target.value)}
@@ -329,27 +329,23 @@ export default function AddLoanSlipDialog({ open, onClose, onCreated }) {
 
                             <Grid item xs={12}>
                                 {readerInfo ? (
-                                    <Stack
-                                        direction="row"
-                                        spacing={2}
-                                        alignItems="center"
-                                        sx={{ p: 1.5, border: (t) => `1px dashed ${t.palette.divider}`, borderRadius: 2 }}
-                                    >
-                                        <Avatar sx={{ bgcolor: "primary.main" }}>
-                                            {(readerInfo.fullName || "?").slice(0, 1)}
-                                        </Avatar>
+                                    <Stack direction="row" spacing={2} alignItems="center" sx={{ p: 1, borderRadius: 1, bgcolor: "action.hover" }}>
+                                        <Avatar sx={{ bgcolor: "primary.main" }}>{(readerDisplayName || "?").slice(0, 1)}</Avatar>
                                         <Box>
-                                            <Typography variant="subtitle2" fontWeight={700}>
-                                                {readerInfo.fullName || `Reader #${readerInfo.readerId}`}
+                                            <Typography variant="subtitle1" fontWeight={700}>
+                                                {readerDisplayName || `Reader #${readerInfo.readerId}`}
                                             </Typography>
                                             <Typography variant="body2" color="text.secondary">
                                                 {readerInfo.cccd ? `CCCD: ${readerInfo.cccd}` : ""}
                                             </Typography>
                                         </Box>
+                                        <Box sx={{ ml: "auto", textAlign: "right" }}>
+                                            <Typography variant="subtitle2">Số đầu mục</Typography>
+                                            <Typography variant="h6" fontWeight={800}>{totalItems}</Typography>
+                                        </Box>
                                     </Stack>
                                 ) : (
                                     <Typography variant="body2" color="text.secondary">
-                                        Nhập ID độc giả để tự tra cứu.
                                     </Typography>
                                 )}
                             </Grid>
@@ -359,22 +355,19 @@ export default function AddLoanSlipDialog({ open, onClose, onCreated }) {
 
                 {/* Đầu mục mượn */}
                 <Card variant="outlined" sx={{ borderRadius: 2 }}>
-                    <CardHeader
-                        title="Đầu mục mượn"
-                        subheader="Nhập ID bản sao (copyId). Hệ thống sẽ tự lấy thông tin sách."
-                        sx={{ pb: 0 }}
-                    />
+                    <CardHeader title="Đầu mục mượn" />
                     <CardContent>
                         <Table component={Paper} size="small" sx={{ borderRadius: 2, overflow: "hidden" }}>
                             <TableHead>
-                                <TableRow sx={{ backgroundColor: "rgba(102,126,234,0.08)" }}>
+                                <TableRow sx={{ backgroundColor: "rgba(102,126,234,0.06)" }}>
                                     <TableCell width={56}>#</TableCell>
                                     <TableCell>ID bản sao</TableCell>
-                                    <TableCell>Tiêu đề / Bìa</TableCell>
+                                    <TableCell>Tiêu đề</TableCell>
                                     <TableCell>Ghi chú</TableCell>
                                     <TableCell align="right" width={56}></TableCell>
                                 </TableRow>
                             </TableHead>
+
                             <TableBody>
                                 {items.map((it, idx) => (
                                     <TableRow key={idx} hover>
@@ -382,7 +375,7 @@ export default function AddLoanSlipDialog({ open, onClose, onCreated }) {
 
                                         <TableCell>
                                             <TextField
-                                                placeholder="VD: 130010"
+                                                placeholder="Nhập ID bản sao"
                                                 fullWidth
                                                 type="number"
                                                 value={it.documentCopyId}
@@ -392,27 +385,22 @@ export default function AddLoanSlipDialog({ open, onClose, onCreated }) {
                                             />
                                         </TableCell>
 
-                                        <TableCell>
+                                        <TableCell sx={{ minWidth: 220 }}>
                                             {it.copyDoc ? (
                                                 <Stack direction="row" spacing={1} alignItems="center">
                                                     {it.copyDoc.coverPhoto ? (
                                                         <img
                                                             src={it.copyDoc.coverPhoto}
                                                             alt={it.copyDoc.title}
-                                                            style={{ width: 28, height: 36, objectFit: "cover", borderRadius: 4 }}
+                                                            style={{ width: 36, height: 48, objectFit: "cover", borderRadius: 4 }}
                                                         />
-                                                    ) : null}
-                                                    <Box sx={{ minWidth: 180 }}>
-                                                        <Typography variant="body2" fontWeight={700} noWrap>
-                                                            {it.copyDoc.title || "-"}
-                                                        </Typography>
-                                                        <Typography variant="caption" color="text.secondary">
-                                                            BarCode: {it.copyDoc.barCode || "-"}
-                                                        </Typography>
+                                                    ) : (
+                                                        <Box sx={{ width: 36, height: 48, bgcolor: "grey.200", borderRadius: 1 }} />
+                                                    )}
+                                                    <Box sx={{ overflow: "hidden" }}>
+                                                        <Typography variant="body2" fontWeight={700} noWrap>{it.copyDoc.title || "-"}</Typography>
+                                                        <Typography variant="caption" color="text.secondary" noWrap>BarCode: {it.copyDoc.barCode || "-"}</Typography>
                                                     </Box>
-                                                    <Tooltip title="Dữ liệu từ /documents/admin/copies/:copyId">
-                                                        <InfoOutlined fontSize="small" color="action" />
-                                                    </Tooltip>
                                                 </Stack>
                                             ) : (
                                                 <Typography variant="body2" color="text.secondary">Chưa có dữ liệu</Typography>
@@ -421,7 +409,7 @@ export default function AddLoanSlipDialog({ open, onClose, onCreated }) {
 
                                         <TableCell>
                                             <TextField
-                                                placeholder="Ghi chú"
+                                                placeholder="Ghi chú (tùy chọn)"
                                                 fullWidth
                                                 value={it.note}
                                                 onChange={(e) => setItems(prev => prev.map((x, i) => i === idx ? { ...x, note: e.target.value } : x))}
@@ -429,16 +417,26 @@ export default function AddLoanSlipDialog({ open, onClose, onCreated }) {
                                         </TableCell>
 
                                         <TableCell align="right">
-                                            <IconButton color="error" onClick={() => setItems(prev => prev.filter((_, i) => i !== idx))} disabled={items.length === 1}>
+                                            <IconButton
+                                                color="error"
+                                                onClick={() => setItems(prev => prev.filter((_, i) => i !== idx))}
+                                                disabled={items.length === 1}
+                                                size="small"
+                                            >
                                                 <Delete />
                                             </IconButton>
                                         </TableCell>
                                     </TableRow>
                                 ))}
+
                                 <TableRow>
                                     <TableCell colSpan={5}>
-                                        <Button startIcon={<Add />} onClick={() => setItems(prev => [...prev, { documentCopyId: "", note: "", copyDoc: null }])} sx={{ fontWeight: 700 }}>
-                                            Thêm dòng
+                                        <Button
+                                            startIcon={<Add />}
+                                            onClick={() => setItems(prev => [...prev, { documentCopyId: "", note: "", copyDoc: null }])}
+                                            sx={{ fontWeight: 700 }}
+                                        >
+                                            Thêm đầu mục
                                         </Button>
                                     </TableCell>
                                 </TableRow>
@@ -448,15 +446,18 @@ export default function AddLoanSlipDialog({ open, onClose, onCreated }) {
                 </Card>
             </DialogContent>
 
-            <DialogActions sx={{ justifyContent: "space-between" }}>
-                <Box><Button onClick={handleCloseAll}>Hủy</Button></Box>
+            <DialogActions sx={{ justifyContent: "space-between", px: 3, py: 2 }}>
+                <Box>
+                    <Button onClick={handleCloseAll}>Hủy</Button>
+                </Box>
                 <Stack direction="row" spacing={1}>
                     <Button
                         onClick={createSlip}
                         variant="contained"
                         disabled={creating}
+                        sx={{ fontWeight: 700 }}
                     >
-                        Tạo phiếu
+                        {creating ? "Đang xử lý..." : "Tạo phiếu"}
                     </Button>
                 </Stack>
             </DialogActions>

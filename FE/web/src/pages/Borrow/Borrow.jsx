@@ -35,16 +35,12 @@ import {
 import { fetchLoanSlips, getDocumentDetail } from "../../services/loanSlips";
 import AddLoanSlipDialog from "../Borrow/AddLoanSlipDialog";
 import ApproveReservationDialog from "./ApproveReservationDialog";
-
-// NEW imports for return dialogs
 import ReturnSingleDialog from "./ReturnSingleDialog";
 import ReturnBulkDialog from "./ReturnBulkDialog";
 
-/** Tabs theo chuẩn mới của BE */
 const TABS = [
   { key: "PENDING", label: "Chờ duyệt" },
-  // kept PENDING_PAYMENT if backend still uses it, but payment UI removed on FE
-  { key: "PENDING_PAYMENT", label: "Chờ thanh toán" },
+  { key: "WAITING_FOR_PICKUP", label: "Chờ đến lấy" },
   { key: "BORROWING", label: "Đang mượn" },
   { key: "RETURNED", label: "Đã trả" },
   { key: "OVERDUE", label: "Quá hạn" },
@@ -63,8 +59,8 @@ function chipForSlipStatus(status) {
   switch (status) {
     case "PENDING":
       return <Chip color="warning" label="Chờ duyệt" size="small" sx={{ fontWeight: 600 }} />;
-    case "PENDING_PAYMENT":
-      return <Chip color="info" label="Chờ thanh toán" size="small" sx={{ fontWeight: 600 }} />;
+    case "WAITING_FOR_PICKUP":
+      return <Chip color="info" label="Chờ đến lấy" size="small" sx={{ fontWeight: 600 }} />;
     case "BORROWING":
       return <Chip color="primary" label="Đang mượn" size="small" sx={{ fontWeight: 600 }} />;
     case "RETURNED":
@@ -94,10 +90,6 @@ function parseRequestedDocumentId(note) {
   return m ? Number(m[1]) : null;
 }
 
-/**
- * Row component (phiếu)
- * - nhận thêm onSingleReturn, onBulkReturn props để mở dialog trả
- */
 function Row({ row, titleCache, onApprove, onSingleReturn, onBulkReturn }) {
   const [open, setOpen] = useState(false);
   const librarianName = row?.Librarian?.fullName || (row?.librarianId ? `#${row.librarianId}` : "-");
@@ -110,22 +102,27 @@ function Row({ row, titleCache, onApprove, onSingleReturn, onBulkReturn }) {
             size="small"
             onClick={() => setOpen((v) => !v)}
             sx={{ color: "#667EEA", "&:hover": { backgroundColor: "rgba(102,126,234,0.08)" } }}
+            aria-label={open ? "Thu gọn" : "Mở rộng"}
           >
             {open ? <ExpandLess /> : <ExpandMore />}
           </IconButton>
         </TableCell>
+
         <TableCell>
           <Typography variant="body2" fontWeight={600} sx={{ fontFamily: "monospace", fontSize: 13 }}>
             #{row.loanSlipId}
           </Typography>
         </TableCell>
+
         <TableCell>
           <Stack direction="row" spacing={1} alignItems="center">
             <Avatar
               sx={{
-                width: 24, height: 24,
+                width: 24,
+                height: 24,
                 background: "linear-gradient(135deg, #667EEA 0%, #764BA2 100%)",
-                fontSize: 12, fontWeight: 600
+                fontSize: 12,
+                fontWeight: 600,
               }}
             >
               {(row.Reader?.fullName || "?").slice(0, 1)}
@@ -135,21 +132,26 @@ function Row({ row, titleCache, onApprove, onSingleReturn, onBulkReturn }) {
                 {row.Reader?.fullName || `Reader #${row.readerId}`}
               </Typography>
               <Typography variant="caption" color="text.secondary">
-                ID độc giả: {row.readerId}
+                ID: {row.readerId}
               </Typography>
             </Box>
           </Stack>
         </TableCell>
+
         <TableCell>
           <Typography variant="body2">{librarianName}</Typography>
         </TableCell>
+
         <TableCell>
           <Typography variant="body2">{formatDate(row.loanDate)}</Typography>
         </TableCell>
+
         <TableCell>
           <Typography variant="body2">{formatDate(row.dueDate)}</Typography>
         </TableCell>
+
         <TableCell>{chipForSlipStatus(row.status)}</TableCell>
+
         <TableCell align="center">
           <Chip
             label={Array.isArray(row.details) ? row.details.length : 0}
@@ -157,11 +159,11 @@ function Row({ row, titleCache, onApprove, onSingleReturn, onBulkReturn }) {
             sx={{
               background: "linear-gradient(135deg, #667EEA 0%, #764BA2 100%)",
               color: "white",
-              fontWeight: 700
+              fontWeight: 700,
             }}
           />
         </TableCell>
-        {/* Thao tác chính */}
+
         <TableCell align="right">
           {String(row.status).toUpperCase() === "PENDING" && (
             <Button size="small" variant="contained" onClick={() => onApprove?.(row)}>
@@ -196,9 +198,9 @@ function Row({ row, titleCache, onApprove, onSingleReturn, onBulkReturn }) {
                 <Typography variant="subtitle2" fontWeight={700}>
                   Chi tiết phiếu
                 </Typography>
-                <Stack direction="row" spacing={2} divider={<Divider orientation="vertical" flexItem />}>
+                <Stack direction="row" spacing={2}>
                   <Typography variant="caption" color="text.secondary">
-                    Tạo lúc: {formatDate(row.created_at)}
+                    Tạo: {formatDate(row.created_at)}
                   </Typography>
                   <Typography variant="caption" color="text.secondary">
                     Cập nhật: {formatDate(row.updated_at)}
@@ -218,13 +220,13 @@ function Row({ row, titleCache, onApprove, onSingleReturn, onBulkReturn }) {
                   "& thead th": {
                     fontWeight: 700,
                     backgroundColor: "rgba(102,126,234,0.06)",
-                    color: "#2D3748"
+                    color: "#2D3748",
                   },
                 }}
               >
                 <TableHead>
                   <TableRow>
-                    <TableCell>#Chi tiết</TableCell>
+                    <TableCell>#</TableCell>
                     <TableCell>ID tài liệu</TableCell>
                     <TableCell>Tên tài liệu</TableCell>
                     <TableCell>Bìa</TableCell>
@@ -232,17 +234,16 @@ function Row({ row, titleCache, onApprove, onSingleReturn, onBulkReturn }) {
                     <TableCell>Trạng thái</TableCell>
                     <TableCell>Ngày trả</TableCell>
                     <TableCell>Tiền phạt</TableCell>
-                    <TableCell>Tình trạng mượn</TableCell>
-                    <TableCell>Tình trạng trả</TableCell>
                     <TableCell>Gia hạn</TableCell>
                     <TableCell>Ghi chú</TableCell>
                     <TableCell align="right">Hành động</TableCell>
                   </TableRow>
                 </TableHead>
+
                 <TableBody>
                   {(row.details || []).length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={13} align="center" sx={{ py: 2 }}>
+                      <TableCell colSpan={11} align="center" sx={{ py: 2 }}>
                         <Typography variant="body2" color="text.secondary">
                           Chưa có bản ghi
                         </Typography>
@@ -253,31 +254,35 @@ function Row({ row, titleCache, onApprove, onSingleReturn, onBulkReturn }) {
                       const requestedId = row.status === "PENDING" ? parseRequestedDocumentId(d.note) : null;
                       const copy = d.DocumentCopy;
                       const doc = copy?.Document;
-
                       const documentId = requestedId ?? doc?.documentId ?? null;
-                      const title = row.status === "PENDING"
-                        ? documentId
-                          ? titleCache.get(documentId) ?? "Đang tải..."
-                          : "-"
-                        : doc?.title || "-";
-
+                      const title =
+                        row.status === "PENDING"
+                          ? documentId
+                            ? titleCache.get(documentId) ?? "Đang tải..."
+                            : "-"
+                          : doc?.title || "-";
                       const cover = row.status === "PENDING" ? null : doc?.coverPhoto || null;
 
                       return (
                         <TableRow key={d.loanDetailId} hover>
                           <TableCell>
-                            <Typography variant="body2" fontWeight={600}>{d.loanDetailId}</Typography>
+                            <Typography variant="body2" fontWeight={600}>
+                              {d.loanDetailId}
+                            </Typography>
                           </TableCell>
+
                           <TableCell>
                             <Typography variant="body2" fontFamily="monospace">
                               {documentId ?? "-"}
                             </Typography>
                           </TableCell>
+
                           <TableCell>
                             <Typography variant="body2" fontWeight={600} noWrap sx={{ maxWidth: 200 }}>
                               {title}
                             </Typography>
                           </TableCell>
+
                           <TableCell>
                             {cover ? (
                               <img
@@ -286,36 +291,42 @@ function Row({ row, titleCache, onApprove, onSingleReturn, onBulkReturn }) {
                                 loading="lazy"
                                 style={{ width: 36, height: 48, objectFit: "cover", borderRadius: 4, display: "block" }}
                               />
-                            ) : "-"}
+                            ) : (
+                              "-"
+                            )}
                           </TableCell>
+
                           <TableCell>
                             <Typography variant="body2" fontFamily="monospace">
                               {copy?.barCode || "-"}
                             </Typography>
                           </TableCell>
+
                           <TableCell>{chipForDetailStatus(d.status)}</TableCell>
+
                           <TableCell>
                             <Typography variant="body2">{formatDate(d.returnDate)}</Typography>
                           </TableCell>
+
                           <TableCell>
-                            <Typography variant="body2" fontWeight={600}><Money value={d.fineAmount} /></Typography>
+                            <Typography variant="body2" fontWeight={600}>
+                              <Money value={d.fineAmount} />
+                            </Typography>
                           </TableCell>
-                          <TableCell><Typography variant="body2">{d.conditionBorrow || "-"}</Typography></TableCell>
-                          <TableCell><Typography variant="body2">{d.conditionReturn || "-"}</Typography></TableCell>
+
                           <TableCell align="center">
                             <Chip label={d.renewalCount ?? 0} size="small" color="primary" sx={{ fontWeight: 600 }} />
                           </TableCell>
+
                           <TableCell>
-                            <Typography variant="caption" color="text.secondary">{d.note || "-"}</Typography>
+                            <Typography variant="caption" color="text.secondary">
+                              {d.note || "-"}
+                            </Typography>
                           </TableCell>
 
                           <TableCell align="right">
                             {String(d.status) === "BORROWED" && (
-                              <Button
-                                size="small"
-                                variant="outlined"
-                                onClick={() => onSingleReturn?.(row, d)}
-                              >
+                              <Button size="small" variant="outlined" onClick={() => onSingleReturn?.(row, d)}>
                                 Trả
                               </Button>
                             )}
@@ -345,9 +356,8 @@ export default function Borrow() {
   const [openApprove, setOpenApprove] = useState(false);
   const [selectedSlip, setSelectedSlip] = useState(null);
 
-  // RETURN dialogs state
   const [openReturnSingle, setOpenReturnSingle] = useState(false);
-  const [selectedDetailForReturn, setSelectedDetailForReturn] = useState(null); // { slip, detail }
+  const [selectedDetailForReturn, setSelectedDetailForReturn] = useState(null);
 
   const [openReturnBulk, setOpenReturnBulk] = useState(false);
   const [selectedSlipForBulkReturn, setSelectedSlipForBulkReturn] = useState(null);
@@ -452,7 +462,6 @@ export default function Borrow() {
 
   const displayRows = filteredRows;
 
-  // Handlers for return dialogs
   function handleOpenSingleReturn(slip, detail) {
     setSelectedDetailForReturn({ slip, detail });
     setOpenReturnSingle(true);
@@ -492,12 +501,15 @@ export default function Borrow() {
       <Card sx={{ mb: 3, borderRadius: 3, boxShadow: "0 8px 32px rgba(0,0,0,0.1)" }}>
         <CardContent>
           <Stack spacing={2}>
+            {/* HÀNG ĐẦU TIÊN: TABS + NÚT HÀNH ĐỘNG */}
             <Stack
-              direction={{ xs: "column", md: "row" }}
-              spacing={2}
+              direction="row"
               alignItems="center"
               justifyContent="space-between"
+              spacing={2}
+              sx={{ width: "100%" }}
             >
+              {/* LEFT — TABS */}
               <Tabs
                 value={tab}
                 onChange={(_e, v) => setTab(v)}
@@ -508,13 +520,13 @@ export default function Borrow() {
                     fontWeight: 600,
                     textTransform: "none",
                     minHeight: 48,
-                    "&.Mui-selected": { color: "#667EEA" }
+                    "&.Mui-selected": { color: "#667EEA" },
                   },
                   "& .MuiTabs-indicator": {
                     background: "linear-gradient(135deg, #667EEA 0%, #764BA2 100%)",
                     height: 3,
-                    borderRadius: "3px 3px 0 0"
-                  }
+                    borderRadius: "3px 3px 0 0",
+                  },
                 }}
               >
                 {TABS.map((t) => (
@@ -522,31 +534,46 @@ export default function Borrow() {
                 ))}
               </Tabs>
 
-              <Button variant="contained" onClick={() => setOpenCreate(true)} sx={{ borderRadius: 2, fontWeight: 700 }}>
-                Tạo phiếu mượn
-              </Button>
+              {/* RIGHT — ACTION BUTTONS */}
+              <Stack direction="row" spacing={1} alignItems="center">
+                <Button
+                  variant="contained"
+                  onClick={() => setOpenCreate(true)}
+                  sx={{
+                    borderRadius: 2,
+                    fontWeight: 700,
+                    height: 40,
+                    textTransform: "none",
+                  }}
+                >
+                  Tạo phiếu mượn
+                </Button>
 
-              <Button
-                variant="outlined"
-                startIcon={<RefreshIcon />}
-                onClick={load}
-                sx={{
-                  borderRadius: 2,
-                  borderColor: "#667EEA",
-                  color: "#667EEA",
-                  fontWeight: 600,
-                  "&:hover": { borderColor: "#5A67D8", backgroundColor: "rgba(102,126,234,0.04)" },
-                }}
-              >
-                Làm mới
-              </Button>
+                <Button
+                  variant="outlined"
+                  startIcon={<RefreshIcon />}
+                  onClick={load}
+                  sx={{
+                    borderRadius: 2,
+                    borderColor: "#667EEA",
+                    color: "#667EEA",
+                    fontWeight: 600,
+                    height: 40,
+                    textTransform: "none",
+                    "&:hover": { borderColor: "#5A67D8", backgroundColor: "rgba(102,126,234,0.04)" },
+                  }}
+                >
+                  Làm mới
+                </Button>
+              </Stack>
             </Stack>
+
 
             <Divider />
 
             <Stack direction={{ xs: "column", md: "row" }} spacing={2} alignItems="center">
               <TextField
-                placeholder="Tìm theo tên độc giả, ID..."
+                placeholder="Tìm theo tên độc giả hoặc ID"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 InputProps={{
@@ -562,7 +589,7 @@ export default function Borrow() {
                   "& .MuiOutlinedInput-root": {
                     borderRadius: 2,
                     "&:hover fieldset": { borderColor: "#667EEA" },
-                    "&.Mui-focused fieldset": { borderColor: "#667EEA" }
+                    "&.Mui-focused fieldset": { borderColor: "#667EEA" },
                   },
                 }}
               />
@@ -578,7 +605,7 @@ export default function Borrow() {
                   "& .MuiOutlinedInput-root": {
                     borderRadius: 2,
                     "&:hover fieldset": { borderColor: "#667EEA" },
-                    "&.Mui-focused fieldset": { borderColor: "#667EEA" }
+                    "&.Mui-focused fieldset": { borderColor: "#667EEA" },
                   },
                 }}
               />
@@ -594,7 +621,7 @@ export default function Borrow() {
                   "& .MuiOutlinedInput-root": {
                     borderRadius: 2,
                     "&:hover fieldset": { borderColor: "#667EEA" },
-                    "&.Mui-focused fieldset": { borderColor: "#667EEA" }
+                    "&.Mui-focused fieldset": { borderColor: "#667EEA" },
                   },
                 }}
               />
@@ -631,6 +658,7 @@ export default function Borrow() {
             sx={{ "& .MuiLinearProgress-bar": { background: "linear-gradient(135deg, #667EEA 0%, #764BA2 100%)" } }}
           />
         )}
+
         <TableContainer component={Paper} elevation={0}>
           <Table size="small">
             <TableHead>
@@ -646,6 +674,7 @@ export default function Borrow() {
                 <TableCell align="right" sx={{ fontWeight: 700, color: "#2D3748" }}>Thao tác</TableCell>
               </TableRow>
             </TableHead>
+
             <TableBody>
               {displayRows.length === 0 ? (
                 <TableRow>
@@ -702,7 +731,6 @@ export default function Borrow() {
         onCreated={() => { setOpenCreate(false); load(); }}
       />
 
-      {/* Dialog duyệt */}
       <ApproveReservationDialog
         open={openApprove}
         onClose={() => { setOpenApprove(false); setSelectedSlip(null); }}
@@ -710,7 +738,6 @@ export default function Borrow() {
         onApproved={() => { setOpenApprove(false); setSelectedSlip(null); load(); }}
       />
 
-      {/* Dialog Trả từng quyển */}
       <ReturnSingleDialog
         open={openReturnSingle}
         onClose={() => handleCloseSingleReturn()}
@@ -721,7 +748,6 @@ export default function Borrow() {
         }}
       />
 
-      {/* Dialog Trả toàn bộ phiếu */}
       <ReturnBulkDialog
         open={openReturnBulk}
         onClose={() => handleCloseBulkReturn()}
