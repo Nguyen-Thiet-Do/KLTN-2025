@@ -4,7 +4,7 @@ import { IconButton } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 
 export default function NotificationsProvider({ children }) {
-  // ✅ Cho phép đóng snackbar từ action
+  
   window.__closeSnackbar = (id) => closeSnackbar(id);
 
   return (

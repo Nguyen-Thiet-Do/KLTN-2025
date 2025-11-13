@@ -26,31 +26,16 @@ export default function ReaderCard({ doc = {} }) {
     title = "",
     categoryName,
     coverPhoto,
-    minDeposit,
-    maxDeposit,
     availableCopies = 0,
     totalCopies = 0,
     author,
     publishYear,
-    rating = 4.5,
     reviewCount = 12,
   } = doc;
 
   const cover = coverPhoto || "/no-cover.png";
   const inStock = totalCopies > 0 && availableCopies > 0;
   const stockPercentage = totalCopies > 0 ? (availableCopies / totalCopies) * 100 : 0;
-
-  const fmtVND = (v) =>
-    typeof v === "number"
-      ? `${new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 0 }).format(v)}₫`
-      : null;
-
-  const depositText =
-    typeof minDeposit === "number" && typeof maxDeposit === "number"
-      ? minDeposit === maxDeposit 
-        ? fmtVND(minDeposit)
-        : `${fmtVND(minDeposit)} - ${fmtVND(maxDeposit)}`
-      : "Miễn phí";
 
   const to = documentId ? `/reader/documents/${documentId}` : undefined;
 
@@ -188,33 +173,19 @@ export default function ReaderCard({ doc = {} }) {
                 </Stack>
               )}
 
-              {/* Rating */}
-              <Stack direction="row" spacing={1} alignItems="center">
-                <Rating value={rating} size="small" readOnly precision={0.1} />
-                <Typography variant="body2" color="text.secondary">
-                  ({reviewCount})
-                </Typography>
-              </Stack>
+
             </Stack>
 
             {/* Deposit & Stock Info */}
             <Stack spacing={1.5}>
-              <Stack direction="row" justifyContent="space-between" alignItems="center">
-                <Typography variant="body2" fontWeight={600}>
-                  Tiền cọc:
-                </Typography>
-                <Typography variant="body2" fontWeight={700} color="primary.main">
-                  {depositText}
-                </Typography>
-              </Stack>
 
               <Stack spacing={1}>
                 <Stack direction="row" justifyContent="space-between" alignItems="center">
                   <Typography variant="body2" fontWeight={600}>
-                    Tình trạng:
+                    Số bản có sẵn:
                   </Typography>
                   <Typography variant="body2" fontWeight={600}>
-                    {availableCopies}/{totalCopies}
+                    {availableCopies}
                   </Typography>
                 </Stack>
                 

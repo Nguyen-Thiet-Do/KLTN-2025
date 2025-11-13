@@ -1,4 +1,4 @@
-// src/pages/Borrow/Borrow.jsx
+// src/components/Borrow/Borrow.jsx
 import { useEffect, useMemo, useState } from "react";
 import {
   Avatar,
@@ -36,9 +36,14 @@ import { fetchLoanSlips, getDocumentDetail } from "../../services/loanSlips";
 import AddLoanSlipDialog from "../Borrow/AddLoanSlipDialog";
 import ApproveReservationDialog from "./ApproveReservationDialog";
 
+// NEW imports for return dialogs
+import ReturnSingleDialog from "./ReturnSingleDialog";
+import ReturnBulkDialog from "./ReturnBulkDialog";
+
 /** Tabs theo chuẩn mới của BE */
 const TABS = [
   { key: "PENDING", label: "Chờ duyệt" },
+  // kept PENDING_PAYMENT if backend still uses it, but payment UI removed on FE
   { key: "PENDING_PAYMENT", label: "Chờ thanh toán" },
   { key: "BORROWING", label: "Đang mượn" },
   { key: "RETURNED", label: "Đã trả" },
@@ -54,7 +59,6 @@ function formatDate(d) {
   return isNaN(dt.getTime()) ? String(d) : dt.toLocaleString("vi-VN");
 }
 
-/** Hiển thị chip cho trạng thái Phiếu (LoanSlip.status) */
 function chipForSlipStatus(status) {
   switch (status) {
     case "PENDING":
@@ -72,7 +76,6 @@ function chipForSlipStatus(status) {
   }
 }
 
-/** Hiển thị chip cho trạng thái Chi tiết (LoanDetail.status) */
 function chipForDetailStatus(status) {
   switch (status) {
     case "PENDING":
@@ -91,13 +94,11 @@ function parseRequestedDocumentId(note) {
   return m ? Number(m[1]) : null;
 }
 
-function Money({ value }) {
-  if (value == null || value === "") return "-";
-  const n = Number(value);
-  return isNaN(n) ? String(value) : `${nf.format(n)}₫`;
-}
-
-function Row({ row, titleCache, onApprove }) {
+/**
+ * Row component (phiếu)
+ * - nhận thêm onSingleReturn, onBulkReturn props để mở dialog trả
+ */
+function Row({ row, titleCache, onApprove, onSingleReturn, onBulkReturn }) {
   const [open, setOpen] = useState(false);
   const librarianName = row?.Librarian?.fullName || (row?.librarianId ? `#${row.librarianId}` : "-");
 
@@ -160,15 +161,22 @@ function Row({ row, titleCache, onApprove }) {
             }}
           />
         </TableCell>
-        {/* NEW: Thao tác */}
+        {/* Thao tác chính */}
         <TableCell align="right">
           {String(row.status).toUpperCase() === "PENDING" && (
+            <Button size="small" variant="contained" onClick={() => onApprove?.(row)}>
+              Duyệt
+            </Button>
+          )}
+
+          {String(row.status).toUpperCase() === "BORROWING" && (
             <Button
               size="small"
-              variant="contained"
-              onClick={() => onApprove?.(row)}
+              variant="outlined"
+              sx={{ ml: 1 }}
+              onClick={() => onBulkReturn?.(row)}
             >
-              Duyệt
+              Trả toàn bộ
             </Button>
           )}
         </TableCell>
@@ -223,12 +231,12 @@ function Row({ row, titleCache, onApprove }) {
                     <TableCell>Mã vạch</TableCell>
                     <TableCell>Trạng thái</TableCell>
                     <TableCell>Ngày trả</TableCell>
-                    <TableCell>Tiền cọc</TableCell>
                     <TableCell>Tiền phạt</TableCell>
                     <TableCell>Tình trạng mượn</TableCell>
                     <TableCell>Tình trạng trả</TableCell>
                     <TableCell>Gia hạn</TableCell>
                     <TableCell>Ghi chú</TableCell>
+                    <TableCell align="right">Hành động</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
@@ -290,9 +298,6 @@ function Row({ row, titleCache, onApprove }) {
                             <Typography variant="body2">{formatDate(d.returnDate)}</Typography>
                           </TableCell>
                           <TableCell>
-                            <Typography variant="body2" fontWeight={600}><Money value={d.depositAmount} /></Typography>
-                          </TableCell>
-                          <TableCell>
                             <Typography variant="body2" fontWeight={600}><Money value={d.fineAmount} /></Typography>
                           </TableCell>
                           <TableCell><Typography variant="body2">{d.conditionBorrow || "-"}</Typography></TableCell>
@@ -302,6 +307,18 @@ function Row({ row, titleCache, onApprove }) {
                           </TableCell>
                           <TableCell>
                             <Typography variant="caption" color="text.secondary">{d.note || "-"}</Typography>
+                          </TableCell>
+
+                          <TableCell align="right">
+                            {String(d.status) === "BORROWED" && (
+                              <Button
+                                size="small"
+                                variant="outlined"
+                                onClick={() => onSingleReturn?.(row, d)}
+                              >
+                                Trả
+                              </Button>
+                            )}
                           </TableCell>
                         </TableRow>
                       );
@@ -317,17 +334,24 @@ function Row({ row, titleCache, onApprove }) {
   );
 }
 
+function Money({ value }) {
+  if (value == null || value === "") return "-";
+  const n = Number(value);
+  return isNaN(n) ? String(value) : `${nf.format(n)}₫`;
+}
+
 export default function Borrow() {
   const [openCreate, setOpenCreate] = useState(false);
-
-  // NEW: Approve dialog
   const [openApprove, setOpenApprove] = useState(false);
   const [selectedSlip, setSelectedSlip] = useState(null);
 
-  // TODO: Lấy từ auth/state thực tế
-  const librarianId = 1;
+  // RETURN dialogs state
+  const [openReturnSingle, setOpenReturnSingle] = useState(false);
+  const [selectedDetailForReturn, setSelectedDetailForReturn] = useState(null); // { slip, detail }
 
-  // Mặc định đứng ở tab "Chờ duyệt"
+  const [openReturnBulk, setOpenReturnBulk] = useState(false);
+  const [selectedSlipForBulkReturn, setSelectedSlipForBulkReturn] = useState(null);
+
   const [tab, setTab] = useState("PENDING");
   const [page, setPage] = useState(1);
   const [limit] = useState(10);
@@ -335,15 +359,12 @@ export default function Borrow() {
   const [rows, setRows] = useState([]);
   const [totalPages, setTotalPages] = useState(1);
 
-  // Filters
   const [searchQuery, setSearchQuery] = useState("");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
 
-  // cache tiêu đề tài liệu cho các chi tiết PENDING
   const [titleCache, setTitleCache] = useState(() => new Map());
 
-  // BE nhận đúng key theo tab
   const apiStatus = useMemo(() => tab, [tab]);
 
   const load = async () => {
@@ -352,7 +373,7 @@ export default function Borrow() {
       const res = await fetchLoanSlips({
         page,
         limit,
-        status: apiStatus,        // 'PENDING'|'PENDING_PAYMENT'|'BORROWING'|'RETURNED'|'OVERDUE'
+        status: apiStatus,
         sortBy: "loanDate",
         sortDir: "DESC",
       });
@@ -362,7 +383,6 @@ export default function Borrow() {
       setTotalPages(res?.pagination?.totalPages || 1);
 
       if (apiStatus === "PENDING") {
-        // gom danh sách documentId cần tra cứu từ note
         const ids = new Set();
         for (const r of data) {
           for (const d of r.details || []) {
@@ -371,7 +391,7 @@ export default function Borrow() {
           }
         }
         if (ids.size) {
-          const newCache = new Map(titleCache); // giữ cache cũ
+          const newCache = new Map(titleCache);
           await Promise.all(
             [...ids].map(async (id) => {
               if (!newCache.has(id)) {
@@ -402,15 +422,12 @@ export default function Borrow() {
   }, [tab]);
 
   useEffect(() => {
-    load(); // load khi đổi tab hoặc trang
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    load();
   }, [tab, page]);
 
-  // Filter rows client-side
   const filteredRows = useMemo(() => {
     let result = [...rows];
 
-    // Filter theo từ khóa (tên độc giả hoặc ID)
     if (searchQuery.trim()) {
       const kw = searchQuery.trim().toLowerCase();
       result = result.filter((r) => {
@@ -420,11 +437,10 @@ export default function Borrow() {
       });
     }
 
-    // Filter theo khoảng ngày (loanDate)
     if (startDate || endDate) {
       result = result.filter((r) => {
         if (!r.loanDate) return false;
-        const loanDateStr = String(r.loanDate).slice(0, 10); // YYYY-MM-DD
+        const loanDateStr = String(r.loanDate).slice(0, 10);
         if (startDate && loanDateStr < startDate) return false;
         if (endDate && loanDateStr > endDate) return false;
         return true;
@@ -435,6 +451,25 @@ export default function Borrow() {
   }, [rows, searchQuery, startDate, endDate]);
 
   const displayRows = filteredRows;
+
+  // Handlers for return dialogs
+  function handleOpenSingleReturn(slip, detail) {
+    setSelectedDetailForReturn({ slip, detail });
+    setOpenReturnSingle(true);
+  }
+  function handleCloseSingleReturn() {
+    setOpenReturnSingle(false);
+    setSelectedDetailForReturn(null);
+  }
+
+  function handleOpenBulkReturn(slip) {
+    setSelectedSlipForBulkReturn(slip);
+    setOpenReturnBulk(true);
+  }
+  function handleCloseBulkReturn() {
+    setOpenReturnBulk(false);
+    setSelectedSlipForBulkReturn(null);
+  }
 
   return (
     <Box sx={{ p: 3 }}>
@@ -509,7 +544,6 @@ export default function Borrow() {
 
             <Divider />
 
-            {/* Filters */}
             <Stack direction={{ xs: "column", md: "row" }} spacing={2} alignItems="center">
               <TextField
                 placeholder="Tìm theo tên độc giả, ID..."
@@ -609,7 +643,6 @@ export default function Borrow() {
                 <TableCell sx={{ fontWeight: 700, color: "#2D3748" }}>Hạn trả</TableCell>
                 <TableCell sx={{ fontWeight: 700, color: "#2D3748" }}>Trạng thái</TableCell>
                 <TableCell align="center" sx={{ fontWeight: 700, color: "#2D3748" }}>Số đầu mục</TableCell>
-                {/* NEW */}
                 <TableCell align="right" sx={{ fontWeight: 700, color: "#2D3748" }}>Thao tác</TableCell>
               </TableRow>
             </TableHead>
@@ -629,6 +662,8 @@ export default function Borrow() {
                     row={r}
                     titleCache={titleCache}
                     onApprove={(slip) => { setSelectedSlip(slip); setOpenApprove(true); }}
+                    onSingleReturn={(slip, detail) => handleOpenSingleReturn(slip, detail)}
+                    onBulkReturn={(slip) => handleOpenBulkReturn(slip)}
                   />
                 ))
               )}
@@ -667,13 +702,34 @@ export default function Borrow() {
         onCreated={() => { setOpenCreate(false); load(); }}
       />
 
-      {/* NEW: Dialog duyệt */}
+      {/* Dialog duyệt */}
       <ApproveReservationDialog
         open={openApprove}
         onClose={() => { setOpenApprove(false); setSelectedSlip(null); }}
         slip={selectedSlip}
-        librarianId={librarianId}
         onApproved={() => { setOpenApprove(false); setSelectedSlip(null); load(); }}
+      />
+
+      {/* Dialog Trả từng quyển */}
+      <ReturnSingleDialog
+        open={openReturnSingle}
+        onClose={() => handleCloseSingleReturn()}
+        loanDetail={selectedDetailForReturn?.detail}
+        onReturned={() => {
+          handleCloseSingleReturn();
+          load();
+        }}
+      />
+
+      {/* Dialog Trả toàn bộ phiếu */}
+      <ReturnBulkDialog
+        open={openReturnBulk}
+        onClose={() => handleCloseBulkReturn()}
+        slip={selectedSlipForBulkReturn}
+        onReturned={() => {
+          handleCloseBulkReturn();
+          load();
+        }}
       />
     </Box>
   );

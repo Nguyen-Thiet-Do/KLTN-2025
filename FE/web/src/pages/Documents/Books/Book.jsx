@@ -172,7 +172,6 @@ export default function Book() {
         status: (c.status || 'AVAILABLE').toUpperCase(),
         conditionNote: String(c.conditionNote ?? '100'),
         entryDate: c.entryDate || now,
-        deposit: null,
         __optimistic: true,
       }));
       return {
@@ -531,7 +530,6 @@ function FragmentRow({ book, isOpen, onToggle, onOpenDetail, copiesState, onOpen
                       <TableCell>Trạng thái</TableCell>
                       <TableCell>Tình trạng</TableCell>
                       <TableCell>Ngày nhập</TableCell>
-                      <TableCell align="right">Tiền cọc</TableCell>
                       <TableCell align="center" width={64}>Hành động</TableCell>
                     </TableRow>
                   </TableHead>
@@ -563,7 +561,6 @@ function FragmentRow({ book, isOpen, onToggle, onOpenDetail, copiesState, onOpen
                               </Stack>
                             </TableCell>
                             <TableCell>{dateStr}</TableCell>
-                            <TableCell align="right" >{formatVND(c.deposit)}</TableCell>
                             <TableCell align="center" width={64}>—</TableCell>
                           </TableRow>
                         );

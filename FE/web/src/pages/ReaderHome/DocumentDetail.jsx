@@ -152,9 +152,7 @@ export default function DocumentDetail() {
     const edition = doc?.book?.edition ?? "—";
     const pageCount = doc?.book?.pageCount ?? "—";
 
-    // deposit.*
-    const minDeposit = doc?.deposit?.minDeposit ?? null;
-    const maxDeposit = doc?.deposit?.maxDeposit ?? null;
+
 
     // copies
     const available = doc?.availableCopiesEffective ?? 0;
@@ -370,7 +368,6 @@ export default function DocumentDetail() {
                                         <InfoItem icon={<LocalLibraryIcon />} label="Thể loại" value={categoryName} />
                                         <InfoItem icon={<MenuBookIcon />} label="ISBN" value={isbn} />
                                         <InfoItem icon={<CalendarIcon />} label="Giá bìa" value={fmtVND(doc.coverPrice)} />
-                                        <InfoItem icon={<LibraryIcon />} label="Tiền cọc" value={`${fmtVND(minDeposit)} – ${fmtVND(maxDeposit)}`} />
                                     </Box>
 
                                     {/* Action Buttons */}
