@@ -7,9 +7,9 @@ const {
   getBooksBasic,
   getMagazinesBasic,
   getNewspapersBasic,
-  getDocumentCopiesWithDeposit,
-  getDocumentCopyWithDeposit,
-  getDocumentCopyWithDepositAndDoc,
+  getDocumentCopies,
+  getDocumentCopy,
+  getDocumentCopyAndDoc,
   createBook,
   createMagazine,
   createNewspaper,
@@ -105,7 +105,7 @@ async function getCopiesWithDepositCtrl(req, res) {
     }
 
     const { status } = req.query; // optional
-    const data = await getDocumentCopiesWithDeposit(documentId, { status });
+    const data = await getDocumentCopies(documentId, { status });
     if (!data) {
       return res.status(404).json({ message: 'Không tìm thấy tài liệu hoặc đã bị xoá' });
     }
@@ -249,13 +249,13 @@ async function getCopyWithDepositSingleCtrl(req, res) {
 
     if (!withDoc) {
       // Hành vi cũ: chỉ trả copy + deposit
-      const data = await getDocumentCopyWithDeposit(copyId);
+      const data = await getDocumentCopy(copyId);
       if (!data) return res.status(404).json({ message: 'Không tìm thấy bản sao hoặc đã bị xoá' });
       return res.status(200).json(data);
     }
 
     // Hành vi mới: trả cả document cơ bản
-    const data = await getDocumentCopyWithDepositAndDoc(copyId, { withAuthors, withSubtype });
+    const data = await getDocumentCopyAndDoc(copyId, { withAuthors, withSubtype });
     if (!data) return res.status(404).json({ message: 'Không tìm thấy bản sao hoặc đã bị xoá' });
     return res.status(200).json(data);
   } catch (err) {

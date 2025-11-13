@@ -42,7 +42,7 @@ const getAllCategories = async () => {
         return categories.map((c) => ({
             categoryId: c.categoryId,
             name: c.name,
-            deposit_rate: c.deposit_rate,
+            
         }));
     }
     catch (error) {

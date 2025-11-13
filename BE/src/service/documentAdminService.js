@@ -65,15 +65,6 @@ function toNumberOrNull(x) {
   return Number.isNaN(v) ? null : v;
 }
 
-function computeDeposit({ coverPrice, depositRate, qualityPercent }) {
-  const cp = Number(coverPrice) || 0;
-  const dr = Number(depositRate) || 0;
-  const q = Number(qualityPercent) || 0;
-  if (!(cp > 0 && dr > 0 && q > 0)) return null;
-  // làm tròn gần nhất để dễ hiển thị/thu tiền
-  return Math.round(cp * dr * (q / 100));
-}
-
 // -------------------- Authors helpers --------------------
 function normalizeAuthorsFromMaps(maps = []) {
   const arr = [...maps].sort((a, b) => (a.ord ?? 1) - (b.ord ?? 1));
@@ -414,27 +405,17 @@ const getMagazinesBasic = (opts = {}) => getBasicDocumentsByCategoryFast({ ...op
 const getNewspapersBasic = (opts = {}) => getBasicDocumentsByCategoryFast({ ...opts, documentType: 'newspaper' });
 
 /* ============================================================
- *                       COPIES + DEPOSIT
+ *                       COPIES (NO DEPOSIT)
  * ==========================================================*/
 
-async function getDocumentCopiesWithDeposit(documentId, { status } = {}) {
-  // 1) Lấy Document + Category (để có coverPrice, deposit_rate)
+async function getDocumentCopies(documentId, { status } = {}) {
   const doc = await Document.findOne({
     where: { documentId, deleted: false },
-    attributes: ['documentId', 'categoryId', 'coverPrice'],
-    include: [{
-      model: Category,
-      attributes: ['categoryId', 'name', 'deposit_rate'],
-      where: { deleted: false },
-      required: true
-    }]
+    attributes: ['documentId']
   });
   if (!doc) return null;
 
-  const coverPrice = Number(doc.coverPrice) || 0;
-  const depositRate = Number(doc.Category?.deposit_rate) || 0;
-
-  // 2) Lấy tất cả copies (không phân trang theo yêu cầu)
+  // Lấy tất cả copies (không phân trang theo yêu cầu)
   const whereCopies = { deleted: false, documentId };
   if (status) whereCopies.status = status;
 
@@ -444,36 +425,9 @@ async function getDocumentCopiesWithDeposit(documentId, { status } = {}) {
     order: [['documentCopyId', 'ASC']]
   });
 
-  // 3) Tính cọc cho từng copy
-  const mapped = copies.map(c => {
-    const quality = toNumberOrNull(c.conditionNote); // “chất lượng” %
-    const deposit = computeDeposit({ coverPrice, depositRate, qualityPercent: quality });
-    return {
-      documentCopyId: c.documentCopyId,
-      barCode: c.barCode,
-      status: c.status,
-      conditionNote: c.conditionNote,
-      entryDate: c.entryDate,
-      deposit
-    };
-  });
-
-  // 4) Tổng hợp nhanh min/max/avg (chỉ tính các copy có deposit hợp lệ)
-  const deposits = mapped.map(x => x.deposit).filter(v => typeof v === 'number' && v >= 0);
-  const summary = deposits.length
-    ? {
-      minDeposit: Math.min(...deposits),
-      maxDeposit: Math.max(...deposits),
-      avgDeposit: Math.round(deposits.reduce((a, b) => a + b, 0) / deposits.length)
-    }
-    : { minDeposit: null, maxDeposit: null, avgDeposit: null };
-
   return {
     documentId: doc.documentId,
-    coverPrice,
-    depositRate,
-    copies: mapped,
-    summary
+    copies
   };
 }
 
@@ -601,7 +555,7 @@ async function ensureCoverAndEbookUrls({ coverFile, ebookFile, coverUrl, ebookVi
 /** ===== Copies helpers ===== */
 function normalizeCopyInput(x = {}, idx = 0) {
   const status = (x.status || 'available').trim();
-  const conditionNote = x.conditionNote != null ? String(x.conditionNote).trim() : null; // ví dụ "100"
+  const conditionNote = x.conditionNote != null ? String(x.conditionNote).trim() : null;
   const entryDate = x.entryDate ? new Date(x.entryDate) : new Date();
   const barCode = x.barCode ? String(x.barCode).trim() : null;
   return { barCode, status, conditionNote, entryDate, _idx: idx };
@@ -723,9 +677,9 @@ async function createBook({
     const full = await Document.findOne({
       where: { documentId: doc.documentId },
       attributes: [
-        'documentId','categoryId','publisherId','title','language',
-        'publicationYear','coverPrice','coverPhoto','ebookUrl','numberOfCopy',
-        'description','shelfLocation'
+        'documentId', 'categoryId', 'publisherId', 'title', 'language',
+        'publicationYear', 'coverPrice', 'coverPhoto', 'ebookUrl', 'numberOfCopy',
+        'description', 'shelfLocation'
       ],
       include: [
         { model: Category, attributes: ['categoryId', 'name'] },
@@ -812,9 +766,9 @@ async function createMagazine({
     const full = await Document.findOne({
       where: { documentId: doc.documentId },
       attributes: [
-        'documentId','categoryId','publisherId','title','language',
-        'publicationYear','coverPrice','coverPhoto','ebookUrl','numberOfCopy',
-        'description','shelfLocation'
+        'documentId', 'categoryId', 'publisherId', 'title', 'language',
+        'publicationYear', 'coverPrice', 'coverPhoto', 'ebookUrl', 'numberOfCopy',
+        'description', 'shelfLocation'
       ],
       include: [
         { model: Category, attributes: ['categoryId', 'name'] },
@@ -899,9 +853,9 @@ async function createNewspaper({
     const full = await Document.findOne({
       where: { documentId: doc.documentId },
       attributes: [
-        'documentId','categoryId','publisherId','title','language',
-        'publicationYear','coverPrice','coverPhoto','ebookUrl','numberOfCopy',
-        'description','shelfLocation'
+        'documentId', 'categoryId', 'publisherId', 'title', 'language',
+        'publicationYear', 'coverPrice', 'coverPhoto', 'ebookUrl', 'numberOfCopy',
+        'description', 'shelfLocation'
       ],
       include: [
         { model: Category, attributes: ['categoryId', 'name'] },
@@ -951,30 +905,13 @@ async function addCopies(documentId, copies = []) {
   });
 }
 
-async function getDocumentCopyWithDeposit(documentCopyId) {
+async function getDocumentCopy(documentCopyId) {
   const copy = await DocumentCopy.findOne({
     where: { documentCopyId, deleted: false },
-    attributes: ['documentCopyId', 'documentId', 'barCode', 'status', 'conditionNote', 'entryDate'],
-    include: [{
-      model: Document,
-      attributes: ['documentId', 'categoryId', 'coverPrice'],
-      include: [{
-        model: Category,
-        attributes: ['categoryId', 'name', 'deposit_rate'],
-        where: { deleted: false },
-        required: true
-      }],
-      required: true
-    }]
+    attributes: ['documentCopyId', 'documentId', 'barCode', 'status', 'conditionNote', 'entryDate']
   });
 
   if (!copy) return null;
-
-  const coverPrice = Number(copy.Document?.coverPrice) || 0;
-  const depositRate = Number(copy.Document?.Category?.deposit_rate) || 0;
-
-  const quality = toNumberOrNull(copy.conditionNote); // ví dụ “100”
-  const deposit = computeDeposit({ coverPrice, depositRate, qualityPercent: quality });
 
   return {
     documentCopyId: copy.documentCopyId,
@@ -982,31 +919,25 @@ async function getDocumentCopyWithDeposit(documentCopyId) {
     barCode: copy.barCode,
     status: copy.status,
     conditionNote: copy.conditionNote,
-    entryDate: copy.entryDate,
-    coverPrice,
-    depositRate,
-    category: copy.Document?.Category
-      ? { categoryId: copy.Document.Category.categoryId, name: copy.Document.Category.name }
-      : null,
-    deposit
+    entryDate: copy.entryDate
   };
 }
 
-async function getDocumentCopyWithDepositAndDoc(documentCopyId, { withAuthors = true, withSubtype = true } = {}) {
-  // 1) Lấy bản sao và documentId (trả thêm 2 field)
+async function getDocumentCopyAndDoc(documentCopyId, { withAuthors = true, withSubtype = true } = {}) {
+  // 1) Lấy bản sao và documentId
   const copy = await DocumentCopy.findOne({
     where: { documentCopyId, deleted: false },
     attributes: ['documentCopyId', 'documentId', 'barCode', 'status', 'conditionNote', 'entryDate'],
     include: [{
       model: Document,
       attributes: [
-        'documentId','categoryId','publisherId','title','language',
-        'publicationYear','coverPrice','coverPhoto','ebookUrl','numberOfCopy',
-        'description','shelfLocation'
+        'documentId', 'categoryId', 'publisherId', 'title', 'language',
+        'publicationYear', 'coverPrice', 'coverPhoto', 'ebookUrl', 'numberOfCopy',
+        'description', 'shelfLocation'
       ],
       include: [{
         model: Category,
-        attributes: ['categoryId', 'name', 'deposit_rate'],
+        attributes: ['categoryId', 'name'],
         where: { deleted: false },
         required: true
       }, {
@@ -1019,21 +950,15 @@ async function getDocumentCopyWithDepositAndDoc(documentCopyId, { withAuthors = 
   });
   if (!copy) return null;
 
-  // 2) Tính tiền cọc
-  const coverPrice = Number(copy.Document?.coverPrice) || 0;
-  const depositRate = Number(copy.Document?.Category?.deposit_rate) || 0;
-  const quality = toNumberOrNull(copy.conditionNote);
-  const deposit = computeDeposit({ coverPrice, depositRate, qualityPercent: quality });
-
-  // 3) (Tuỳ chọn) lấy thêm authors, genres và subtype
+  // 2) (Tuỳ chọn) lấy thêm authors, genres và subtype
   let documentFull = null;
   if (withAuthors || withSubtype) {
     documentFull = await Document.findOne({
       where: { documentId: copy.documentId, deleted: false },
       attributes: [
-        'documentId','categoryId','publisherId','title','language',
-        'publicationYear','coverPrice','coverPhoto','ebookUrl','numberOfCopy',
-        'description','shelfLocation'
+        'documentId', 'categoryId', 'publisherId', 'title', 'language',
+        'publicationYear', 'coverPrice', 'coverPhoto', 'ebookUrl', 'numberOfCopy',
+        'description', 'shelfLocation'
       ],
       include: [
         { model: Category, attributes: ['categoryId', 'name'], required: false },
@@ -1065,7 +990,7 @@ async function getDocumentCopyWithDepositAndDoc(documentCopyId, { withAuthors = 
 
   const documentBasic = mapItem(documentFull);
 
-  // 5) Trả kết quả
+  // 3) Trả kết quả
   return {
     copy: {
       documentCopyId: copy.documentCopyId,
@@ -1074,9 +999,6 @@ async function getDocumentCopyWithDepositAndDoc(documentCopyId, { withAuthors = 
       status: copy.status,
       conditionNote: copy.conditionNote,
       entryDate: copy.entryDate,
-      deposit,
-      coverPrice,
-      depositRate,
       category: copy.Document?.Category
         ? { categoryId: copy.Document.Category.categoryId, name: copy.Document.Category.name }
         : null
@@ -1236,9 +1158,9 @@ async function updateBook({
     const full = await Document.findOne({
       where: { documentId },
       attributes: [
-        'documentId','categoryId','publisherId','title','language',
-        'publicationYear','coverPrice','coverPhoto','ebookUrl','numberOfCopy',
-        'description','shelfLocation'
+        'documentId', 'categoryId', 'publisherId', 'title', 'language',
+        'publicationYear', 'coverPrice', 'coverPhoto', 'ebookUrl', 'numberOfCopy',
+        'description', 'shelfLocation'
       ],
       include: [
         { model: Category, attributes: ['categoryId', 'name'] },
@@ -1332,9 +1254,9 @@ async function updateMagazine({
     const full = await Document.findOne({
       where: { documentId },
       attributes: [
-        'documentId','categoryId','publisherId','title','language',
-        'publicationYear','coverPrice','coverPhoto','ebookUrl','numberOfCopy',
-        'description','shelfLocation'
+        'documentId', 'categoryId', 'publisherId', 'title', 'language',
+        'publicationYear', 'coverPrice', 'coverPhoto', 'ebookUrl', 'numberOfCopy',
+        'description', 'shelfLocation'
       ],
       include: [
         { model: Category, attributes: ['categoryId', 'name'] },
@@ -1428,9 +1350,9 @@ async function updateNewspaper({
     const full = await Document.findOne({
       where: { documentId },
       attributes: [
-        'documentId','categoryId','publisherId','title','language',
-        'publicationYear','coverPrice','coverPhoto','ebookUrl','numberOfCopy',
-        'description','shelfLocation'
+        'documentId', 'categoryId', 'publisherId', 'title', 'language',
+        'publicationYear', 'coverPrice', 'coverPhoto', 'ebookUrl', 'numberOfCopy',
+        'description', 'shelfLocation'
       ],
       include: [
         { model: Category, attributes: ['categoryId', 'name'] },
@@ -1671,20 +1593,20 @@ async function updateCopy(documentCopyId, {
       await copy.update(patch, { transaction: t });
     }
 
-    const data = await getDocumentCopyWithDeposit(copy.documentCopyId);
+    const data = await getDocumentCopy(copy.documentCopyId);
     return { ok: true, data };
   });
 }
 
 module.exports = {
-  // list & deposit
+  // list
   getBasicDocumentsByCategoryFast,
   getBooksBasic,
   getMagazinesBasic,
   getNewspapersBasic,
-  getDocumentCopiesWithDeposit,
-  getDocumentCopyWithDeposit,
-  getDocumentCopyWithDepositAndDoc,
+  getDocumentCopies,
+  getDocumentCopy,
+  getDocumentCopyAndDoc,
   // create & copies
   createBook,
   createMagazine,

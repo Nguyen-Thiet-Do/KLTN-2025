@@ -22,6 +22,10 @@ const Payment = require('./Payment');
 const Violation = require('./Violation');
 const Notification = require('./Notification');
 
+// NEW: Card models
+const CardType = require('./CardType');
+const MemberCard = require('./MemberCard');
+
 // Accounts & Roles
 Role.hasMany(Account, { foreignKey: 'roleId' });
 Account.belongsTo(Role, { foreignKey: 'roleId' });
@@ -117,6 +121,22 @@ Payment.belongsTo(Reader, { foreignKey: 'readerId' });
 Librarian.hasMany(Payment, { foreignKey: 'librarianId' });
 Payment.belongsTo(Librarian, { foreignKey: 'librarianId' });
 
+// ----------------- Card models relations -----------------
+
+// CardType <-> MemberCard
+CardType.hasMany(MemberCard, { foreignKey: 'cardTypeId', as: 'cards' });
+MemberCard.belongsTo(CardType, { foreignKey: 'cardTypeId', as: 'cardType' });
+
+// Reader <-> MemberCard
+// NOTE: Your system said 1 reader only has 1 card — using hasOne to reflect that.
+// If you ever want historical multiple cards, change to hasMany.
+Reader.hasOne(MemberCard, { foreignKey: 'readerId', as: 'memberCard' });
+MemberCard.belongsTo(Reader, { foreignKey: 'readerId', as: 'reader' });
+
+// MemberCard <-> Payments (relatedCardId)
+MemberCard.hasMany(Payment, { foreignKey: 'relatedCardId', as: 'payments' });
+Payment.belongsTo(MemberCard, { foreignKey: 'relatedCardId', as: 'card' });
+
 module.exports = {
   Account,
   Role,
@@ -140,7 +160,6 @@ module.exports = {
   Payment,
   Violation,
   Notification,
+  CardType,
+  MemberCard,
 };
-
-
-// test

@@ -12,8 +12,6 @@ const Librarian = sequelize.define('Librarian', {
   hireDate: { type: DataTypes.DATEONLY, allowNull: true, field: 'hireDate' },
   cccd: { type: DataTypes.STRING(20), allowNull: true, field: 'cccd' },
   address: { type: DataTypes.STRING(255), allowNull: true, field: 'address' },
-  basicSalary: { type: DataTypes.DECIMAL(12, 2), allowNull: true, field: 'basicSalary' },
-  salaryCoefficient: { type: DataTypes.DECIMAL(5, 2), allowNull: true, field: 'salaryCoefficient' },
   deleted: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false, field: 'deleted' },
   created_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW, field: 'created_at' },
   updated_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW, field: 'updated_at' },

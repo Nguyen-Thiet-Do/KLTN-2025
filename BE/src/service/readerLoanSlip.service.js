@@ -59,7 +59,6 @@ async function getMyLoanHistoryService(user, query) {
           'returnDate',
           'status',
           'fineAmount',
-          'depositAmount',
           'renewalCount',
           'note',
         ],

@@ -9,7 +9,7 @@ const {
   // thêm để tính "giữ chỗ mềm"
   LoanSlip, LoanDetail
 } = require('../model');
-const { Op, col, fn, where, literal  } = require('sequelize');
+const { Op, col, fn, where, literal } = require('sequelize');
 
 /* =============================================================================
  *                              CONSTANTS & LABELS
@@ -75,8 +75,9 @@ function buildCategoryWhere(documentType = 'all') {
 
 /**
  * Include cho danh sách tài liệu (LIST)
- * - Join Category (bắt buộc) để biết deposit_rate và xác thực loại hợp lệ
- * - Join DocumentCopy (tuỳ chọn) để tính tồn kho và tiền cọc
+ * - Join Category (bắt buộc) để biết tên và xác thực loại hợp lệ
+ * - Join DocumentCopy (tuỳ chọn) để tính tồn kho
+ * Lưu ý: đã loại bỏ các trường liên quan tới deposit.
  * @param {object} categoryWhere - where cho Category
  * @returns {Array} - Mảng include cho Sequelize
  */
@@ -84,7 +85,8 @@ function listIncludeForDocuments(categoryWhere) {
   return [
     {
       model: Category,
-      attributes: ['categoryId', 'name', 'deposit_rate'],
+      // chỉ lấy những trường cần cho list, bỏ deposit_rate
+      attributes: ['categoryId', 'name'],
       where: categoryWhere,
       required: true
     },
@@ -104,6 +106,7 @@ function listIncludeForDocuments(categoryWhere) {
  * - Join Category (bắt buộc)
  * - Join các subtype (Book/Magazine/Newspaper), Publisher (nullable)
  * - Join Copies, Authors (N-N), Genres (N-N)
+ * Lưu ý: đã loại bỏ deposit_rate khỏi Category attributes.
  * @param {object} categoryWhere - where cho Category
  * @returns {Array} - Mảng include cho Sequelize
  */
@@ -111,7 +114,8 @@ function detailInclude(categoryWhere) {
   return [
     {
       model: Category,
-      attributes: ['categoryId', 'name', 'deposit_rate', 'deleted'],
+      // bỏ deposit_rate khỏi attributes
+      attributes: ['categoryId', 'name', 'deleted'],
       where: categoryWhere,
       required: true
     },
@@ -154,25 +158,11 @@ function detailInclude(categoryWhere) {
 }
 
 /* =============================================================================
- *                       BUSINESS HELPERS (TÍNH CỌC / CHUẨN HOÁ)
+ *                       BUSINESS HELPERS (CHUẨN HOÁ)
  * ========================================================================== */
 function safeToNumber(x) {
   const v = parseFloat(x);
   return Number.isNaN(v) ? null : v;
-}
-
-function computeDepositStats(coverPrice = 0, depositRate = 0, copies = []) {
-  if (!(coverPrice > 0 && depositRate > 0)) return { minDeposit: null, maxDeposit: null };
-  const values = copies
-    .map(c => safeToNumber(c.conditionNote))
-    .filter(v => v !== null && v > 0)
-    .map(percent => coverPrice * depositRate * (percent / 100));
-
-  if (!values.length) return { minDeposit: null, maxDeposit: null };
-  return {
-    minDeposit: Math.round(Math.min(...values)),
-    maxDeposit: Math.round(Math.max(...values))
-  };
 }
 
 function normalizeCopies(copies = []) {
@@ -238,11 +228,9 @@ function countAvailableCopiesCaseInsensitive(copies = []) {
 function mapListItem(d) {
   const o = d.toJSON();
   const coverPrice = o.coverPrice || 0;
-  const depositRate = o.Category?.deposit_rate || 0;
   const copies = Array.isArray(o.copies) ? o.copies : [];
   // dùng case-insensitive
   const availableCopies = countAvailableCopiesCaseInsensitive(copies);
-  const { minDeposit, maxDeposit } = computeDepositStats(coverPrice, depositRate, copies);
 
   return {
     documentId: o.documentId,
@@ -251,9 +239,6 @@ function mapListItem(d) {
     coverPrice,
     categoryName: o.Category?.name,
     shelfLocation: o.shelfLocation,
-    depositRate,
-    minDeposit,
-    maxDeposit,
     totalCopies: copies.length,
     availableCopies,
     documentType: inferTypeFromCategoryName(o.Category?.name)
@@ -797,7 +782,7 @@ async function getSimilarSeed(documentId) {
     where: { documentId, deleted: false },
     attributes: ['documentId', 'categoryId', 'publisherId', 'language', 'shelfLocation'],
     include: [
-      { model: Category, attributes: ['categoryId', 'name', 'deposit_rate'], where: { deleted: false }, required: true },
+      { model: Category, attributes: ['categoryId', 'name'], where: { deleted: false }, required: true },
       { model: Author, as: 'authors', attributes: ['authorId'], through: { attributes: [], where: { deleted: false } }, where: { deleted: false }, required: false },
       { model: Genre, as: 'genres', attributes: ['genreId'], through: { attributes: [], where: { deleted: false } }, where: { deleted: false }, required: false }
     ]
@@ -982,7 +967,7 @@ const getAllDocumentsWithDepositInfo = async (
     const totalItems = await countDocuments(whereDoc, whereCat);
     const rows = await findDocuments(whereDoc, whereCat, { limit, offset });
 
-    // TÍNH availableCopiesEffective
+    // TÍNH availableCopiesEffective (giữ lại)
     const ids = rows.map(r => r.documentId);
     const pendingMap = await getPendingHoldsByDocumentIds(ids);
 
@@ -1022,12 +1007,10 @@ const getDocumentDetailWithDeposit = async (documentId) => {
     const documentType = inferTypeFromCategoryName(o.Category?.name);
 
     const coverPrice = o.coverPrice || 0;
-    const depositRate = o.Category?.deposit_rate || 0;
     const copies = Array.isArray(o.copies) ? o.copies : [];
     const availableCopies = countAvailableCopiesCaseInsensitive(copies);
-    const { minDeposit, maxDeposit } = computeDepositStats(coverPrice, depositRate, copies);
 
-    // TÍNH availableCopiesEffective cho detail
+    // TÍNH availableCopiesEffective cho detail (giữ lại)
     const pendingHolds = await getPendingHoldsByDocumentId(o.documentId);
     const availableCopiesEffective = Math.max(0, availableCopies - pendingHolds);
 
@@ -1054,8 +1037,7 @@ const getDocumentDetailWithDeposit = async (documentId) => {
 
       category: {
         categoryId: o.Category?.categoryId,
-        name: o.Category?.name,
-        depositRate
+        name: o.Category?.name
       },
       publisher,
 
@@ -1063,7 +1045,6 @@ const getDocumentDetailWithDeposit = async (documentId) => {
       magazine,
       newspaper,
 
-      deposit: { minDeposit, maxDeposit },
       authors: normalizeAuthors(o.authors || []),
       genres: normalizeGenres(o.genres || []),
       copies: normalizeCopies(copies),
