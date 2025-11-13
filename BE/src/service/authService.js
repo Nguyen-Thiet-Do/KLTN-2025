@@ -2,13 +2,19 @@
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcrypt");
 const sequelize = require("../config/database");
-const { Account, Reader, Librarian } = require("../model/index");
+
+const {
+  Account,
+  Reader,
+  Librarian,
+  MemberCard,
+  CardType,
+  LoanSlip,
+} = require("../model/index");
 
 // =============================
 // 🔐 TOKEN HANDLERS
 // =============================
-
-// Generate Access Token
 const generateAccessToken = (account) => {
   return jwt.sign(
     {
@@ -21,7 +27,6 @@ const generateAccessToken = (account) => {
   );
 };
 
-// Generate Refresh Token
 const generateRefreshToken = (account) => {
   return jwt.sign(
     {
@@ -45,19 +50,141 @@ const getFullProfile = async (accountId, roleId) => {
   let profileType = null;
 
   try {
+    // =================
+    // READER
+    // =================
     if (roleId === 3) {
       const reader = await Reader.findOne({ where: { accountId } });
       if (reader) {
         profileData = reader.toJSON();
         profileType = "reader";
+
+        // --- Lấy thẻ thành viên hiện tại (nếu có) ---
+        let memberCardData = null;
+        try {
+          // include CardType theo alias 'cardType' (như bạn khai trong model/index)
+          const memberCard = await MemberCard.findOne({
+            where: {
+              readerId: profileData.readerId,
+              status: "ACTIVE",
+              deleted: false,
+            },
+            include: [{ model: CardType, as: "cardType" }],
+            order: [["created_at", "DESC"]],
+          });
+
+          if (memberCard) {
+            const mc = memberCard.toJSON();
+            memberCardData = {
+              memberCardId: mc.memberCardId,
+              cardNumber: mc.cardNumber,
+              cardTypeId: mc.cardTypeId,
+              balance: mc.balance,
+              status: mc.status,
+              issueDate: mc.issueDate || mc.created_at,
+              expiryDate: mc.expiryDate || mc.expiry_date || null,
+              note: mc.note || null,
+              created_at: mc.created_at,
+              updated_at: mc.updated_at,
+              cardType: mc.cardType || null, // từ include
+            };
+          }
+        } catch (err) {
+          // Nếu include alias gây lỗi — fallback lấy đơn giản
+          console.warn("MemberCard include CardType failed:", err.message);
+          try {
+            const memberCard = await MemberCard.findOne({
+              where: {
+                readerId: profileData.readerId,
+                status: "ACTIVE",
+                deleted: false,
+              },
+              order: [["created_at", "DESC"]],
+            });
+            if (memberCard) {
+              const mc = memberCard.toJSON();
+              memberCardData = {
+                memberCardId: mc.memberCardId,
+                cardNumber: mc.cardNumber,
+                cardTypeId: mc.cardTypeId,
+                balance: mc.balance,
+                status: mc.status,
+                issueDate: mc.issueDate || mc.created_at,
+                expiryDate: mc.expiryDate || mc.expire_date || null,
+                note: mc.note || null,
+                created_at: mc.created_at,
+                updated_at: mc.updated_at,
+              };
+            }
+          } catch (e) {
+            console.warn("Fallback MemberCard findOne failed:", e.message);
+          }
+        }
+
+        // --- Đếm số phiếu mượn theo trạng thái ---
+        // pending = "PENDING"
+        // waitingPickup (chờ đến lấy) = "WAITING_FOR_PICKUP"
+        // borrowing = ["BORROWING","BORROWED","OVERDUE"]
+        // returned = "RETURNED"
+        const pendingCount = await LoanSlip.count({
+          where: {
+            readerId: profileData.readerId,
+            deleted: false,
+            status: "PENDING",
+          },
+        }).catch(() => 0);
+
+        const waitingPickupCount = await LoanSlip.count({
+          where: {
+            readerId: profileData.readerId,
+            deleted: false,
+            status: "WAITING_FOR_PICKUP",
+          },
+        }).catch(() => 0);
+
+        const borrowingStatuses = ["BORROWING", "BORROWED", "OVERDUE"];
+        const borrowingCount = await LoanSlip.count({
+          where: {
+            readerId: profileData.readerId,
+            deleted: false,
+            status: borrowingStatuses,
+          },
+        }).catch(() => 0);
+
+        const activeLoansCount = pendingCount + waitingPickupCount + borrowingCount;
+
+        const returnedCount = await LoanSlip.count({
+          where: {
+            readerId: profileData.readerId,
+            deleted: false,
+            status: "RETURNED",
+          },
+        }).catch(() => 0);
+
+        // Gắn thêm thông tin vào profile trả về
+        profileData = {
+          ...profileData,
+          memberCard: memberCardData,
+          loanCounts: {
+            pending: pendingCount,
+            waitingPickup: waitingPickupCount,
+            borrowing: borrowingCount,
+            activeTotal: activeLoansCount,
+          },
+          returnedCount,
+        };
       } else {
         console.warn(`⚠️ Không tìm thấy Reader cho accountId=${accountId}`);
       }
-    } else if (roleId === 2) {
+
+      // =================
+      // LIBRARIAN (role 2) hoặc ADMIN (role 1)
+      // =================
+    } else if (roleId === 2 || roleId === 1) {
       const librarian = await Librarian.findOne({ where: { accountId } });
       if (librarian) {
         profileData = librarian.toJSON();
-        profileType = "librarian";
+        profileType = roleId === 1 ? "admin" : "librarian";
       } else {
         console.warn(`⚠️ Không tìm thấy Librarian cho accountId=${accountId}`);
       }
@@ -88,7 +215,7 @@ const loginService = async (account) => {
     { where: { accountId: account.accountId } }
   );
 
-  // Lấy thông tin đầy đủ (đã fix lỗi null)
+  // Lấy thông tin đầy đủ
   const fullProfile = await getFullProfile(account.accountId, account.roleId);
 
   return {
@@ -112,7 +239,7 @@ const refreshTokenService = async (refreshToken) => {
     throw new Error("INVALID_REFRESH_TOKEN");
   }
 
-  if (account.status !== "active") {
+  if (account.status !== "active" && account.status !== "ACTIVE") {
     throw new Error("INACTIVE_ACCOUNT");
   }
 

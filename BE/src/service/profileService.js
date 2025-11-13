@@ -1,9 +1,10 @@
 // src/services/reader.service.js
-const { Reader, Account } = require("../model");
+const { Reader, Account, MemberCard, CardType, LoanSlip } = require("../model");
 const { Op } = require("sequelize");
 
 /**
  * LẤY THÔNG TIN ĐỘC GIẢ THEO ACCOUNT ID (bao gồm cả Account)
+ * Bổ sung: memberCard, loanCounts (pending / waitingPickup / borrowing / activeTotal), returnedCount
  */
 const getReaderByAccountId = async (accountId) => {
   try {
@@ -12,9 +13,21 @@ const getReaderByAccountId = async (accountId) => {
       include: [
         {
           model: Account,
-          // dùng defaultScope của Account để tự loại passwordHash/refresh_token
-          // nếu muốn lấy tất cả cột thì dùng scope: 'withSecrets' (không khuyến nghị)
           required: true,
+        },
+        // include memberCard cùng cardType (nếu có)
+        {
+          model: MemberCard,
+          as: "memberCard",
+          required: false,
+          where: { deleted: false },
+          include: [
+            {
+              model: CardType,
+              as: "cardType",
+              required: false,
+            },
+          ],
         },
       ],
     });
@@ -24,7 +37,52 @@ const getReaderByAccountId = async (accountId) => {
     // Chuyển về object thuần
     const r = reader.get({ plain: true });
 
-    // Trả về dạng gộp + nested
+    // --- Tính thống kê phiếu mượn ---
+    // Các trạng thái dùng mặc định — nếu DB của bạn dùng tên khác hãy sửa ở đây
+    const BORROWING_STATUSES = ["BORROWING", "BORROWED", "OVERDUE"];
+
+    const [
+      pendingCount,
+      waitingPickupCount,
+      borrowingCount,
+      returnedCount,
+    ] = await Promise.all([
+      LoanSlip.count({
+        where: {
+          readerId: r.readerId,
+          deleted: false,
+          status: "PENDING",
+        },
+      }).catch(() => 0),
+
+      LoanSlip.count({
+        where: {
+          readerId: r.readerId,
+          deleted: false,
+          status: "WAITING_FOR_PICKUP",
+        },
+      }).catch(() => 0),
+
+      LoanSlip.count({
+        where: {
+          readerId: r.readerId,
+          deleted: false,
+          status: BORROWING_STATUSES,
+        },
+      }).catch(() => 0),
+
+      LoanSlip.count({
+        where: {
+          readerId: r.readerId,
+          deleted: false,
+          status: "RETURNED",
+        },
+      }).catch(() => 0),
+    ]);
+
+    const activeTotal = Number(pendingCount) + Number(waitingPickupCount) + Number(borrowingCount);
+
+    // --- Build response (giữ các trường cũ, thêm mới) ---
     return {
       // ------- Reader fields -------
       readerId: r.readerId,
@@ -35,7 +93,7 @@ const getReaderByAccountId = async (accountId) => {
       gender: r.gender,
       cccd: r.cccd,
       address: r.address,
-      totolBorrow: r.totolBorrow,
+      totalBorrow: r.totalBorrow ?? r.totolBorrow ?? 0,
       note: r.note,
       deleted: r.deleted,
       created_at: r.created_at,
@@ -51,6 +109,20 @@ const getReaderByAccountId = async (accountId) => {
 
       // ------- Nested Account object (nếu cần dùng nhóm) -------
       account: r.Account ?? null,
+
+      // ------- Member card (nếu có) -------
+      memberCard: r.memberCard ?? null, // đã include cardType nếu có
+
+      // ------- Loan counts -------
+      loanCounts: {
+        pending: Number(pendingCount) || 0,
+        waitingPickup: Number(waitingPickupCount) || 0,
+        borrowing: Number(borrowingCount) || 0,
+        activeTotal: Number(activeTotal) || 0,
+      },
+
+      // ------- Returned count -------
+      returnedCount: Number(returnedCount) || 0,
     };
   } catch (error) {
     console.error("❌ Lỗi getReaderByAccountId:", error);
@@ -60,11 +132,9 @@ const getReaderByAccountId = async (accountId) => {
 
 /**
  * CẬP NHẬT THÔNG TIN ĐỘC GIẢ THEO ACCOUNT ID
- * - Chỉ sửa bảng Readers (được phép chỉnh): fullName, gender, dateOfBirth, address, cccd, note
- * - KHÔNG cập nhật bảng Account
+ * - Chỉ sửa bảng Readers (được phép chỉnh)
  */
 const updateReaderByAccountId = async (accountId, data) => {
-  // Whitelist các trường Reader được phép sửa
   const ALLOWED_FIELDS = ["fullName", "gender", "dateOfBirth", "address", "cccd", "note"];
 
   try {
@@ -74,7 +144,6 @@ const updateReaderByAccountId = async (accountId, data) => {
 
     if (!reader) return null;
 
-    // Lọc dữ liệu theo whitelist, bỏ qua undefined
     const patch = {};
     for (const key of ALLOWED_FIELDS) {
       if (Object.prototype.hasOwnProperty.call(data, key) && data[key] !== undefined) {
@@ -82,15 +151,12 @@ const updateReaderByAccountId = async (accountId, data) => {
       }
     }
 
-    // Không có gì để cập nhật
     if (Object.keys(patch).length === 0) {
-      // Trả về hiện trạng
       return await getReaderByAccountId(accountId);
     }
 
     await reader.update(patch);
 
-    // Trả về thông tin mới nhất (bao gồm cả Account để FE hiển thị đồng bộ)
     return await getReaderByAccountId(accountId);
   } catch (error) {
     console.error("❌ Lỗi updateReaderByAccountId:", error);

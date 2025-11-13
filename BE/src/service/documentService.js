@@ -93,7 +93,7 @@ function listIncludeForDocuments(categoryWhere) {
     {
       model: DocumentCopy,
       as: 'copies',
-      attributes: ['documentCopyId', 'conditionNote', 'status'],
+      attributes: ['documentCopyId', 'conditionNote', 'status', 'numberBorrow'],
       where: { deleted: false },
       required: false,
       separate: true
@@ -126,7 +126,7 @@ function detailInclude(categoryWhere) {
     {
       model: DocumentCopy,
       as: 'copies',
-      attributes: ['documentCopyId', 'barCode', 'status', 'conditionNote', 'entryDate', 'deleted'],
+      attributes: ['documentCopyId', 'barCode', 'status', 'conditionNote', 'entryDate', 'deleted', 'numberBorrow'],
       where: { deleted: false },
       required: false
     },
@@ -171,7 +171,8 @@ function normalizeCopies(copies = []) {
     barCode: c.barCode,
     status: c.status,
     conditionNote: c.conditionNote,
-    entryDate: c.entryDate
+    entryDate: c.entryDate,
+    numberBorrow: c.numberBorrow
   }));
 }
 
@@ -225,12 +226,41 @@ function countAvailableCopiesCaseInsensitive(copies = []) {
   return n;
 }
 
+/**
+ * MỚI: Đếm số bản "còn có thể mượn"
+ * Hiện tại định nghĩa = status === 'AVAILABLE' (case-insensitive).
+ * Nếu muốn thay logic (ví dụ cho ON_SHELF), chỉnh hàm này.
+ */
+function countBorrowableCopiesCaseInsensitive(copies = []) {
+  let n = 0;
+  for (const c of copies) {
+    if (toUPPER(c.status) === 'AVAILABLE') n += 1;
+  }
+  return n;
+}
+
+/**
+ * MỚI: Tổng số lượt đã mượn của các bản sao (tổng numberBorrow trên các copies)
+ */
+function totalNumberBorrowFromCopies(copies = []) {
+  let s = 0;
+  for (const c of copies) {
+    const v = safeToNumber(c.numberBorrow);
+    s += (Number.isFinite(v) ? v : 0);
+  }
+  return s;
+}
+
 function mapListItem(d) {
   const o = d.toJSON();
   const coverPrice = o.coverPrice || 0;
   const copies = Array.isArray(o.copies) ? o.copies : [];
   // dùng case-insensitive
   const availableCopies = countAvailableCopiesCaseInsensitive(copies);
+
+  // --- MỚI: tổng lượt mượn và số bản có thể mượn ---
+  const borrowableCopies = countBorrowableCopiesCaseInsensitive(copies);
+  const totalBorrow = totalNumberBorrowFromCopies(copies);
 
   return {
     documentId: o.documentId,
@@ -241,6 +271,8 @@ function mapListItem(d) {
     shelfLocation: o.shelfLocation,
     totalCopies: copies.length,
     availableCopies,
+    borrowableCopies,       // số bản còn có thể mượn
+    totalBorrow,            // tổng lượt mượn của tất cả copies
     documentType: inferTypeFromCategoryName(o.Category?.name)
   };
 }
@@ -1022,6 +1054,10 @@ const getDocumentDetailWithDeposit = async (documentId) => {
       note: o.Publisher.note ?? null
     } : null;
 
+    // --- MỚI: tính borrowableCopies và totalBorrow cho detail ---
+    const borrowableCopies = countBorrowableCopiesCaseInsensitive(copies);
+    const totalBorrow = totalNumberBorrowFromCopies(copies);
+
     return {
       documentId: o.documentId,
       documentType,
@@ -1052,7 +1088,11 @@ const getDocumentDetailWithDeposit = async (documentId) => {
 
       // Số liệu kho
       availableCopies,               // AVAILABLE (case-insensitive)
-      availableCopiesEffective       // AVAILABLE - pending holds
+      availableCopiesEffective,      // AVAILABLE - pending holds
+
+      // --- MỚI: thông tin mượn ---
+      borrowableCopies,
+      totalBorrow
     };
   } catch (error) {
     console.error('Error in getDocumentDetailWithDeposit:', error);
@@ -1216,9 +1256,15 @@ async function getPopularDocuments({ page = 1, limit = 10, documentType = 'all' 
     const holds = pendingMap.get(o.documentId) || 0;
     const effective = available - holds;
 
+    // totalBorrow từ SQL rankRows (ổn định hơn khi DB giàu dữ liệu)
+    const totalBorrowSql = Number(r.get('totalBorrow') || 0);
+
+    const base = mapListItemWithEffective(row, effective);
+
+    // Ghi đè/ổn định totalBorrow với giá trị SQL (nếu bạn muốn luôn dùng tổng từ copies, có thể đổi)
     return {
-      ...mapListItemWithEffective(row, effective),
-      totalBorrow: Number(r.get('totalBorrow') || 0)
+      ...base,
+      totalBorrow: totalBorrowSql
     };
   }).filter(Boolean);
 

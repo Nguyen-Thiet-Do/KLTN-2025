@@ -23,8 +23,6 @@ const getAllLibrarians = async () => {
       dateOfBirth: l.dateOfBirth,
       cccd: l.cccd || null,
       address: l.address || null,
-      basicSalary: l.basicSalary || null,
-      salaryCoefficient: l.salaryCoefficient || null,
       email: l.Account?.email || null,
       phoneNumber: l.Account?.phoneNumber || null,
       deleted: l.deleted || false,
@@ -63,7 +61,6 @@ const createLibrarian = async (data) => {
     phoneNumber,
     address,
     cccd,
-    basicSalary,
   } = data;
 
   if (!fullName || !email || !password)
@@ -99,7 +96,6 @@ const createLibrarian = async (data) => {
         dateOfBirth: dateOfBirth || null,
         address: address || null,
         cccd: cccd || null,
-        basicSalary: basicSalary || null,
       },
       { transaction }
     );
@@ -129,8 +125,6 @@ const updateLibrarian = async (id, data) => {
     phoneNumber,
     address,
     cccd,
-    basicSalary,
-    salaryCoefficient,
     note,
   } = data;
 
@@ -146,8 +140,6 @@ const updateLibrarian = async (id, data) => {
         dateOfBirth,
         address,
         cccd,
-        basicSalary,
-        salaryCoefficient,
         note,
       },
       { where: { librarianId: id }, transaction }
