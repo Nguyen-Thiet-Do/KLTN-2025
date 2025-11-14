@@ -55,8 +55,11 @@ configViewEngine(app);
 // ============================================================
 // MIDDLEWARE
 // ============================================================
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+const rawBodySaver = (req, res, buf, encoding) => {
+  if (buf && buf.length) req.rawBody = buf.toString(encoding || 'utf8');
+};
+app.use(express.json({ limit: '10mb', verify: rawBodySaver }));
+app.use(express.urlencoded({ extended: true, limit: '10mb', verify: rawBodySaver }));
 
 // Khởi tạo Passport
 app.use(passport.initialize());
