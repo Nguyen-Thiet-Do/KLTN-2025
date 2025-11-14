@@ -19,4 +19,15 @@ export const statisticApi = {
     }
     return res.data;
   },
+  async getCategory() {
+    const res = await api.get("/statistics/category");
+    if (!res.data?.success) throw new Error("Không lấy được thống kê danh mục");
+    return res.data.data;
+  },
+  async getTopBooks() {
+  const res = await api.get("/statistics/top-books");
+  if (!res.data?.success) throw new Error("Không lấy được top 5 sách");
+  return res.data.data;
+}
+
 };
