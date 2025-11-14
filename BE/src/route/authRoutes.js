@@ -69,4 +69,8 @@ router.post(
   authController.loginReader
 );
 
+router.post('/register/init', authController.registerInit);
+router.post('/register/verify', authController.registerVerify);
+router.post('/register/complete', authController.registerComplete);
+
 module.exports = router;

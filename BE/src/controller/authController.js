@@ -265,6 +265,40 @@ const loginReader = async (req, res, next) => {
   })(req, res, next);
 };
 
+async function registerInit(req, res) {
+  try {
+    const { email } = req.body;
+    const r = await authService.sendRegistrationOtpService(email);
+    return res.json({ ok: true, message: r.message });
+  } catch (err) {
+    const code = err.statusCode || 500;
+    return res.status(code).json({ ok: false, message: err.message });
+  }
+}
+
+async function registerVerify(req, res) {
+  try {
+    const payload = req.body; // expect fullName,email,password,otp,...
+    const r = await authService.verifyOtpAndCreateAccountService(payload);
+    return res.status(201).json({ ok: true, data: r });
+  } catch (err) {
+    const code = err.statusCode || 500;
+    return res.status(code).json({ ok: false, message: err.message });
+  }
+}
+
+async function registerComplete(req, res) {
+  try {
+    const payload = req.body; // readerId, cardTypeId, action, extraInfo
+    const r = await authService.completeRegistrationService(payload);
+    return res.json({ ok: true, data: r });
+  } catch (err) {
+    const code = err.statusCode || 500;
+    return res.status(code).json({ ok: false, message: err.message });
+  }
+}
+
+
 // ============================================================
 // ✅ EXPORT CÁC HÀM
 // ============================================================
@@ -275,4 +309,7 @@ module.exports = {
   getProfile,
   registerReader,
   loginReader,
+  registerInit, 
+  registerVerify, 
+  registerComplete
 };

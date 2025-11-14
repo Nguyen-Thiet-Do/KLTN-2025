@@ -2,6 +2,9 @@
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcrypt");
 const sequelize = require("../config/database");
+const { generateRandomCode, generateCardNumber } = require('../utils/helpers'); // ensure exists
+const mailService = require('./mailService'); // ensure exists
+const payosService = require('./payosService'); // ensure exists
 
 const {
   Account,
@@ -10,6 +13,7 @@ const {
   MemberCard,
   CardType,
   LoanSlip,
+  Payment,
 } = require("../model/index");
 
 // =============================
@@ -377,6 +381,183 @@ const registerReaderService = async (userData) => {
   }
 };
 
+
+
+// In-memory OTP store (dev only)
+const OTP_STORE = new Map();
+function _saveOtp(email, otp, ttl = 10 * 60 * 1000, meta = {}) {
+  const expiresAt = Date.now() + ttl;
+  OTP_STORE.set(email, { otp: String(otp), expiresAt, meta });
+}
+function _verifyOtp(email, otp) {
+  const row = OTP_STORE.get(email);
+  if (!row) return false;
+  if (Date.now() > row.expiresAt) { OTP_STORE.delete(email); return false; }
+  if (String(otp) !== String(row.otp)) return false;
+  OTP_STORE.delete(email);
+  return true;
+}
+
+/** sendRegistrationOtpService(email) */
+async function sendRegistrationOtpService(email) {
+  if (!email) throw Object.assign(new Error('MISSING_EMAIL'), { statusCode: 400 });
+  const existing = await Account.findOne({ where: { email } });
+  if (existing) throw Object.assign(new Error('EMAIL_EXISTS'), { statusCode: 409 });
+  const otp = generateRandomCode(6);
+  _saveOtp(email, otp);
+  await mailService.sendOtpEmail(email, otp);
+  return { ok: true, message: 'OTP_SENT' };
+}
+
+/** verifyOtpAndCreateAccountService(payload) */
+async function verifyOtpAndCreateAccountService(payload) {
+  const { email, otp, password, fullName, phoneNumber, dateOfBirth, gender, cccd, address } = payload;
+  if (!email || !otp || !password || !fullName) throw Object.assign(new Error('MISSING_FIELDS'), { statusCode: 400 });
+  if (!_verifyOtp(email, otp)) throw Object.assign(new Error('OTP_INVALID_OR_EXPIRED'), { statusCode: 400 });
+
+  const ex = await Account.findOne({ where: { email } });
+  if (ex) throw Object.assign(new Error('EMAIL_EXISTS'), { statusCode: 409 });
+  if (cccd) {
+    const er = await Reader.findOne({ where: { cccd } });
+    if (er) throw Object.assign(new Error('CCCD_EXISTS'), { statusCode: 409 });
+  }
+
+  const tx = await sequelize.transaction();
+  try {
+    const saltRounds = Number(process.env.BCRYPT_SALT_ROUNDS) || 10;
+    const passwordHash = await bcrypt.hash(password, saltRounds);
+
+    const account = await Account.create({
+      email,
+      phoneNumber: phoneNumber || null,
+      passwordHash,
+      status: 'active',
+      roleId: 3
+    }, { transaction: tx });
+
+    const reader = await Reader.create({
+      accountId: account.accountId,
+      roleId: 3,
+      fullName,
+      dateOfBirth: dateOfBirth || null,
+      gender: typeof gender !== 'undefined' ? gender : null,
+      cccd: cccd || null,
+      address: address || null,
+      totalBorrow: 0
+    }, { transaction: tx });
+
+    await tx.commit();
+
+    // return minimal info (do not modify existing token logic in your file)
+    return { account: { accountId: account.accountId, email: account.email }, reader: { readerId: reader.readerId, fullName: reader.fullName } };
+  } catch (err) {
+    await tx.rollback();
+    throw err;
+  }
+}
+
+/**
+ * completeRegistrationService({ readerId, cardTypeId, action='SKIP'|'PAY', extraInfo })
+ */
+async function completeRegistrationService({ readerId, cardTypeId, action = 'SKIP', extraInfo = {} }) {
+  if (!readerId || !cardTypeId) throw Object.assign(new Error('MISSING_FIELDS'), { statusCode: 400 });
+  const cardType = await CardType.findOne({ where: { cardTypeId, deleted: false } });
+  if (!cardType) throw Object.assign(new Error('CARD_TYPE_NOT_FOUND'), { statusCode: 404 });
+
+  if (action === 'SKIP' || Number(cardType.price) <= 0) {
+    const cardNumber = generateCardNumber();
+    const today = new Date();
+    const issueDate = today.toISOString().slice(0, 10);
+    const expiryDate = new Date(today.getTime() + (cardType.duration || 365) * 24 * 3600 * 1000).toISOString().slice(0, 10);
+    const mc = await MemberCard.create({
+      readerId,
+      cardNumber,
+      cardTypeId: cardType.cardTypeId,
+      balance: 0.0,
+      issueDate,
+      expiryDate,
+      status: 'ACTIVE',
+      note: 'created_via_registration_skip_or_free'
+    });
+    return { ok: true, free: true, memberCard: mc };
+  }
+
+  // Paid flow: create Payment PENDING and create PayOS link
+  const orderCode = `REG${Date.now()}-${readerId}`;
+  const payment = await Payment.create({
+    loanSlipId: null,
+    violationId: null,
+    readerId,
+    librarianId: Number(process.env.SYSTEM_LIBRARIAN_ID || 120401),
+    paymentType: 'CARD_PURCHASE',
+    amount: Number(cardType.price),
+    paymentMethod: 'PAYOS_QR',
+    paymentDate: null,
+    transactionCode: orderCode,
+    status: 'PENDING',
+    note: `cardType:${cardType.cardTypeId}`
+  });
+
+  const returnUrl = `${(process.env.APP_BASE_URL || '').replace(/\/$/, '')}/pay/return?orderCode=${encodeURIComponent(orderCode)}`;
+  const cancelUrl = `${(process.env.APP_BASE_URL || '').replace(/\/$/, '')}/pay/cancel?orderCode=${encodeURIComponent(orderCode)}`;
+
+  let payosResp;
+  try {
+    payosResp = await payosService.createPaymentLink({ orderCode, amount: Number(cardType.price), description: `Mua thẻ ${cardType.typeName}`, returnUrl, cancelUrl });
+  } catch (err) {
+    await payment.update({ status: 'FAILED', note: (payment.note || '') + '|payos_create_failed' });
+    throw Object.assign(new Error('PAYOS_CREATE_FAILED'), { statusCode: 500 });
+  }
+
+  const payosData = payosResp?.data || payosResp || {};
+  await payment.update({ note: (payment.note || '') + `|payos:${JSON.stringify({ paymentLinkId: payosData.paymentLinkId, qr: payosData.qr || payosData.deepLink || null })}` });
+
+  return { ok: true, paymentId: payment.paymentId, amount: payment.amount, payos: payosData };
+}
+
+/** finalizePaymentAndCreateMemberCard(paymentOrId) - used by webhook */
+async function finalizePaymentAndCreateMemberCard(paymentOrId) {
+  let payment = paymentOrId;
+  if (!payment.paymentId) payment = await Payment.findByPk(paymentOrId);
+  if (!payment) throw new Error('PAYMENT_NOT_FOUND');
+  if (payment.status === 'COMPLETED') return payment;
+
+  const note = payment.note || '';
+  const m = /cardType:(\d+)/.exec(note);
+  const cardTypeId = m ? Number(m[1]) : null;
+  if (!cardTypeId) {
+    await payment.update({ status: 'COMPLETED', note: note + '|no_cardType_found' });
+    return payment;
+  }
+
+  const existing = await MemberCard.findOne({ where: { readerId: payment.readerId, status: 'ACTIVE', deleted: false } });
+  if (existing) {
+    await payment.update({ status: 'COMPLETED', relatedCardId: existing.memberCardId });
+    return payment;
+  }
+
+  const cardType = await CardType.findByPk(cardTypeId);
+  const cardNumber = generateCardNumber();
+  const today = new Date();
+  const issueDate = today.toISOString().slice(0, 10);
+  const expiryDate = new Date(today.getTime() + (cardType.duration || 365) * 24 * 3600 * 1000).toISOString().slice(0, 10);
+
+  const card = await MemberCard.create({
+    readerId: payment.readerId,
+    cardNumber,
+    cardTypeId,
+    balance: 0.0,
+    issueDate,
+    expiryDate,
+    status: 'ACTIVE',
+    note: `created_via_payment_${payment.paymentId}`
+  });
+
+  await payment.update({ status: 'COMPLETED', relatedCardId: card.memberCardId });
+  return { payment, memberCard: card };
+}
+
+
 // =============================
 // EXPORT
 // =============================
@@ -386,4 +567,8 @@ module.exports = {
   logoutService,
   getFullProfile,
   registerReaderService,
+  sendRegistrationOtpService,
+  verifyOtpAndCreateAccountService,
+  completeRegistrationService,
+  finalizePaymentAndCreateMemberCard
 };

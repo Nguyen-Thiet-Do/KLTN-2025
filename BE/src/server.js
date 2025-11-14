@@ -22,6 +22,8 @@ const documentAdminRoutes = require('./route/documentAdminRoutes');
 const adminLoanSlipRoutes = require('./route/adminLoanSlip.routes');
 const readerLoanSlipRoutes = require('./route/readerLoanSlip.routes');
 const statisticRoutes = require('./route/statisticRoutes');
+const payosRoutes = require('./route/payos.routes');
+
 const app = express();
 const port = process.env.PORT || 8080;
 
@@ -80,6 +82,9 @@ app.use('/api/loans/admin', adminLoanSlipRoutes);
 app.use('/api/loans/reader', readerLoanSlipRoutes);
 
 app.use('/api/statistics', statisticRoutes);
+
+app.use('/api/payos', payosRoutes);  // API root: /api/payos/create  và /api/payos/webhook
+app.use('/pay', payosRoutes);
 
 
 // ============================================================

@@ -27,6 +27,7 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.914.0",
     "@aws-sdk/s3-request-presigner": "^3.914.0",
+    "axios": "^1.13.2",
     "bcrypt": "^6.0.0",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
@@ -35,6 +36,7 @@
     "jsonwebtoken": "^9.0.2",
     "multer": "^2.0.2",
     "mysql2": "^3.15.1",
+    "nodemailer": "^7.0.10",
     "passport": "^0.7.0",
     "passport-jwt": "^4.0.1",
     "passport-local": "^1.0.0",
