@@ -101,6 +101,24 @@ app.get('/health', (req, res) => {
     port: port
   });
 });
+// ============================================================
+// TEST MAILER
+// ============================================================
+const nodemailer = require('nodemailer');
+app.get("/test-mail", async (req, res) => {
+  try {
+    await transporter.sendMail({
+      from: process.env.MAIL_FROM,
+      to: "thietdo134@gmail.com",
+      subject: "Test SMTP",
+      text: "SMTP OK!"
+    });
+    res.send("OK");
+  } catch (e) {
+    console.error("SMTP ERROR:", e);
+    res.status(500).send(e);
+  }
+});
 
 // ============================================================
 // ERROR HANDLING
