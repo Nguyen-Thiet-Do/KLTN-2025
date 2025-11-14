@@ -518,24 +518,38 @@ async function completeRegistrationService({ readerId, cardTypeId, action = 'SKI
 /** finalizePaymentAndCreateMemberCard(paymentOrId) - used by webhook */
 async function finalizePaymentAndCreateMemberCard(paymentOrId) {
   let payment = paymentOrId;
-  if (!payment.paymentId) payment = await Payment.findByPk(paymentOrId);
+  if (!payment || !payment.paymentId) {
+    payment = await Payment.findByPk(paymentOrId);
+  }
   if (!payment) throw new Error('PAYMENT_NOT_FOUND');
-  if (payment.status === 'COMPLETED') return payment;
+
+  // if already completed, return (idempotent)
+  if (String(payment.status).toUpperCase() === 'COMPLETED' || String(payment.status).toUpperCase() === 'PAID') {
+    return payment;
+  }
 
   const note = payment.note || '';
   const m = /cardType:(\d+)/.exec(note);
   const cardTypeId = m ? Number(m[1]) : null;
+
+  // if no card type tracked in note, mark complete but warn
   if (!cardTypeId) {
     await payment.update({ status: 'COMPLETED', note: note + '|no_cardType_found' });
     return payment;
   }
 
-  const existing = await MemberCard.findOne({ where: { readerId: payment.readerId, status: 'ACTIVE', deleted: false } });
+  // check existing active member card for reader
+  const existing = await MemberCard.findOne({
+    where: { readerId: payment.readerId, status: 'ACTIVE', deleted: false }
+  });
+
   if (existing) {
-    await payment.update({ status: 'COMPLETED', relatedCardId: existing.memberCardId });
-    return payment;
+    const newNote = note + `|existing_card:${existing.memberCardId}`;
+    await payment.update({ status: 'COMPLETED', note: newNote });
+    return { payment: await Payment.findByPk(payment.paymentId), memberCard: existing };
   }
 
+  // create new member card
   const cardType = await CardType.findByPk(cardTypeId);
   const cardNumber = generateCardNumber();
   const today = new Date();
@@ -553,8 +567,10 @@ async function finalizePaymentAndCreateMemberCard(paymentOrId) {
     note: `created_via_payment_${payment.paymentId}`
   });
 
-  await payment.update({ status: 'COMPLETED', relatedCardId: card.memberCardId });
-  return { payment, memberCard: card };
+  const newNote = note + `|created_card:${card.memberCardId}`;
+  await payment.update({ status: 'COMPLETED', note: newNote });
+
+  return { payment: await Payment.findByPk(payment.paymentId), memberCard: card };
 }
 
 
