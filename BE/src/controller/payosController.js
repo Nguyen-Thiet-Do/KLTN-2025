@@ -25,118 +25,71 @@ async function webhookHandler(req, res) {
     try {
         console.log('--- PayOS Webhook received ---');
         console.log('Headers:', req.headers);
-        console.log('RawBody:', typeof req.rawBody === 'string' ? req.rawBody.slice(0, 4000) : req.rawBody);
-        console.log('Parsed body:', req.body);
+        console.log('Body:', req.body);
 
-        // Try signature from headers first
-        const signatureHeader =
-            req.headers['x-signature'] ||
-            req.headers['x-payos-signature'] ||
-            req.headers['x-hmac-signature'] ||
-            req.headers['signature'];
+        const webhookData = req.body;
 
-        // parsed body (if json parsed)
-        const parsed = req.body && Object.keys(req.body).length ? req.body : null;
-        if (!parsed && !req.rawBody) {
-            console.warn('Webhook: no parsed body and no rawBody');
-            return res.status(400).send('no payload');
+        // Verify webhook using PayOS SDK
+        const isValid = payosService.verifyPaymentWebhookData(webhookData);
+
+        if (!isValid) {
+            console.warn('❌ Invalid webhook signature');
+            return res.status(403).json({ error: 'invalid signature' });
         }
 
-        let data = null;
-        let signature = signatureHeader || null;
+        console.log('✅ Webhook signature valid');
 
-        if (parsed) {
-            if (parsed.data && parsed.signature) {
-                data = parsed.data;
-                signature = signature || parsed.signature;
-            } else {
-                // either direct data object or other wrapper
-                data = parsed;
-            }
-        }
-
-        // fallback parse rawBody if needed
-        if (!data && req.rawBody) {
-            try {
-                const rb = JSON.parse(req.rawBody);
-                data = rb.data || rb;
-                signature = signature || rb.signature;
-            } catch (e) {
-                console.warn('rawBody is not JSON or cannot parse');
-            }
-        }
-
-        if (!data) {
-            console.warn('Webhook: no data extracted from request');
-            return res.status(400).send('no payload');
-        }
-
-        if (!signature) {
-            console.warn('Webhook: no signature provided');
-            return res.status(400).send('no signature');
-        }
-
-        // verify signature: try both parsed data and parsedRaw.data if exists
-        let verified = false;
-        try {
-            // if rawBody contained wrapper with data, try using that
-            if (req.rawBody) {
-                try {
-                    const parsedRaw = JSON.parse(req.rawBody);
-                    if (parsedRaw && parsedRaw.data) {
-                        verified = payosService.verifyWebhookSignature(parsedRaw.data, signature);
-                    }
-                } catch (e) {
-                    // ignore parse error
-                }
-            }
-            if (!verified) verified = payosService.verifyWebhookSignature(data, signature);
-        } catch (e) {
-            console.error('Error during signature verification:', e);
-            verified = false;
-        }
-
-        if (!verified) {
-            console.warn('Invalid payos signature', { data: typeof data === 'object' ? JSON.stringify(data).slice(0, 1000) : data });
-            return res.status(403).send('invalid signature');
-        }
-
-        // find payment by orderCode or reference
-        const orderCode = data.orderCode || null;
-        const reference = data.reference || data.transactionId || null;
-        let payment = null;
-        if (orderCode) payment = await Payment.findOne({ where: { transactionCode: orderCode } });
-        if (!payment && reference) payment = await Payment.findOne({ where: { transactionCode: reference } });
-
+        // Extract data
+        const data = webhookData.data || webhookData;
+        const orderCode = data.orderCode;
         const code = data.code;
-        const success = (String(code) === '00') || data.success === true || (String(data.status || '').toUpperCase() === 'SUCCESS');
+        const desc = data.desc;
+
+        console.log('📦 Webhook data:', { orderCode, code, desc });
+
+        // Find payment
+        let payment = await Payment.findOne({
+            where: { transactionCode: String(orderCode) }
+        });
 
         if (!payment) {
-            console.warn('Webhook: payment not found for', { orderCode, reference });
-            return res.status(200).send('OK');
+            console.warn('⚠️ Payment not found for orderCode:', orderCode);
+            return res.status(200).json({ message: 'payment not found' });
         }
 
-        // idempotency
+        // Idempotency check
         if (payment.status === 'COMPLETED' || payment.status === 'PAID') {
-            console.log('Payment already processed', payment.paymentId);
-            return res.status(200).send('OK');
+            console.log('✅ Payment already processed:', payment.paymentId);
+            return res.status(200).json({ message: 'already processed' });
         }
 
-        if (success) {
-            await payment.update({ status: 'COMPLETED', transactionCode: reference || payment.transactionCode });
+        // code: "00" = success
+        const isSuccess = String(code) === '00';
+
+        if (isSuccess) {
+            console.log('✅ Payment successful, creating member card...');
+
+            await payment.update({
+                status: 'COMPLETED',
+                paymentDate: new Date()
+            });
+
             try {
                 await authService.finalizePaymentAndCreateMemberCard(payment);
+                console.log('✅ Member card created successfully');
             } catch (err) {
-                console.error('finalizePaymentAndCreateMemberCard error', err);
+                console.error('❌ Error creating member card:', err.message);
             }
-            return res.status(200).send('OK');
         } else {
-            await payment.update({ status: 'FAILED', transactionCode: reference || payment.transactionCode });
-            return res.status(200).send('OK');
+            console.log('❌ Payment failed with code:', code);
+            await payment.update({ status: 'FAILED' });
         }
+
+        return res.status(200).json({ message: 'OK' });
+
     } catch (err) {
-        console.error('payos webhook error', err);
-        return res.status(500).send('ERR');
+        console.error('❌ Webhook error:', err);
+        return res.status(500).json({ error: 'internal error' });
     }
 }
 

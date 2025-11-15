@@ -1,7 +1,18 @@
 // src/service/payosService.js
-const axios = require('axios');
+const PayOS = require('@payos/node');
 const { createHmac } = require('crypto');
 const cfg = require('../config/payosConfig');
+
+// Khởi tạo PayOS client
+const payos = new PayOS(
+    process.env.PAYOS_CLIENT_ID || cfg.clientId,
+    process.env.PAYOS_API_KEY || cfg.apiKey,
+    process.env.PAYOS_CHECKSUM_KEY || cfg.checksumKey
+);
+
+// ============================================
+// HELPER FUNCTIONS FOR WEBHOOK VERIFICATION
+// ============================================
 
 function deepSortObj(v) {
     if (Array.isArray(v)) return v.map(x => (x && typeof x === 'object') ? deepSortObj(x) : x);
@@ -35,10 +46,14 @@ function verifyWebhookSignature(data, signature) {
     return expected === signature;
 }
 
+// ============================================
+// CREATE PAYMENT LINK (Using Official SDK)
+// ============================================
+
 /**
- * Tạo payment link với PayOS
+ * Tạo payment link với PayOS SDK
  * @param {Object} params
- * @param {string|number} params.orderCode - Mã đơn hàng (số nguyên dương, tối đa 9 chữ số)
+ * @param {string|number} params.orderCode - Mã đơn hàng 
  * @param {number} params.amount - Số tiền (VNĐ)
  * @param {string} params.description - Mô tả giao dịch
  * @param {string} params.returnUrl - URL redirect khi thành công
@@ -46,16 +61,15 @@ function verifyWebhookSignature(data, signature) {
  */
 async function createPaymentLink({ orderCode, amount, description, returnUrl, cancelUrl }) {
     try {
-        // Validate inputs
+        // Validate
         if (!orderCode || !amount) {
             throw new Error('orderCode và amount là bắt buộc');
         }
 
-        // PayOS yêu cầu orderCode là số nguyên dương, tối đa 9 chữ số
+        // Convert orderCode to number (PayOS yêu cầu số nguyên)
         let numericOrderCode = orderCode;
         if (typeof orderCode === 'string') {
-            // Nếu orderCode là string có format "REG1234567890-123", chỉ lấy phần số
-            numericOrderCode = parseInt(orderCode.replace(/[^\d]/g, '').slice(-9));
+            numericOrderCode = parseInt(orderCode.replace(/[^\d]/g, ''));
         }
         numericOrderCode = Number(numericOrderCode);
 
@@ -63,67 +77,36 @@ async function createPaymentLink({ orderCode, amount, description, returnUrl, ca
             throw new Error('orderCode phải là số nguyên dương');
         }
 
-        // ✅ Payload theo chuẩn PayOS v2 - items là BẮT BUỘC
-        const payload = {
+        // PayOS SDK payload
+        const paymentData = {
             orderCode: numericOrderCode,
             amount: Number(amount),
             description: description || 'Thanh toán',
-            items: [
-                {
-                    name: description || 'Thanh toán',
-                    quantity: 1,
-                    price: Number(amount)
-                }
-            ],
             returnUrl: returnUrl || `${cfg.appBaseUrl}/pay/return`,
             cancelUrl: cancelUrl || `${cfg.appBaseUrl}/pay/cancel`
         };
 
-        console.log('📦 PayOS Request Payload:', JSON.stringify(payload, null, 2));
+        console.log('📦 Creating PayOS payment:', JSON.stringify(paymentData, null, 2));
 
-        // Tạo signature từ payload (KHÔNG bao gồm clientId)
-        const sigStr = buildSignatureString(payload);
-        console.log('🔐 Signature String:', sigStr);
+        // Gọi SDK - nó sẽ tự động xử lý signature và headers
+        const response = await payos.createPaymentLink(paymentData);
 
-        const signature = calcHmacSha256Hex(sigStr, process.env.PAYOS_CHECKSUM_KEY || cfg.checksumKey);
-        console.log('✍️ Signature:', signature);
+        console.log('✅ PayOS Response:', JSON.stringify(response, null, 2));
 
-        const url = `${process.env.PAYOS_API_BASE || cfg.apiBase}/v2/payment-requests`;
-        console.log('🌐 PayOS URL:', url);
-
-        // Headers theo docs PayOS
-        const headers = {
-            'Content-Type': 'application/json',
-            'x-client-id': process.env.PAYOS_CLIENT_ID || cfg.clientId,
-            'x-api-key': process.env.PAYOS_API_KEY || cfg.apiKey
-        };
-
-        console.log('📤 Sending request to PayOS...');
-
-        const res = await axios.post(url, payload, {
-            headers,
-            timeout: 15000
-        });
-
-        console.log('✅ PayOS Response:', JSON.stringify(res.data, null, 2));
-
-        return res.data;
+        return response;
 
     } catch (error) {
         console.error('❌ PayOS createPaymentLink Error:');
         console.error('Message:', error.message);
 
         if (error.response) {
-            console.error('Status:', error.response.status);
-            console.error('Data:', JSON.stringify(error.response.data, null, 2));
-            console.error('Headers:', error.response.headers);
-        } else if (error.request) {
-            console.error('No response received:', error.request);
+            console.error('Status:', error.response?.status);
+            console.error('Data:', error.response?.data);
         }
 
-        // Ném lỗi với thông tin chi tiết
-        const errorMsg = error.response?.data?.message
-            || error.response?.data?.error
+        // Ném lỗi với message rõ ràng
+        const errorMsg = error.response?.data?.desc
+            || error.response?.data?.message
             || error.message
             || 'PayOS API Error';
 
@@ -131,29 +114,70 @@ async function createPaymentLink({ orderCode, amount, description, returnUrl, ca
     }
 }
 
-async function inquiryPayment(paymentLinkId) {
+// ============================================
+// INQUIRY PAYMENT (Using Official SDK)
+// ============================================
+
+async function inquiryPayment(orderCode) {
     try {
-        const url = `${process.env.PAYOS_API_BASE || cfg.apiBase}/v2/payment-requests/${encodeURIComponent(paymentLinkId)}`;
+        console.log('🔍 Querying payment:', orderCode);
 
-        const res = await axios.get(url, {
-            headers: {
-                'x-client-id': process.env.PAYOS_CLIENT_ID || cfg.clientId,
-                'x-api-key': process.env.PAYOS_API_KEY || cfg.apiKey
-            },
-            timeout: 10000
-        });
+        const response = await payos.getPaymentLinkInformation(orderCode);
 
-        return res.data;
+        console.log('✅ Payment info:', JSON.stringify(response, null, 2));
+
+        return response;
     } catch (error) {
-        console.error('inquiryPayment error:', error.response?.data || error.message);
+        console.error('❌ inquiryPayment error:', error.message);
         throw error;
     }
 }
 
+// ============================================
+// CANCEL PAYMENT (Using Official SDK)
+// ============================================
+
+async function cancelPayment(orderCode, reason) {
+    try {
+        console.log('❌ Cancelling payment:', orderCode);
+
+        const response = await payos.cancelPaymentLink(orderCode, reason);
+
+        console.log('✅ Cancel response:', response);
+
+        return response;
+    } catch (error) {
+        console.error('❌ cancelPayment error:', error.message);
+        throw error;
+    }
+}
+
+// ============================================
+// VERIFY WEBHOOK (Using Official SDK)
+// ============================================
+
+function verifyPaymentWebhookData(webhookData) {
+    try {
+        const result = payos.verifyPaymentWebhookData(webhookData);
+        console.log('✅ Webhook verification:', result ? 'VALID' : 'INVALID');
+        return result;
+    } catch (error) {
+        console.error('❌ Webhook verification error:', error.message);
+        return false;
+    }
+}
+
 module.exports = {
-    buildSignatureString,
-    calcHmacSha256Hex,
-    verifyWebhookSignature,
+    // Core functions
     createPaymentLink,
-    inquiryPayment
+    inquiryPayment,
+    cancelPayment,
+
+    // Webhook verification
+    verifyWebhookSignature,
+    verifyPaymentWebhookData,
+
+    // Helper functions (for backward compatibility)
+    buildSignatureString,
+    calcHmacSha256Hex
 };
