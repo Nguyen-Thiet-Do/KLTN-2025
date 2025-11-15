@@ -1,6 +1,7 @@
 // src/service/adminLoanSlip.service.js
 const { Op } = require('sequelize');
 const sequelize = require('../config/database');
+const mailService = require('./mailService');
 
 const {
   LoanSlip,
@@ -482,7 +483,8 @@ async function approveReservationService(payload) {
     return m ? Number(m[1]) : null;
   };
 
-  return await sequelize.transaction(async (t) => {
+  // Thực hiện cập nhật trong transaction — chỉ DB thay đổi ở đây
+  const txResult = await sequelize.transaction(async (t) => {
     const slip = await LoanSlip.findByPk(Number(loanSlipId), { transaction: t, lock: t.LOCK.UPDATE });
     if (!slip) { const e = new Error('Không tìm thấy phiếu'); e.status = 404; throw e; }
 
@@ -502,8 +504,14 @@ async function approveReservationService(payload) {
       e.status = 400; throw e;
     }
 
+    // Lấy reader (chứa accountId) để kiểm tra thẻ & lấy account.email sau đó
+    const reader = await Reader.findByPk(slip.readerId, { transaction: t, lock: t.LOCK.UPDATE });
+    if (!reader) {
+      const e = new Error('Không tìm thấy độc giả');
+      e.status = 404; throw e;
+    }
+
     // Lấy memberCard (thẻ) của reader và từ đó lấy cardType
-    const reader = await Reader.findByPk(slip.readerId, { transaction: t });
     const memberCard = await MemberCard.findOne({
       where: { readerId: slip.readerId, deleted: false, status: 'ACTIVE' },
       order: [['issueDate', 'DESC']],
@@ -552,9 +560,11 @@ async function approveReservationService(payload) {
       groups.get(docId).push(d);
     }
 
+    // Chọn bản sao cho từng loanDetail (ưu tiên assignments nếu có)
     const chosenCopyIds = new Map(); // loanDetailId -> documentCopyId
 
     for (const [documentId, details] of groups.entries()) {
+      // preset (admin chỉ định cụ thể)
       const preset = details
         .filter(d => assignMap.has(d.loanDetailId))
         .map(d => ({ loanDetailId: d.loanDetailId, documentCopyId: assignMap.get(d.loanDetailId) }));
@@ -602,9 +612,8 @@ async function approveReservationService(payload) {
       }
     }
 
-    // Prefetch chosen copy condition info
-    const chosenIdsSet = new Set([...chosenCopyIds.values()]);
-    const chosenIds = [...chosenIdsSet];
+    // Prefetch chosen copies info
+    const chosenIds = Array.from(new Set(Array.from(chosenCopyIds.values()).map(Number)));
     const chosenCopies = chosenIds.length
       ? await DocumentCopy.findAll({
         where: { documentCopyId: chosenIds },
@@ -620,7 +629,6 @@ async function approveReservationService(payload) {
       const copyId = chosenCopyIds.get(d.loanDetailId);
       const cp = chosenCopyMap.get(Number(copyId));
       const overrideCond = condMap.get(d.loanDetailId);
-      // === CHỈNH: ưu tiên DocumentCopy.conditionNote ===
       const borrowCond = sanitizeBorrowCondition(
         cp?.conditionNote ?? overrideCond ?? cp?.conditionGrade ?? null
       );
@@ -649,14 +657,93 @@ async function approveReservationService(payload) {
       status: 'WAITING_FOR_PICKUP',
     }, { transaction: t });
 
+    // Lấy email từ account (nếu reader.accountId tồn tại) ngay trong transaction
+    let readerEmail = null;
+    try {
+      if (reader.accountId) {
+        const Account = require('../model').Account; // lấy model Account từ index models
+        const account = await Account.findByPk(reader.accountId, {
+          attributes: ['email'],
+          transaction: t,
+          lock: t.LOCK.UPDATE
+        });
+        readerEmail = account?.email || null;
+      }
+    } catch (err) {
+      // không phá transaction chỉ vì không fetch được email; ta trả null và xử lý bên ngoài
+      readerEmail = null;
+    }
+
+    // Trả về dữ liệu cần thiết để dùng ở bên ngoài transaction (không gọi mail ở đây)
     return {
-      message: 'Duyệt phiếu thành công. Phiếu đã chuyển sang WAITING_FOR_PICKUP (chờ độc giả đến lấy).',
       loanSlipId: slip.loanSlipId,
-      slipStatus: 'WAITING_FOR_PICKUP',
-      payment: null,
+      readerId: slip.readerId,
+      readerEmail,              // <-- trả về email nếu có
+      dueDate: newDueDate,
+      assignedCopyMap: Array.from(chosenCopyIds.entries()).map(([loanDetailId, documentCopyId]) => ({ loanDetailId, documentCopyId })),
     };
-  });
+  }); // end transaction
+
+  // --- SAU KHI TRANSACTION HOÀN TẤT: chuẩn bị và gửi email thông báo ---
+  try {
+    const readerEmail = txResult.readerEmail; // email lấy từ account (nếu có)
+    // Nếu không có email ở account, optional: fallback sang một email khác (ví dụ slip.contactEmail) hoặc admin
+    const finalEmail = readerEmail || process.env.ADMIN_NOTIFICATION_EMAIL || null;
+
+    if (finalEmail) {
+      // Lấy thông tin các LoanDetail vừa gán để hiển thị title + copyId
+      const loanDetails = await LoanDetail.findAll({
+        where: { loanSlipId: txResult.loanSlipId },
+        include: [
+          {
+            model: DocumentCopy,
+            attributes: ['documentCopyId'],
+            include: [{ model: Document, attributes: ['documentId', 'title'] }]
+          }
+        ]
+      });
+
+      const items = loanDetails.map(d => ({
+        loanDetailId: d.loanDetailId,
+        documentId: d.DocumentCopy?.Document?.documentId || null,
+        title: d.DocumentCopy?.Document?.title || null,
+        documentCopyId: d.documentCopyId || d.DocumentCopy?.documentCopyId || null
+      }));
+
+      // pickupDeadline = hôm nay + 3 ngày
+      const pickupDeadline = addDaysDateOnly(fmtToday(), 3);
+
+      console.log(`📤 Sending reservation approval email for slip=${txResult.loanSlipId} to=${finalEmail} (readerEmail=${readerEmail})`);
+      await mailService.sendReservationApprovedEmail(finalEmail, {
+        fullName: (await Reader.findByPk(txResult.readerId))?.fullName || 'Độc giả',
+        slipId: txResult.loanSlipId,
+        items,
+        pickupDeadline,
+        pickUpLocation: process.env.LIBRARY_ADDRESS || 'Thư viện Book Tech — Số 1, Đường ABC, Quận XYZ',
+        supportEmail: process.env.SUPPORT_EMAIL,
+        supportPhone: process.env.SUPPORT_PHONE,
+        libraryName: process.env.LIBRARY_NAME
+      });
+      console.log('✅ Reservation approval email sent to', finalEmail);
+      if (!readerEmail) {
+        console.warn(`⚠️ Email sent to fallback (${finalEmail}) because reader.account.email is missing for readerId=${txResult.readerId}`);
+      }
+    } else {
+      console.warn('⚠️ No email available to send reservation approval for loanSlipId', txResult.loanSlipId);
+    }
+  } catch (mailErr) {
+    console.error('❌ Failed to send reservation approval email for loanSlipId', txResult.loanSlipId, mailErr?.message || mailErr);
+    // Không throw — email thất bại không rollback transaction
+  }
+
+  return {
+    message: 'Duyệt phiếu thành công. Phiếu đã chuyển sang WAITING_FOR_PICKUP (chờ độc giả đến lấy).',
+    loanSlipId: txResult.loanSlipId,
+    slipStatus: 'WAITING_FOR_PICKUP',
+  };
 }
+
+
 
 /** ---------------------------------------------
  *  Lấy danh sách bản sao có thể mượn (AVAILABLE)

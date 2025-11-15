@@ -11,8 +11,10 @@ const {
   MemberCard,
   CardType,
   LoanSlip: LoanSlipModel,
+  Account
 } = require('../model');
 
+const mailService = require('./mailService'); // <-- thêm mailService
 const { getDocumentDetailWithDeposit } = require('./documentService'); // nếu bạn đã đổi tên, thay lại cho khớp
 
 /** Helpers: xử lý ngày (giống admin service) */
@@ -130,10 +132,10 @@ async function reserveLoanForReaderService(user, payload) {
       throw e;
     }
 
-    // Map account -> reader
+    // Map account -> reader (FIX: remove memberCardId, DB không có)
     const reader = await Reader.findOne({
       where: { accountId: user.accountId, deleted: false },
-      attributes: ['readerId', 'fullName', 'memberCardId'],
+      attributes: ['readerId', 'fullName', 'accountId'],
       transaction: t,
       lock: t.LOCK.UPDATE,
     });
@@ -143,7 +145,7 @@ async function reserveLoanForReaderService(user, payload) {
       throw e;
     }
 
-    // --- Chuẩn hoá items: KHÔNG quantity, KHÔNG CHO PHÉP TRÙNG ---
+    // Chuẩn hoá items
     const itemsIn = Array.isArray(payload?.items) ? payload.items : [];
     if (!itemsIn.length) {
       const e = new Error('Danh sách sách mượn trống');
@@ -163,7 +165,7 @@ async function reserveLoanForReaderService(user, payload) {
         throw e;
       }
       seen.add(id);
-      items.push({ documentId: id }); // luôn 1 bản
+      items.push({ documentId: id });
     }
 
     if (items.length === 0) {
@@ -172,7 +174,7 @@ async function reserveLoanForReaderService(user, payload) {
       throw e;
     }
 
-    // --- LẤY THẺ (MemberCard) CỦA ĐỘC GIẢ -> RỒI LẤY CardType ---
+    // LẤY THẺ QUA readerId
     const memberCard = await MemberCard.findOne({
       where: { readerId: reader.readerId, deleted: false, status: 'ACTIVE' },
       order: [['issueDate', 'DESC']],
@@ -182,19 +184,22 @@ async function reserveLoanForReaderService(user, payload) {
 
     if (!memberCard) {
       const e = new Error('Độc giả chưa có thẻ hội viên hợp lệ (MemberCard).');
-      e.status = 403; throw e;
+      e.status = 403;
+      throw e;
     }
 
-    // Kiểm expiry
+    // Check expiry
     if (memberCard.expiryDate) {
       if (!parseDateOnly(memberCard.expiryDate)) {
         const e = new Error('Ngày hết hạn trên thẻ không hợp lệ');
-        e.status = 403; throw e;
+        e.status = 403;
+        throw e;
       }
       const today = fmtToday();
       if (daysDiff(today, memberCard.expiryDate) < 0) {
         const e = new Error('Thẻ hội viên đã hết hạn, không được mượn.');
-        e.status = 403; throw e;
+        e.status = 403;
+        throw e;
       }
     }
 
@@ -202,19 +207,21 @@ async function reserveLoanForReaderService(user, payload) {
     const cardType = cardTypeId ? await CardType.findByPk(cardTypeId, { transaction: t }) : null;
 
     if (!cardType || Number(cardType.canBorrowHome) !== 1) {
-      const e = new Error('Loại thẻ độc giả hiện tại không cho phép mượn về (thẻ không hợp lệ hoặc không có quyền mượn)');
-      e.status = 403; throw e;
+      const e = new Error('Loại thẻ độc giả hiện tại không cho phép mượn về');
+      e.status = 403;
+      throw e;
     }
 
     const maxBorrowLimit = Number(cardType.maxBorrowLimit) || 0;
     const borrowDuration = Number(cardType.borrowDuration) || 0;
 
     if (maxBorrowLimit <= 0 || borrowDuration <= 0) {
-      const e = new Error('Loại thẻ này không có quyền mượn (maxBorrowLimit hoặc borrowDuration không hợp lệ)');
-      e.status = 403; throw e;
+      const e = new Error('Loại thẻ này không có quyền mượn');
+      e.status = 403;
+      throw e;
     }
 
-    // --- Kiểm tra quota & điều kiện độc giả (chi tiết) ---
+    // Snapshot quota
     const snap = await getReaderBorrowSnapshot(reader.readerId, t);
     const remaining = maxBorrowLimit - snap.activeCount;
     const requestedTotal = items.length;
@@ -242,10 +249,10 @@ async function reserveLoanForReaderService(user, payload) {
     }
 
     if (remaining <= 0 || requestedTotal > remaining) {
-      const e = new Error('Vượt quá hạn mức mượn');
+      const e = new Error('Vượt quá hạn mượn');
       e.status = 409;
       e.details = {
-        message: 'Vượt quá hạn mức mượn',
+        message: 'Vượt quá hạn mượn',
         breakdown: {
           pendingApprovalCount: snap.pendingApprovalCount,
           waitingForPickupCount: snap.waitingForPickupCount,
@@ -259,9 +266,8 @@ async function reserveLoanForReaderService(user, payload) {
       throw e;
     }
 
-    // Kiểm tra từng tài liệu (bỏ hoàn toàn logic deposit)
+    // Check từng tài liệu
     const detailPreview = [];
-
     for (const it of items) {
       const detail = await getDocumentDetailWithDeposit(it.documentId);
       if (!detail) {
@@ -270,7 +276,6 @@ async function reserveLoanForReaderService(user, payload) {
         throw e;
       }
 
-      // ====== SOFT-HOLD: kiểm tra tồn kho hiệu dụng (AVAILABLE - PENDING holds) ======
       const available = await DocumentCopy.count({
         where: { documentId: it.documentId, deleted: false, status: 'AVAILABLE' },
         transaction: t,
@@ -298,24 +303,23 @@ async function reserveLoanForReaderService(user, payload) {
         e.statusCode = 400;
         throw e;
       }
-      // ====== END SOFT-HOLD ======
 
       detailPreview.push({
         documentId: detail.documentId,
         title: detail.title,
-        quantity: 1, // luôn 1
+        quantity: 1
       });
     }
 
-    // Tạo LoanSlip ở trạng thái PENDING
+    // Tạo LoanSlip
     const slip = await LoanSlip.create(
       {
         readerId: reader.readerId,
-        librarianId: null, // sẽ set khi duyệt
+        librarianId: null,
         loanDate: new Date(),
-        dueDate: null, // sẽ set khi duyệt
-        status: 'PENDING', // chờ duyệt
-        borrowForm: 'RESERVATION', // kiểu đặt mượn
+        dueDate: null,
+        status: 'PENDING',
+        borrowForm: 'RESERVATION',
         addressForm: null,
         note: payload?.note || null,
         deleted: false,
@@ -323,23 +327,65 @@ async function reserveLoanForReaderService(user, payload) {
       { transaction: t }
     );
 
-    // Tạo LoanDetail: mỗi tài liệu 1 dòng (tag REQUEST_DOCUMENT_ID để soft-hold tiếp theo)
     for (const it of detailPreview) {
       await LoanDetail.create(
         {
           loanSlipId: slip.loanSlipId,
-          documentCopyId: null, // sẽ gán khi thủ thư duyệt
+          documentCopyId: null,
           returnDate: null,
           status: 'PENDING',
           fineAmount: 0,
           renewalCount: 0,
-          note: `REQUEST_DOCUMENT_ID=${it.documentId}`, // tag để tính pendingHolds
+          note: `REQUEST_DOCUMENT_ID=${it.documentId}`,
         },
         { transaction: t }
       );
     }
 
     await t.commit();
+
+    // Gửi email — background
+    setImmediate(async () => {
+      try {
+        let readerEmail = null;
+
+        try {
+          if (reader.accountId) {
+            const account = await Account.findByPk(reader.accountId);
+            if (account && account.email) readerEmail = account.email;
+          }
+        } catch { }
+
+        if (!readerEmail) {
+          const r2 = await Reader.findByPk(reader.readerId);
+          if (r2 && r2.accountId) {
+            const a2 = await Account.findByPk(r2.accountId);
+            if (a2 && a2.email) readerEmail = a2.email;
+          }
+        }
+
+        if (!readerEmail) {
+          console.warn('⚠️ Reader email not found — skipping reservation confirmation email.');
+          return;
+        }
+
+        const mailItems = detailPreview.map(d => ({ documentId: d.documentId, title: d.title }));
+        const mailData = {
+          fullName: reader.fullName || '',
+          slipId: slip.loanSlipId,
+          items: mailItems,
+          requestedTotal: detailPreview.length,
+          remainingAfterReserve: Math.max(0, (maxBorrowLimit - snap.activeCount) - detailPreview.length),
+          supportEmail: process.env.SUPPORT_EMAIL || 'support@booktechv2.net',
+          supportPhone: process.env.SUPPORT_PHONE || '0123-456-789',
+          year: new Date().getFullYear()
+        };
+
+        await mailService.sendReservationConfirmationEmail(readerEmail, mailData);
+      } catch (err) {
+        console.error('❌ Failed to send reservation email:', err.message || err);
+      }
+    });
 
     return {
       slip: {
@@ -363,5 +409,6 @@ async function reserveLoanForReaderService(user, payload) {
     throw e;
   }
 }
+
 
 module.exports = { reserveLoanForReaderService };

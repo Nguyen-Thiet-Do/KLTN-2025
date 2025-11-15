@@ -597,7 +597,7 @@ async function completeRegistrationService({ readerId, cardTypeId, action = 'SKI
     payosResp = await payosService.createPaymentLink({
       orderCode: orderCode,
       amount: Number(cardType.price),
-      description: `Mua thẻ ${cardType.cardTypeName || cardType.typeName || 'Membership'}`,
+      description: `Thanh toán thẻ thành viên`,
       returnUrl,
       cancelUrl,
       items: [{
@@ -645,6 +645,9 @@ async function completeRegistrationService({ readerId, cardTypeId, action = 'SKI
 
 // =============================
 // 💳 FINALIZE PAYMENT AND CREATE MEMBER CARD (FIXED)
+// =============================
+// =============================
+// 💳 FINALIZE PAYMENT AND CREATE MEMBER CARD (WITH EMAIL NOTIFICATION)
 // =============================
 async function finalizePaymentAndCreateMemberCard(paymentOrId) {
   try {
@@ -743,6 +746,65 @@ async function finalizePaymentAndCreateMemberCard(paymentOrId) {
 
     console.log('✅ Payment updated with card info');
 
+    // === Send confirmation email (best-effort: log errors but don't break flow) ===
+    try {
+      // Try to get reader and account info
+      let readerEmail = null;
+      let readerFullName = '';
+
+      const reader = await Reader.findByPk(card.readerId);
+      if (reader) {
+        readerFullName = reader.fullName || '';
+        if (reader.accountId) {
+          const account = await Account.findByPk(reader.accountId);
+          if (account && account.email) {
+            readerEmail = account.email;
+          }
+        }
+      }
+
+      // Fallback: if readerEmail not found, try payment.readerId (in case different)
+      if (!readerEmail && payment.readerId) {
+        const r2 = await Reader.findByPk(payment.readerId);
+        if (r2) {
+          if (!readerFullName) readerFullName = r2.fullName || '';
+          if (r2.accountId) {
+            const a2 = await Account.findByPk(r2.accountId);
+            if (a2 && a2.email) readerEmail = a2.email;
+          }
+        }
+      }
+
+      if (readerEmail) {
+        // prepare mail data
+        const mailData = {
+          fullName: readerFullName || '',
+          cardNumber: card.cardNumber,
+          cardTypeName: cardType.cardTypeName || cardType.typeName || '',
+          amount: Number(payment.amount) || 0,
+          issueDate: card.issueDate,
+          expiryDate: card.expiryDate,
+          supportEmail: process.env.SUPPORT_EMAIL || 'support@booktechv2.net',
+          supportPhone: process.env.SUPPORT_PHONE || '0123-456-789',
+          year: new Date().getFullYear()
+        };
+
+        try {
+          // mailService.sendMemberCardIssuedEmail should be available (ensure imported)
+          await mailService.sendMemberCardIssuedEmail(readerEmail, mailData);
+          console.log('✅ Confirmation email sent to', readerEmail);
+        } catch (mailErr) {
+          console.error('❌ Failed to send confirmation email:', mailErr?.message || mailErr);
+          // Do NOT throw — keep flow intact
+        }
+      } else {
+        console.warn('⚠️ No reader email found — skipping member card confirmation email.');
+      }
+    } catch (prepareMailErr) {
+      console.error('❌ Error while preparing/sending member card email:', prepareMailErr?.message || prepareMailErr);
+      // Do not throw
+    }
+
     // ✅ Return fresh data
     const updatedPayment = await Payment.findByPk(payment.paymentId);
 
@@ -760,6 +822,7 @@ async function finalizePaymentAndCreateMemberCard(paymentOrId) {
     throw error;
   }
 }
+
 
 // =============================
 // EXPORT

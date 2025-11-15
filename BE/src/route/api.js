@@ -993,7 +993,7 @@ routeApi.get('/', (req, res) => {
           {
             method: 'POST',
             path: '/api/loans/admin/loans',
-            description: 'Tạo phiếu mượn ở trạng thái chờ thanh toán (PENDING_PAYMENT)',
+            description: 'Tạo phiếu mượn ở trạng thái chờ đến lấy (WAITING_FOR_PICKUP)',
             auth: true,
             role: 'Admin (roleId = 1), Librarian (roleId = 2)',
             body: {
@@ -1001,75 +1001,12 @@ routeApi.get('/', (req, res) => {
               librarianId: 'number (required)',
               loanDate: "date (optional, 'YYYY-MM-DD')",
               dueDate: "date (optional, 'YYYY-MM-DD')",
-              items: 'array (required) — [{ documentCopyId:number, depositAmount?:number, note?:string }]',
-              totalAmount: 'number (optional) — nếu không gửi sẽ = tổng depositAmount',
+              items: 'array (required) — [{ documentCopyId:number, note?:string }]',
             },
             examples: [
-              '{ "readerId": 10, "librarianId": 2, "items":[{"documentCopyId":101,"depositAmount":50000}], "totalAmount":50000 }'
+              '{ "readerId": 10, "librarianId": 2, "items":[{"documentCopyId":101 }'
             ]
           },
-          {
-            method: 'POST',
-            path: '/api/loans/admin/loans/:loanSlipId/payment/qr',
-            description: 'Tạo QR thanh toán cho 1 phiếu mượn đang PENDING_PAYMENT',
-            auth: true,
-            role: 'Admin (roleId = 1), Librarian (roleId = 2)',
-            params: {
-              loanSlipId: 'number (required)',
-            },
-            body: {
-              amount: 'number (required)',
-              description: 'string (optional)'
-            },
-            response: {
-              success: 'boolean',
-              paymentId: 'number (id của payment vừa tạo)',
-              amount: 'number',
-              status: 'string (PENDING)',
-              transactionCode: 'string',
-              qr: '{ type: "data-url", content: "data:image/png;base64,..." }'
-            }
-          },
-
-          // ================== MỚI: XÁC NHẬN THANH TOÁN ==================
-          {
-            method: 'PATCH',
-            path: '/api/loans/admin/loans/:loanSlipId/payment/confirm',
-            description: 'Xác nhận thanh toán theo loanSlipId (coi như đã thanh toán)',
-            auth: true,
-            role: 'Admin (roleId = 1), Librarian (roleId = 2)',
-            params: {
-              loanSlipId: 'number (required)'
-            },
-            body: {
-              transactionCode: 'string (optional) — mã đối soát (nếu có)'
-            },
-            response: {
-              success: 'boolean',
-              message: 'string',
-              loanSlipId: 'number',
-              // Hiệu ứng: LoanSlip: PENDING_PAYMENT -> OPEN; LoanDetail: PENDING_PAYMENT -> BORROWED; DocumentCopy: ON_HOLD -> BORROWED
-            }
-          },
-          {
-            method: 'PATCH',
-            path: '/api/loans/admin/payments/:paymentId/confirm',
-            description: 'Xác nhận thanh toán theo paymentId (đối soát qua bảng Payment)',
-            auth: true,
-            role: 'Admin (roleId = 1), Librarian (roleId = 2)',
-            params: {
-              paymentId: 'number (required)'
-            },
-            body: {
-              transactionCode: 'string (optional)'
-            },
-            response: {
-              success: 'boolean',
-              message: 'string',
-              loanSlipId: 'number'
-            }
-          },
-
           // ================== MỚI: DUYỆT PHIẾU ĐẶT TRƯỚC ==================
           {
             method: 'POST',
@@ -1084,22 +1021,17 @@ routeApi.get('/', (req, res) => {
               librarianId: 'number (required) — người duyệt',
               dueDate: "date (optional, 'YYYY-MM-DD')",
               pricingMode: "string (optional, 'AUTO_MIN' | 'AUTO_MAX' | 'MANUAL', default='AUTO_MIN')",
-              deposits: 'array (optional; chỉ cần khi MANUAL hoặc ghi đè) — [{ loanDetailId:number, depositAmount:number }]',
               assignments: 'array (optional; chỉ định bản sao) — [{ loanDetailId:number, documentCopyId:number }]',
-              createPayment: 'boolean (optional, default=false) — nếu true sẽ tạo Payment PENDING = tổng cọc'
             },
             response: {
               success: 'boolean',
               message: 'string',
               loanSlipId: 'number',
               slipStatus: 'string (WAITING_FOR_PICKUP)',
-              totalDeposit: 'number',
-              payment: '{ paymentId:number, amount:number, status:\'PENDING\', transactionCode:string } | null'
             }
           }
         ]
       },
-
       {
         group: 'Loan Slips Reader',
         icon: '📄',
@@ -1127,7 +1059,7 @@ routeApi.get('/', (req, res) => {
             auth: true,
             role: 'Reader (roleId = 3)',
             body: {
-              items: 'array [{ documentId:number, quantity?:number>=1 }] (required)',
+              items: 'array [{ documentId:number}] (required)',
               note: 'string (optional)'
             }
           }

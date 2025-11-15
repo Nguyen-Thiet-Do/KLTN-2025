@@ -5,14 +5,32 @@ require('dotenv').config();
 const SENDGRID_API_KEY = process.env.SENDGRID_API_KEY;
 const MAIL_FROM = process.env.MAIL_FROM || 'thietdo345@gmail.com'; // Email đã verify trong SendGrid
 
+// Hỗ trợ liên hệ mặc định (dùng trong template)
+const SUPPORT_EMAIL = process.env.SUPPORT_EMAIL || 'support@booktechv2.net';
+const SUPPORT_PHONE = process.env.SUPPORT_PHONE || '0123-456-789';
+
 // Khởi tạo SendGrid
 if (SENDGRID_API_KEY) {
   sgMail.setApiKey(SENDGRID_API_KEY);
   console.log('✅ SendGrid initialized');
 } else {
-  console.warn('⚠️ SENDGRID_API_KEY missing — email will not be sent!');
+  console.warn('⚠️ SENDGRID_API_KEY missing — email will not be sent! (DEV MODE)');
 }
 
+// --- helper escapeHtml (bảo vệ nội dung HTML) ---
+function escapeHtml(str) {
+  if (!str) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+// =============================
+// SEND OTP EMAIL (existing)
+// =============================
 async function sendOtpEmail(to, otp) {
   // Nếu không có API key, chỉ log ra console (dev mode)
   if (!SENDGRID_API_KEY) {
@@ -56,7 +74,7 @@ async function sendOtpEmail(to, otp) {
         
         <div class="otp-box">
           <p style="margin: 0; font-size: 14px; color: #666;">Mã OTP của bạn là:</p>
-          <div class="otp-code">${otp}</div>
+          <div class="otp-code">${escapeHtml(otp)}</div>
         </div>
         
         <p><strong>Lưu ý:</strong></p>
@@ -68,7 +86,7 @@ async function sendOtpEmail(to, otp) {
         
         <div class="footer">
           <p>Email này được gửi tự động, vui lòng không trả lời.</p>
-          <p>&copy; 2024 Book Tech Library. All rights reserved.</p>
+          <p>&copy; ${new Date().getFullYear()} Book Tech Library. All rights reserved.</p>
         </div>
       </div>
     </body>
@@ -77,7 +95,7 @@ async function sendOtpEmail(to, otp) {
 
   const msg = {
     to: to,
-    from: MAIL_FROM, // Email đã verify trong SendGrid
+    from: MAIL_FROM,
     subject: 'Mã OTP xác thực - Book Tech',
     text: `Mã OTP của bạn là: ${otp}. Mã có hiệu lực trong 10 phút.`,
     html: html
@@ -93,4 +111,296 @@ async function sendOtpEmail(to, otp) {
   }
 }
 
-module.exports = { sendOtpEmail };
+// -----------------------------
+// General sendEmail wrapper
+// -----------------------------
+async function sendEmail(to, subject, html, text) {
+  if (!to) throw new Error('sendEmail: missing "to"');
+
+  // Dev mode: chỉ log khi không có API key
+  if (!SENDGRID_API_KEY) {
+    console.log('--- SEND EMAIL (DEV MODE) ---');
+    console.log({ to, subject, text, from: MAIL_FROM });
+    return { accepted: [to], messageId: 'dev-local' };
+  }
+
+  const msg = {
+    to,
+    from: MAIL_FROM,
+    subject,
+    text: text || '',
+    html: html || ''
+  };
+
+  try {
+    const res = await sgMail.send(msg);
+    console.log(`✅ Email sent to ${to} — subject="${subject}"`);
+    return res;
+  } catch (err) {
+    console.error('❌ sendEmail Error:', err.response?.body || err.message || err);
+    throw err;
+  }
+}
+
+// -----------------------------
+// Template: gửi mail khi phát hành thẻ thành viên
+// data: { fullName, cardNumber, cardTypeName, amount, issueDate, expiryDate, supportEmail?, supportPhone?, year? }
+// -----------------------------
+async function sendMemberCardIssuedEmail(to, data = {}) {
+  if (!to) throw new Error('sendMemberCardIssuedEmail: missing "to"');
+
+  const {
+    fullName = '',
+    cardNumber = '',
+    cardTypeName = '',
+    amount = '',
+    issueDate = '',
+    expiryDate = '',
+    supportEmail = SUPPORT_EMAIL,
+    supportPhone = SUPPORT_PHONE,
+    year = new Date().getFullYear()
+  } = data;
+
+  const subject = `[Book Tech] Xác nhận: Thẻ thành viên đã được phát hành — Số thẻ ${cardNumber || ''}`;
+
+  // Plain text
+  const text = `Kính gửi ${fullName},
+
+Cảm ơn bạn đã đăng ký thẻ thành viên tại Thư viện Book Tech.
+
+Chúng tôi xác nhận thẻ thành viên của bạn đã được phát hành thành công với thông tin:
+- Số thẻ: ${cardNumber}
+- Loại thẻ: ${cardTypeName}
+- Số tiền đã nộp: ${amount} VND
+- Ngày phát hành: ${issueDate}
+- Hạn sử dụng: ${expiryDate}
+
+Số tiền trên sẽ được giữ làm quỹ đảm bảo cho việc mượn/trả tài liệu mang về. Sau 12 tháng (kể từ ngày phát hành), nếu bạn không gia hạn thẻ, số tiền này sẽ được hoàn trả — trừ đi các khoản khấu trừ (nếu có) do vi phạm trong quá trình mượn.
+
+Bạn có thể bắt đầu sử dụng tài khoản ngay lập tức tại:
+https://booktechv2.netlify.app/ hoặc ứng dụng Booktech.
+
+Nếu cần hỗ trợ, vui lòng liên hệ:
+- Email: ${supportEmail}
+- SĐT: ${supportPhone}
+
+Trân trọng,
+Đội ngũ Book Tech Library
+© ${year} Book Tech Library
+`;
+
+  // HTML (nhẹ, inline styles)
+  const html = `
+  <!doctype html>
+  <html>
+  <head><meta charset="utf-8"></head>
+  <body style="font-family:Arial, sans-serif; color:#333;">
+    <div style="max-width:600px; margin:20px auto; padding:20px; border:1px solid #eee; border-radius:8px;">
+      <h2 style="color:#0b5cff; margin-top:0;">Xác nhận phát hành thẻ thành viên</h2>
+      <p>Chào <strong>${escapeHtml(fullName)}</strong>,</p>
+
+      <p>Cảm ơn bạn đã đăng ký thẻ thành viên tại <strong>Thư viện Book Tech</strong>. Thẻ của bạn đã được phát hành với thông tin:</p>
+
+      <table style="width:100%; border-collapse:collapse; margin:12px 0;">
+        <tr><td style="padding:8px; background:#f7f7f7; width:40%"><strong>Số thẻ</strong></td><td style="padding:8px;">${escapeHtml(cardNumber)}</td></tr>
+        <tr><td style="padding:8px; background:#f7f7f7;"><strong>Loại thẻ</strong></td><td style="padding:8px;">${escapeHtml(cardTypeName)}</td></tr>
+        <tr><td style="padding:8px; background:#f7f7f7;"><strong>Số tiền đã nộp</strong></td><td style="padding:8px;">${escapeHtml(String(amount))} VND</td></tr>
+        <tr><td style="padding:8px; background:#f7f7f7;"><strong>Ngày phát hành</strong></td><td style="padding:8px;">${escapeHtml(issueDate)}</td></tr>
+        <tr><td style="padding:8px; background:#f7f7f7;"><strong>Hạn sử dụng</strong></td><td style="padding:8px;">${escapeHtml(expiryDate)}</td></tr>
+      </table>
+
+      <p>Số tiền trên sẽ được giữ làm quỹ đảm bảo để bạn mượn/trả tài liệu mang về. Sau <strong>12 tháng</strong> nếu bạn không gia hạn thẻ, quỹ sẽ được hoàn trả (sau khi trừ các khoản phạt nếu có).</p>
+
+      <p>Bắt đầu sử dụng: <a href="https://booktechv2.netlify.app/" target="_blank" rel="noopener">https://booktechv2.netlify.app/</a> hoặc mở ứng dụng <strong>Booktech</strong>.</p>
+
+      <hr style="border:none; border-top:1px solid #eee; margin:18px 0;">
+
+      <p style="font-size:13px; color:#555;">Hỗ trợ: ${escapeHtml(supportEmail)} | ${escapeHtml(supportPhone)}</p>
+      <p style="font-size:12px; color:#999;">Đây là email tự động. Vui lòng không trả lời trực tiếp.<br>&copy; ${year} Book Tech Library</p>
+    </div>
+  </body>
+  </html>
+  `;
+
+  return sendEmail(to, subject, html, text);
+}
+
+// -----------------------------
+// Template: gửi mail khi đặt mượn thành công (reservation)
+// data: { fullName, slipId, items: [{documentId, title}], requestedTotal, remainingAfterReserve, supportEmail?, supportPhone?, year? }
+// -----------------------------
+async function sendReservationConfirmationEmail(to, data = {}) {
+  if (!to) throw new Error('sendReservationConfirmationEmail: missing "to"');
+
+  const {
+    fullName = '',
+    slipId = '',
+    items = [],
+    requestedTotal = 0,
+    remainingAfterReserve = 0,
+    supportEmail = SUPPORT_EMAIL,
+    supportPhone = SUPPORT_PHONE,
+    year = new Date().getFullYear()
+  } = data;
+
+  const subject = `[Book Tech] Xác nhận đặt mượn — Phiếu #${slipId}`;
+
+  // Plain text
+  const textLines = [
+    `Kính gửi ${fullName},`,
+    '',
+    `Chúng tôi đã nhận được yêu cầu đặt mượn của bạn. Thông tin phiếu đặt:`,
+    `- Mã phiếu: ${slipId}`,
+    `- Số lượng tài liệu: ${requestedTotal}`,
+    `- Số lượt mượn có thể còn lại: ${remainingAfterReserve}`,
+    '',
+    `Danh sách tài liệu (tạm):`,
+    ...items.map(it => `- ${it.title || ('Tài liệu #' + it.documentId)} (ID: ${it.documentId})`),
+    '',
+    `Phiếu đang ở trạng thái: CHỜ thủ thư duyệt. Bạn sẽ nhận thông báo khi thủ thư xác nhận và hẹn lấy.`,
+    '',
+    `Bạn có thể kiểm tra chi tiết tại: https://booktechv2.netlify.app/ (đăng nhập)`,
+    '',
+    `Nếu cần hỗ trợ, vui lòng liên hệ:`,
+    `- Email: ${supportEmail}`,
+    `- SĐT: ${supportPhone}`,
+    '',
+    `Trân trọng,`,
+    `Đội ngũ Book Tech Library`,
+    `© ${year} Book Tech Library`
+  ];
+  const text = textLines.join('\n');
+
+  // HTML
+  const itemsHtml = items.map(it => `<li>${escapeHtml(it.title || `Tài liệu #${it.documentId}`)} (ID: ${escapeHtml(String(it.documentId))})</li>`).join('');
+  const html = `
+  <!doctype html>
+  <html>
+  <head><meta charset="utf-8"></head>
+  <body style="font-family:Arial, sans-serif; color:#333;">
+    <div style="max-width:600px; margin:20px auto; padding:20px; border:1px solid #eee; border-radius:8px;">
+      <h2 style="color:#0b5cff; margin-top:0;">Xác nhận đặt mượn</h2>
+      <p>Chào <strong>${escapeHtml(fullName)}</strong>,</p>
+
+      <p>Chúng tôi đã nhận được yêu cầu đặt mượn của bạn với thông tin:</p>
+
+      <table style="width:100%; border-collapse:collapse; margin:12px 0;">
+        <tr><td style="padding:8px; background:#f7f7f7; width:40%"><strong>Mã phiếu</strong></td><td style="padding:8px;">${escapeHtml(String(slipId))}</td></tr>
+        <tr><td style="padding:8px; background:#f7f7f7;"><strong>Số lượng</strong></td><td style="padding:8px;">${requestedTotal}</td></tr>
+        <tr><td style="padding:8px; background:#f7f7f7;"><strong>Số lượt mượn còn lại</strong></td><td style="padding:8px;">${remainingAfterReserve}</td></tr>
+      </table>
+
+      <p><strong>Danh sách tài liệu:</strong></p>
+      <ul>${itemsHtml}</ul>
+
+      <p>Phiếu đang ở trạng thái: <strong>CHỜ THỦ THƯ DUYỆT</strong>. Bạn sẽ nhận email khi thủ thư xác nhận và hẹn lấy. Nếu không thấy email, vui lòng kiểm tra phần Spam/Promotions.</p>
+
+      <p>Bạn có thể kiểm tra chi tiết và trạng thái phiếu tại: <a href="https://booktechv2.netlify.app/" target="_blank" rel="noopener">https://booktechv2.netlify.app/</a></p>
+
+      <hr style="border:none; border-top:1px solid #eee; margin:18px 0;">
+
+      <p style="font-size:13px; color:#555;">Hỗ trợ: ${escapeHtml(supportEmail)} | ${escapeHtml(supportPhone)}</p>
+      <p style="font-size:12px; color:#999;">Đây là email tự động. Vui lòng không trả lời trực tiếp.<br>&copy; ${year} Book Tech Library</p>
+    </div>
+  </body>
+  </html>
+  `;
+
+  return sendEmail(to, subject, html, text);
+}
+
+// -----------------------------
+// Template: gửi mail khi thủ thư duyệt yêu cầu (chuyển sang WAITING_FOR_PICKUP)
+// data: {
+//   fullName, slipId, items: [{ title, documentId, documentCopyId }],
+//   pickupDeadline, pickUpLocation, supportEmail?, supportPhone?, year?
+// }
+// -----------------------------
+async function sendReservationApprovedEmail(to, data = {}) {
+  if (!to) throw new Error('sendReservationApprovedEmail: missing "to"');
+
+  const {
+    fullName = '',
+    slipId = '',
+    items = [],
+    pickupDeadline = '', // YYYY-MM-DD
+    pickUpLocation = process.env.LIBRARY_ADDRESS || 'Thư viện Book Tech — Số 1, Đường ABC, Quận XYZ',
+    supportEmail = process.env.SUPPORT_EMAIL || SUPPORT_EMAIL,
+    supportPhone = process.env.SUPPORT_PHONE || SUPPORT_PHONE,
+    libraryName = process.env.LIBRARY_NAME || 'Thư viện Book Tech',
+    year = new Date().getFullYear()
+  } = data;
+
+  const subject = `[${libraryName}] Phiếu #${slipId} — Đã được duyệt, vui lòng đến nhận trong vòng 3 ngày`;
+
+  // Plain text
+  const textLines = [
+    `Kính gửi ${fullName},`,
+    '',
+    `Phiếu đặt mượn (Mã: ${slipId}) của bạn đã được THỦ THƯ DUYỆT và đang được giữ chờ tại thư viện.`,
+    '',
+    `Danh sách tài liệu được giữ:`,
+    ...items.map(it => `- ${it.title || ('Tài liệu #' + it.documentId)} (Bản sao: ${it.documentCopyId || '—'})`),
+    '',
+    `Vui lòng đến nhận tại: ${pickUpLocation}`,
+    `Hạn cuối nhận: ${pickupDeadline} (tức trong vòng 3 ngày kể từ khi được duyệt).`,
+    '',
+    `Lưu ý quan trọng:`,
+    `- Nếu bạn không đến lấy trong vòng 3 ngày (đến sau ${pickupDeadline}), hệ thống sẽ tự động hủy giữ và trả bản sao về kho hoặc phát hành cho yêu cầu khác.`,
+    `- Sau khi hủy, bạn sẽ nhận được thông báo; nếu vẫn muốn mượn, vui lòng đặt lại yêu cầu.`,
+    '',
+    `Nếu cần hỗ trợ, liên hệ:`,
+    `- Email: ${supportEmail}`,
+    `- SĐT: ${supportPhone}`,
+    '',
+    `Trân trọng,`,
+    `${libraryName}`,
+    `© ${year} ${libraryName}`
+  ];
+  const text = textLines.join('\n');
+
+  // HTML
+  const itemsHtml = items.map(it => `<li>${escapeHtml(it.title || `Tài liệu #${it.documentId}`)} — Bản sao: ${escapeHtml(String(it.documentCopyId || '—'))}</li>`).join('');
+  const html = `
+  <!doctype html>
+  <html>
+  <head><meta charset="utf-8"></head>
+  <body style="font-family:Arial, sans-serif; color:#333;">
+    <div style="max-width:680px; margin:20px auto; padding:22px; border:1px solid #eee; border-radius:8px;">
+      <h2 style="color:#0b5cff; margin-top:0;">Phiếu đặt mượn đã được duyệt</h2>
+      <p>Xin chào <strong>${escapeHtml(fullName)}</strong>,</p>
+
+      <p>Phiếu <strong>#${escapeHtml(String(slipId))}</strong> của bạn đã được <strong>thủ thư duyệt</strong> và các bản sao đã được giữ sẵn.</p>
+
+      <p><strong>Danh sách tài liệu được giữ:</strong></p>
+      <ul>${itemsHtml}</ul>
+
+      <p><strong>Hạn cuối nhận:</strong> ${escapeHtml(pickupDeadline)} (vui lòng đến trong vòng 3 ngày).</p>
+      <p><strong>Địa điểm nhận:</strong> ${escapeHtml(pickUpLocation)}</p>
+
+      <div style="padding:12px; background:#f9fafb; border-radius:6px; margin-top:12px;">
+        <p style="margin:0;"><strong>Lưu ý quan trọng</strong></p>
+        <ul style="margin-top:6px;">
+          <li>Nếu bạn không đến nhận trong vòng 3 ngày, thư viện sẽ hủy giữ và trả bản sao về kho hoặc phát hành cho yêu cầu khác.</li>
+          <li>Sau khi hủy, nếu bạn vẫn cần, vui lòng tạo lại yêu cầu đặt mượn.</li>
+        </ul>
+      </div>
+
+      <hr style="border:none; border-top:1px solid #eee; margin:18px 0;">
+
+      <p style="font-size:13px; color:#555;">Hỗ trợ: ${escapeHtml(supportEmail)} | ${escapeHtml(supportPhone)}</p>
+      <p style="font-size:12px; color:#999;">Đây là email tự động. Vui lòng không trả lời trực tiếp.<br>&copy; ${year} ${escapeHtml(libraryName)}</p>
+    </div>
+  </body>
+  </html>
+  `;
+
+  return sendEmail(to, subject, html, text);
+}
+module.exports = {
+  sendOtpEmail,
+  sendEmail,
+  sendMemberCardIssuedEmail,
+  sendReservationConfirmationEmail,
+  sendReservationApprovedEmail
+};
