@@ -554,7 +554,7 @@ async function verifyOtpAndCreateAccountService(payload) {
 }
 
 // =============================
-// 🎫 COMPLETE REGISTRATION
+// 🎫 COMPLETE REGISTRATION (FIXED)
 // =============================
 async function completeRegistrationService({ readerId, cardTypeId, action = 'SKIP', extraInfo = {} }) {
   if (!readerId || !cardTypeId) {
@@ -566,11 +566,16 @@ async function completeRegistrationService({ readerId, cardTypeId, action = 'SKI
     throw Object.assign(new Error('CARD_TYPE_NOT_FOUND'), { statusCode: 404 });
   }
 
+  // ============================================================
+  // SKIP hoặc MIỄN PHÍ → Tạo thẻ ngay
+  // ============================================================
   if (action === 'SKIP' || Number(cardType.price) <= 0) {
     const cardNumber = generateCardNumber();
     const today = new Date();
     const issueDate = today.toISOString().slice(0, 10);
-    const expiryDate = new Date(today.getTime() + (cardType.duration || 365) * 24 * 3600 * 1000).toISOString().slice(0, 10);
+    const expiryDate = new Date(
+      today.getTime() + (cardType.duration || 365) * 24 * 3600 * 1000
+    ).toISOString().slice(0, 10);
 
     const mc = await MemberCard.create({
       readerId,
@@ -586,8 +591,14 @@ async function completeRegistrationService({ readerId, cardTypeId, action = 'SKI
     return { ok: true, free: true, memberCard: mc };
   }
 
-  // Paid flow
-  const orderCode = `REG${Date.now()}-${readerId}`;
+  // ============================================================
+  // TRẢ PHÍ → Tạo Payment và gọi PayOS
+  // ============================================================
+
+  // ✅ Tạo orderCode là số nguyên từ timestamp
+  const orderCode = Date.now();
+
+  // Tạo Payment record ngay
   const payment = await Payment.create({
     loanSlipId: null,
     violationId: null,
@@ -597,44 +608,65 @@ async function completeRegistrationService({ readerId, cardTypeId, action = 'SKI
     amount: Number(cardType.price),
     paymentMethod: 'PAYOS_QR',
     paymentDate: null,
-    transactionCode: orderCode,
+    transactionCode: String(orderCode), // ✅ Lưu dạng string
     status: 'PENDING',
     note: `cardType:${cardType.cardTypeId}`
   });
 
-  const returnUrl = `${(process.env.APP_BASE_URL || '').replace(/\/$/, '')}/pay/return?orderCode=${encodeURIComponent(orderCode)}`;
-  const cancelUrl = `${(process.env.APP_BASE_URL || '').replace(/\/$/, '')}/pay/cancel?orderCode=${encodeURIComponent(orderCode)}`;
+  console.log(`💳 Payment created: ${payment.paymentId} | orderCode: ${orderCode}`);
+
+  // ✅ URL không có query params (PayOS sẽ tự động thêm)
+  const baseUrl = (process.env.APP_BASE_URL || '').replace(/\/$/, '');
+  const returnUrl = `${baseUrl}/pay/return`;
+  const cancelUrl = `${baseUrl}/pay/cancel`;
 
   let payosResp;
   try {
+    // ✅ Gọi PayOS với orderCode là số nguyên
     payosResp = await payosService.createPaymentLink({
-      orderCode,
+      orderCode: orderCode, // ✅ Number, không phải string
       amount: Number(cardType.price),
-      description: `Mua thẻ ${cardType.typeName}`,
+      description: `Mua thẻ ${cardType.typeName || cardType.cardTypeName}`,
       returnUrl,
       cancelUrl
     });
+
+    console.log('✅ PayOS response:', JSON.stringify(payosResp, null, 2));
+
   } catch (err) {
+    console.error('❌ PayOS create failed:', err.message);
+
+    // Đánh dấu payment thất bại
     await payment.update({
       status: 'FAILED',
-      note: (payment.note || '') + '|payos_create_failed'
+      note: (payment.note || '') + '|payos_create_failed:' + err.message
     });
+
     throw Object.assign(new Error('PAYOS_CREATE_FAILED'), { statusCode: 500 });
   }
 
+  // ✅ Lưu thông tin PayOS vào Payment
   const payosData = payosResp?.data || payosResp || {};
+
   await payment.update({
     note: (payment.note || '') + `|payos:${JSON.stringify({
-      paymentLinkId: payosData.paymentLinkId,
-      qr: payosData.qr || payosData.deepLink || null
+      paymentLinkId: payosData.paymentLinkId || payosData.id,
+      checkoutUrl: payosData.checkoutUrl,
+      qrCode: payosData.qrCode || payosData.qr
     })}`
   });
 
+  // ✅ Trả về đầy đủ thông tin cho client
   return {
     ok: true,
     paymentId: payment.paymentId,
+    orderCode: orderCode, // ✅ Trả về để client có thể tracking
     amount: payment.amount,
-    payos: payosData
+    payos: {
+      checkoutUrl: payosData.checkoutUrl,
+      qrCode: payosData.qrCode || payosData.qr,
+      paymentLinkId: payosData.paymentLinkId || payosData.id
+    }
   };
 }
 
