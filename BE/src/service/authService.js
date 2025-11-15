@@ -683,56 +683,123 @@ async function completeRegistrationService({ readerId, cardTypeId, action = 'SKI
 // 💳 FINALIZE PAYMENT AND CREATE MEMBER CARD
 // =============================
 async function finalizePaymentAndCreateMemberCard(paymentOrId) {
-  let payment = paymentOrId;
-  if (!payment || !payment.paymentId) {
-    payment = await Payment.findByPk(paymentOrId);
-  }
-  if (!payment) throw new Error('PAYMENT_NOT_FOUND');
+  try {
+    let payment = paymentOrId;
+    if (!payment || !payment.paymentId) {
+      payment = await Payment.findByPk(paymentOrId);
+    }
+    
+    if (!payment) {
+      console.error('❌ Payment not found');
+      throw new Error('PAYMENT_NOT_FOUND');
+    }
 
-  if (String(payment.status).toUpperCase() === 'COMPLETED' || String(payment.status).toUpperCase() === 'PAID') {
-    return payment;
-  }
+    console.log('💳 Processing payment:', {
+      paymentId: payment.paymentId,
+      readerId: payment.readerId,
+      status: payment.status,
+      note: payment.note
+    });
 
-  const note = payment.note || '';
-  const m = /cardType:(\d+)/.exec(note);
-  const cardTypeId = m ? Number(m[1]) : null;
+    // Check status
+    if (String(payment.status).toUpperCase() === 'COMPLETED' || String(payment.status).toUpperCase() === 'PAID') {
+      console.log('⚠️ Payment already completed, skipping');
+      return payment;
+    }
 
-  if (!cardTypeId) {
-    await payment.update({ status: 'COMPLETED', note: note + '|no_cardType_found' });
-    return payment;
-  }
+    // Extract cardTypeId from note
+    const note = payment.note || '';
+    const m = /cardType:(\d+)/.exec(note);
+    const cardTypeId = m ? Number(m[1]) : null;
 
-  const existing = await MemberCard.findOne({
-    where: { readerId: payment.readerId, status: 'ACTIVE', deleted: false }
-  });
+    console.log('🔍 Extracted cardTypeId:', cardTypeId, 'from note:', note);
 
-  if (existing) {
-    const newNote = note + `|existing_card:${existing.memberCardId}`;
+    if (!cardTypeId) {
+      console.warn('❌ No cardTypeId found in payment note');
+      await payment.update({ status: 'COMPLETED', note: note + '|no_cardType_found' });
+      return payment;
+    }
+
+    // Check existing MemberCard
+    const existing = await MemberCard.findOne({
+      where: { readerId: payment.readerId, status: 'ACTIVE', deleted: false }
+    });
+
+    if (existing) {
+      console.warn('⚠️ Reader already has an ACTIVE member card:', existing.memberCardId);
+      const newNote = note + `|existing_card:${existing.memberCardId}`;
+      await payment.update({ status: 'COMPLETED', note: newNote });
+      return { payment: await Payment.findByPk(payment.paymentId), memberCard: existing };
+    }
+
+    // Get CardType
+    const cardType = await CardType.findByPk(cardTypeId);
+    
+    if (!cardType) {
+      console.error('❌ CardType not found:', cardTypeId);
+      throw new Error('CARD_TYPE_NOT_FOUND');
+    }
+
+    console.log('📋 CardType found:', {
+      cardTypeId: cardType.cardTypeId,
+      typeName: cardType.cardTypeName || cardType.typeName,
+      duration: cardType.duration
+    });
+
+    // Generate card details
+    const cardNumber = generateCardNumber();
+    const today = new Date();
+    const issueDate = today.toISOString().slice(0, 10);
+    const expiryDate = new Date(today.getTime() + (cardType.duration || 365) * 24 * 3600 * 1000).toISOString().slice(0, 10);
+
+    console.log('🎫 Creating MemberCard:', {
+      readerId: payment.readerId,
+      cardNumber,
+      cardTypeId,
+      issueDate,
+      expiryDate
+    });
+
+    // Create MemberCard
+    const card = await MemberCard.create({
+      readerId: payment.readerId,
+      cardNumber,
+      cardTypeId,
+      balance: 0.0,
+      issueDate,
+      expiryDate,
+      status: 'ACTIVE',
+      note: `created_via_payment_${payment.paymentId}`
+    });
+
+    console.log('✅ MemberCard created successfully:', {
+      memberCardId: card.memberCardId,
+      cardNumber: card.cardNumber,
+      readerId: card.readerId
+    });
+
+    // Update payment note
+    const newNote = note + `|created_card:${card.memberCardId}`;
     await payment.update({ status: 'COMPLETED', note: newNote });
-    return { payment: await Payment.findByPk(payment.paymentId), memberCard: existing };
+
+    console.log('✅ Payment updated with card info');
+
+    // Return fresh data
+    const updatedPayment = await Payment.findByPk(payment.paymentId);
+    
+    return { 
+      payment: updatedPayment, 
+      memberCard: card 
+    };
+
+  } catch (error) {
+    console.error('❌ finalizePaymentAndCreateMemberCard ERROR:', {
+      message: error.message,
+      stack: error.stack,
+      paymentId: paymentOrId?.paymentId || paymentOrId
+    });
+    throw error;
   }
-
-  const cardType = await CardType.findByPk(cardTypeId);
-  const cardNumber = generateCardNumber();
-  const today = new Date();
-  const issueDate = today.toISOString().slice(0, 10);
-  const expiryDate = new Date(today.getTime() + (cardType.duration || 365) * 24 * 3600 * 1000).toISOString().slice(0, 10);
-
-  const card = await MemberCard.create({
-    readerId: payment.readerId,
-    cardNumber,
-    cardTypeId,
-    balance: 0.0,
-    issueDate,
-    expiryDate,
-    status: 'ACTIVE',
-    note: `created_via_payment_${payment.paymentId}`
-  });
-
-  const newNote = note + `|created_card:${card.memberCardId}`;
-  await payment.update({ status: 'COMPLETED', note: newNote });
-
-  return { payment: await Payment.findByPk(payment.paymentId), memberCard: card };
 }
 
 // =============================
