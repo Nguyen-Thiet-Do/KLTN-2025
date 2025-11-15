@@ -54,16 +54,12 @@ const getFullProfile = async (accountId, roleId) => {
   let profileType = null;
 
   try {
-    // =================
-    // READER
-    // =================
     if (roleId === 3) {
       const reader = await Reader.findOne({ where: { accountId } });
       if (reader) {
         profileData = reader.toJSON();
         profileType = "reader";
 
-        // --- Lấy thẻ thành viên hiện tại (nếu có) ---
         let memberCardData = null;
         try {
           const memberCard = await MemberCard.findOne({
@@ -123,7 +119,6 @@ const getFullProfile = async (accountId, roleId) => {
           }
         }
 
-        // --- Đếm số phiếu mượn theo trạng thái ---
         const pendingCount = await LoanSlip.count({
           where: {
             readerId: profileData.readerId,
@@ -173,10 +168,6 @@ const getFullProfile = async (accountId, roleId) => {
       } else {
         console.warn(`⚠️ Không tìm thấy Reader cho accountId=${accountId}`);
       }
-
-      // =================
-      // LIBRARIAN (role 2) hoặc ADMIN (role 1)
-      // =================
     } else if (roleId === 2 || roleId === 1) {
       const librarian = await Librarian.findOne({ where: { accountId } });
       if (librarian) {
@@ -377,9 +368,6 @@ const registerReaderService = async (userData) => {
 // =============================
 const OTP_STORE = new Map();
 
-/**
- * Lưu OTP với email được normalize (lowercase + trim)
- */
 function _saveOtp(email, otp, ttl = 10 * 60 * 1000, meta = {}) {
   const normalizedEmail = String(email).toLowerCase().trim();
   const expiresAt = Date.now() + ttl;
@@ -395,9 +383,6 @@ function _saveOtp(email, otp, ttl = 10 * 60 * 1000, meta = {}) {
   console.log(`   Expires: ${new Date(expiresAt).toISOString()}`);
 }
 
-/**
- * Verify OTP với email được normalize
- */
 function _verifyOtp(email, otp) {
   const normalizedEmail = String(email).toLowerCase().trim();
   const row = OTP_STORE.get(normalizedEmail);
@@ -441,7 +426,6 @@ async function sendRegistrationOtpService(email) {
 
   const normalizedEmail = email.toLowerCase().trim();
 
-  // Check if email exists (case-insensitive)
   const existing = await Account.findOne({
     where: sequelize.where(
       sequelize.fn('LOWER', sequelize.col('email')),
@@ -483,12 +467,10 @@ async function verifyOtpAndCreateAccountService(payload) {
 
   const normalizedEmail = email.toLowerCase().trim();
 
-  // Verify OTP
   if (!_verifyOtp(normalizedEmail, otp)) {
     throw Object.assign(new Error('OTP_INVALID_OR_EXPIRED'), { statusCode: 400 });
   }
 
-  // Double-check email (case-insensitive)
   const ex = await Account.findOne({
     where: sequelize.where(
       sequelize.fn('LOWER', sequelize.col('email')),
@@ -554,10 +536,7 @@ async function verifyOtpAndCreateAccountService(payload) {
 }
 
 // =============================
-// 🎫 COMPLETE REGISTRATION (FIXED)
-// =============================
-// =============================
-// 🎫 COMPLETE REGISTRATION (FIXED)
+// 🎫 COMPLETE REGISTRATION
 // =============================
 async function completeRegistrationService({ readerId, cardTypeId, action = 'SKIP', extraInfo = {} }) {
   if (!readerId || !cardTypeId) {
@@ -569,9 +548,6 @@ async function completeRegistrationService({ readerId, cardTypeId, action = 'SKI
     throw Object.assign(new Error('CARD_TYPE_NOT_FOUND'), { statusCode: 404 });
   }
 
-  // ============================================================
-  // SKIP hoặc MIỄN PHÍ → Tạo thẻ ngay
-  // ============================================================
   if (action === 'SKIP' || Number(cardType.price) <= 0) {
     const cardNumber = generateCardNumber();
     const today = new Date();
@@ -594,14 +570,8 @@ async function completeRegistrationService({ readerId, cardTypeId, action = 'SKI
     return { ok: true, free: true, memberCard: mc };
   }
 
-  // ============================================================
-  // TRẢ PHÍ → Tạo Payment và gọi PayOS
-  // ============================================================
-
-  // ✅ Tạo orderCode là số nguyên từ timestamp
   const orderCode = Date.now();
 
-  // Tạo Payment record ngay
   const payment = await Payment.create({
     loanSlipId: null,
     violationId: null,
@@ -611,28 +581,25 @@ async function completeRegistrationService({ readerId, cardTypeId, action = 'SKI
     amount: Number(cardType.price),
     paymentMethod: 'PAYOS_QR',
     paymentDate: null,
-    transactionCode: String(orderCode), // ✅ Lưu dạng string
+    transactionCode: String(orderCode),
     status: 'PENDING',
     note: `cardType:${cardType.cardTypeId}`
   });
 
   console.log(`💳 Payment created: ${payment.paymentId} | orderCode: ${orderCode}`);
 
-  // ✅ URL không có query params (PayOS sẽ tự động thêm)
   const baseUrl = (process.env.APP_BASE_URL || '').replace(/\/$/, '');
   const returnUrl = `${baseUrl}/pay/return`;
   const cancelUrl = `${baseUrl}/pay/cancel`;
 
   let payosResp;
   try {
-    // ✅ Gọi PayOS với orderCode là số nguyên
     payosResp = await payosService.createPaymentLink({
-      orderCode: orderCode, // ✅ Number, không phải string
+      orderCode: orderCode,
       amount: Number(cardType.price),
       description: `Mua thẻ ${cardType.cardTypeName || cardType.typeName || 'Membership'}`,
       returnUrl,
       cancelUrl,
-      // ✅ Thêm items array (bắt buộc với PayOS)
       items: [{
         name: cardType.cardTypeName || cardType.typeName || 'Membership Card',
         quantity: 1,
@@ -645,7 +612,6 @@ async function completeRegistrationService({ readerId, cardTypeId, action = 'SKI
   } catch (err) {
     console.error('❌ PayOS create failed:', err.message);
 
-    // Đánh dấu payment thất bại
     await payment.update({
       status: 'FAILED',
       note: (payment.note || '') + '|payos_create_failed:' + err.message
@@ -654,7 +620,6 @@ async function completeRegistrationService({ readerId, cardTypeId, action = 'SKI
     throw Object.assign(new Error('PAYOS_CREATE_FAILED'), { statusCode: 500 });
   }
 
-  // ✅ Lưu thông tin PayOS vào Payment
   const payosData = payosResp?.data || payosResp || {};
 
   await payment.update({
@@ -665,11 +630,10 @@ async function completeRegistrationService({ readerId, cardTypeId, action = 'SKI
     })}`
   });
 
-  // ✅ Trả về đầy đủ thông tin cho client
   return {
     ok: true,
     paymentId: payment.paymentId,
-    orderCode: orderCode, // ✅ Trả về để client có thể tracking
+    orderCode: orderCode,
     amount: payment.amount,
     payos: {
       checkoutUrl: payosData.checkoutUrl,
@@ -680,7 +644,7 @@ async function completeRegistrationService({ readerId, cardTypeId, action = 'SKI
 }
 
 // =============================
-// 💳 FINALIZE PAYMENT AND CREATE MEMBER CARD
+// 💳 FINALIZE PAYMENT AND CREATE MEMBER CARD (FIXED)
 // =============================
 async function finalizePaymentAndCreateMemberCard(paymentOrId) {
   try {
@@ -701,13 +665,21 @@ async function finalizePaymentAndCreateMemberCard(paymentOrId) {
       note: payment.note
     });
 
-    // Check status
-    if (String(payment.status).toUpperCase() === 'COMPLETED' || String(payment.status).toUpperCase() === 'PAID') {
-      console.log('⚠️ Payment already completed, skipping');
-      return payment;
+    // ✅ KIỂM TRA CARD TRƯỚC (quan trọng nhất)
+    const existingCard = await MemberCard.findOne({
+      where: { 
+        readerId: payment.readerId, 
+        status: 'ACTIVE', 
+        deleted: false 
+      }
+    });
+
+    if (existingCard) {
+      console.log('✅ Member card already exists:', existingCard.memberCardId);
+      return { payment, memberCard: existingCard };
     }
 
-    // Extract cardTypeId from note
+    // ✅ Nếu chưa có card, kiểm tra note có cardTypeId không
     const note = payment.note || '';
     const m = /cardType:(\d+)/.exec(note);
     const cardTypeId = m ? Number(m[1]) : null;
@@ -716,23 +688,10 @@ async function finalizePaymentAndCreateMemberCard(paymentOrId) {
 
     if (!cardTypeId) {
       console.warn('❌ No cardTypeId found in payment note');
-      await payment.update({ status: 'COMPLETED', note: note + '|no_cardType_found' });
-      return payment;
+      return { payment, memberCard: null };
     }
 
-    // Check existing MemberCard
-    const existing = await MemberCard.findOne({
-      where: { readerId: payment.readerId, status: 'ACTIVE', deleted: false }
-    });
-
-    if (existing) {
-      console.warn('⚠️ Reader already has an ACTIVE member card:', existing.memberCardId);
-      const newNote = note + `|existing_card:${existing.memberCardId}`;
-      await payment.update({ status: 'COMPLETED', note: newNote });
-      return { payment: await Payment.findByPk(payment.paymentId), memberCard: existing };
-    }
-
-    // Get CardType
+    // ✅ Get CardType
     const cardType = await CardType.findByPk(cardTypeId);
     
     if (!cardType) {
@@ -746,7 +705,7 @@ async function finalizePaymentAndCreateMemberCard(paymentOrId) {
       duration: cardType.duration
     });
 
-    // Generate card details
+    // ✅ Generate card details
     const cardNumber = generateCardNumber();
     const today = new Date();
     const issueDate = today.toISOString().slice(0, 10);
@@ -760,7 +719,7 @@ async function finalizePaymentAndCreateMemberCard(paymentOrId) {
       expiryDate
     });
 
-    // Create MemberCard
+    // ✅ Create MemberCard
     const card = await MemberCard.create({
       readerId: payment.readerId,
       cardNumber,
@@ -778,13 +737,13 @@ async function finalizePaymentAndCreateMemberCard(paymentOrId) {
       readerId: card.readerId
     });
 
-    // Update payment note
+    // ✅ Update payment note
     const newNote = note + `|created_card:${card.memberCardId}`;
-    await payment.update({ status: 'COMPLETED', note: newNote });
+    await payment.update({ note: newNote });
 
     console.log('✅ Payment updated with card info');
 
-    // Return fresh data
+    // ✅ Return fresh data
     const updatedPayment = await Payment.findByPk(payment.paymentId);
     
     return { 
