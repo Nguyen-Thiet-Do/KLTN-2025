@@ -35,38 +35,112 @@ function verifyWebhookSignature(data, signature) {
     return expected === signature;
 }
 
+/**
+ * Tạo payment link với PayOS
+ * @param {Object} params
+ * @param {string|number} params.orderCode - Mã đơn hàng (số nguyên dương, tối đa 9 chữ số)
+ * @param {number} params.amount - Số tiền (VNĐ)
+ * @param {string} params.description - Mô tả giao dịch
+ * @param {string} params.returnUrl - URL redirect khi thành công
+ * @param {string} params.cancelUrl - URL redirect khi hủy
+ */
 async function createPaymentLink({ orderCode, amount, description, returnUrl, cancelUrl }) {
-    const payload = {
-        clientId: process.env.PAYOS_CLIENT_ID || cfg.clientId,
-        orderCode,
-        amount: Number(amount),
-        description,
-        returnUrl,
-        cancelUrl
-    };
+    try {
+        // Validate inputs
+        if (!orderCode || !amount) {
+            throw new Error('orderCode và amount là bắt buộc');
+        }
 
-    const sigStr = buildSignatureString(payload);
-    const signature = calcHmacSha256Hex(sigStr, process.env.PAYOS_CHECKSUM_KEY || cfg.checksumKey);
+        // PayOS yêu cầu orderCode là số nguyên dương, tối đa 9 chữ số
+        let numericOrderCode = orderCode;
+        if (typeof orderCode === 'string') {
+            // Nếu orderCode là string có format "REG1234567890-123", chỉ lấy phần số
+            numericOrderCode = parseInt(orderCode.replace(/[^\d]/g, '').slice(-9));
+        }
+        numericOrderCode = Number(numericOrderCode);
 
-    const url = `${process.env.PAYOS_API_BASE || cfg.apiBase}/payments`;
-    const res = await axios.post(url, payload, {
-        headers: {
+        if (isNaN(numericOrderCode) || numericOrderCode <= 0) {
+            throw new Error('orderCode phải là số nguyên dương');
+        }
+
+        // ❌ BỎ clientId ra khỏi payload - PayOS không cần field này trong body
+        const payload = {
+            orderCode: numericOrderCode,
+            amount: Number(amount),
+            description: description || 'Thanh toán',
+            returnUrl: returnUrl || `${cfg.appBaseUrl}/pay/return`,
+            cancelUrl: cancelUrl || `${cfg.appBaseUrl}/pay/cancel`
+        };
+
+        console.log('📦 PayOS Request Payload:', JSON.stringify(payload, null, 2));
+
+        // Tạo signature từ payload (KHÔNG bao gồm clientId)
+        const sigStr = buildSignatureString(payload);
+        console.log('🔐 Signature String:', sigStr);
+
+        const signature = calcHmacSha256Hex(sigStr, process.env.PAYOS_CHECKSUM_KEY || cfg.checksumKey);
+        console.log('✍️ Signature:', signature);
+
+        const url = `${process.env.PAYOS_API_BASE || cfg.apiBase}/v2/payment-requests`;
+        console.log('🌐 PayOS URL:', url);
+
+        // Headers theo docs PayOS
+        const headers = {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${process.env.PAYOS_API_KEY || cfg.apiKey}`,
-            'X-Signature': signature
-        },
-        timeout: 15000
-    });
-    return res.data;
+            'x-client-id': process.env.PAYOS_CLIENT_ID || cfg.clientId,
+            'x-api-key': process.env.PAYOS_API_KEY || cfg.apiKey
+        };
+
+        console.log('📤 Sending request to PayOS...');
+
+        const res = await axios.post(url, payload, {
+            headers,
+            timeout: 15000
+        });
+
+        console.log('✅ PayOS Response:', JSON.stringify(res.data, null, 2));
+
+        return res.data;
+
+    } catch (error) {
+        console.error('❌ PayOS createPaymentLink Error:');
+        console.error('Message:', error.message);
+
+        if (error.response) {
+            console.error('Status:', error.response.status);
+            console.error('Data:', JSON.stringify(error.response.data, null, 2));
+            console.error('Headers:', error.response.headers);
+        } else if (error.request) {
+            console.error('No response received:', error.request);
+        }
+
+        // Ném lỗi với thông tin chi tiết
+        const errorMsg = error.response?.data?.message
+            || error.response?.data?.error
+            || error.message
+            || 'PayOS API Error';
+
+        throw new Error(`PayOS Error: ${errorMsg}`);
+    }
 }
 
 async function inquiryPayment(paymentLinkId) {
-    const url = `${process.env.PAYOS_API_BASE || cfg.apiBase}/payments/${encodeURIComponent(paymentLinkId)}`;
-    const res = await axios.get(url, {
-        headers: { 'Authorization': `Bearer ${process.env.PAYOS_API_KEY || cfg.apiKey}` },
-        timeout: 10000
-    });
-    return res.data;
+    try {
+        const url = `${process.env.PAYOS_API_BASE || cfg.apiBase}/v2/payment-requests/${encodeURIComponent(paymentLinkId)}`;
+
+        const res = await axios.get(url, {
+            headers: {
+                'x-client-id': process.env.PAYOS_CLIENT_ID || cfg.clientId,
+                'x-api-key': process.env.PAYOS_API_KEY || cfg.apiKey
+            },
+            timeout: 10000
+        });
+
+        return res.data;
+    } catch (error) {
+        console.error('inquiryPayment error:', error.response?.data || error.message);
+        throw error;
+    }
 }
 
 module.exports = {
