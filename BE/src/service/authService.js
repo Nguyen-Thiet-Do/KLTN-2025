@@ -2,9 +2,9 @@
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcrypt");
 const sequelize = require("../config/database");
-const { generateRandomCode, generateCardNumber } = require('../utils/helpers'); // ensure exists
-const mailService = require('./mailService'); // ensure exists
-const payosService = require('./payosService'); // ensure exists
+const { generateRandomCode, generateCardNumber } = require('../utils/helpers');
+const mailService = require('./mailService');
+const payosService = require('./payosService');
 
 const {
   Account,
@@ -66,7 +66,6 @@ const getFullProfile = async (accountId, roleId) => {
         // --- Lấy thẻ thành viên hiện tại (nếu có) ---
         let memberCardData = null;
         try {
-          // include CardType theo alias 'cardType' (như bạn khai trong model/index)
           const memberCard = await MemberCard.findOne({
             where: {
               readerId: profileData.readerId,
@@ -90,11 +89,10 @@ const getFullProfile = async (accountId, roleId) => {
               note: mc.note || null,
               created_at: mc.created_at,
               updated_at: mc.updated_at,
-              cardType: mc.cardType || null, // từ include
+              cardType: mc.cardType || null,
             };
           }
         } catch (err) {
-          // Nếu include alias gây lỗi — fallback lấy đơn giản
           console.warn("MemberCard include CardType failed:", err.message);
           try {
             const memberCard = await MemberCard.findOne({
@@ -126,10 +124,6 @@ const getFullProfile = async (accountId, roleId) => {
         }
 
         // --- Đếm số phiếu mượn theo trạng thái ---
-        // pending = "PENDING"
-        // waitingPickup (chờ đến lấy) = "WAITING_FOR_PICKUP"
-        // borrowing = ["BORROWING","BORROWED","OVERDUE"]
-        // returned = "RETURNED"
         const pendingCount = await LoanSlip.count({
           where: {
             readerId: profileData.readerId,
@@ -165,7 +159,6 @@ const getFullProfile = async (accountId, roleId) => {
           },
         }).catch(() => 0);
 
-        // Gắn thêm thông tin vào profile trả về
         profileData = {
           ...profileData,
           memberCard: memberCardData,
@@ -213,13 +206,11 @@ const loginService = async (account) => {
   const accessToken = generateAccessToken(account);
   const refreshToken = generateRefreshToken(account);
 
-  // Cập nhật refresh_token trong DB
   await Account.scope("withSecrets").update(
     { refresh_token: refreshToken },
     { where: { accountId: account.accountId } }
   );
 
-  // Lấy thông tin đầy đủ
   const fullProfile = await getFullProfile(account.accountId, account.roleId);
 
   return {
@@ -272,7 +263,7 @@ const logoutService = async (accountId) => {
 };
 
 // =============================
-// 📝 REGISTER READER
+// 📝 REGISTER READER (Legacy - keep for compatibility)
 // =============================
 const registerReaderService = async (userData) => {
   const {
@@ -381,54 +372,149 @@ const registerReaderService = async (userData) => {
   }
 };
 
-
-
-// In-memory OTP store (dev only)
+// =============================
+// 🔐 IN-MEMORY OTP STORE (FIXED)
+// =============================
 const OTP_STORE = new Map();
+
+/**
+ * Lưu OTP với email được normalize (lowercase + trim)
+ */
 function _saveOtp(email, otp, ttl = 10 * 60 * 1000, meta = {}) {
+  const normalizedEmail = String(email).toLowerCase().trim();
   const expiresAt = Date.now() + ttl;
-  OTP_STORE.set(email, { otp: String(otp), expiresAt, meta });
+
+  OTP_STORE.set(normalizedEmail, {
+    otp: String(otp),
+    expiresAt,
+    meta
+  });
+
+  console.log(`💾 OTP saved for: ${normalizedEmail}`);
+  console.log(`   OTP: ${otp}`);
+  console.log(`   Expires: ${new Date(expiresAt).toISOString()}`);
 }
+
+/**
+ * Verify OTP với email được normalize
+ */
 function _verifyOtp(email, otp) {
-  const row = OTP_STORE.get(email);
-  if (!row) return false;
-  if (Date.now() > row.expiresAt) { OTP_STORE.delete(email); return false; }
-  if (String(otp) !== String(row.otp)) return false;
-  OTP_STORE.delete(email);
+  const normalizedEmail = String(email).toLowerCase().trim();
+  const row = OTP_STORE.get(normalizedEmail);
+
+  console.log(`🔍 Verifying OTP for: ${normalizedEmail}`);
+  console.log(`   Stored OTP: ${row?.otp || 'NOT_FOUND'}`);
+  console.log(`   Input OTP: ${otp}`);
+  console.log(`   Expires at: ${row ? new Date(row.expiresAt).toISOString() : 'N/A'}`);
+
+  if (!row) {
+    console.log('❌ OTP not found in store');
+    return false;
+  }
+
+  if (Date.now() > row.expiresAt) {
+    console.log('❌ OTP expired');
+    OTP_STORE.delete(normalizedEmail);
+    return false;
+  }
+
+  const storedOtp = String(row.otp).trim();
+  const inputOtp = String(otp).trim();
+
+  if (storedOtp !== inputOtp) {
+    console.log(`❌ OTP mismatch: stored="${storedOtp}" vs input="${inputOtp}"`);
+    return false;
+  }
+
+  console.log('✅ OTP valid - deleting from store');
+  OTP_STORE.delete(normalizedEmail);
   return true;
 }
 
-/** sendRegistrationOtpService(email) */
+// =============================
+// 📧 SEND REGISTRATION OTP
+// =============================
 async function sendRegistrationOtpService(email) {
-  if (!email) throw Object.assign(new Error('MISSING_EMAIL'), { statusCode: 400 });
-  const existing = await Account.findOne({ where: { email } });
-  if (existing) throw Object.assign(new Error('EMAIL_EXISTS'), { statusCode: 409 });
+  if (!email) {
+    throw Object.assign(new Error('MISSING_EMAIL'), { statusCode: 400 });
+  }
+
+  const normalizedEmail = email.toLowerCase().trim();
+
+  // Check if email exists (case-insensitive)
+  const existing = await Account.findOne({
+    where: sequelize.where(
+      sequelize.fn('LOWER', sequelize.col('email')),
+      normalizedEmail
+    )
+  });
+
+  if (existing) {
+    throw Object.assign(new Error('EMAIL_EXISTS'), { statusCode: 409 });
+  }
+
   const otp = generateRandomCode(6);
-  _saveOtp(email, otp);
+  _saveOtp(normalizedEmail, otp);
+
   await mailService.sendOtpEmail(email, otp);
+
   return { ok: true, message: 'OTP_SENT' };
 }
 
-/** verifyOtpAndCreateAccountService(payload) */
+// =============================
+// ✅ VERIFY OTP AND CREATE ACCOUNT
+// =============================
 async function verifyOtpAndCreateAccountService(payload) {
-  const { email, otp, password, fullName, phoneNumber, dateOfBirth, gender, cccd, address } = payload;
-  if (!email || !otp || !password || !fullName) throw Object.assign(new Error('MISSING_FIELDS'), { statusCode: 400 });
-  if (!_verifyOtp(email, otp)) throw Object.assign(new Error('OTP_INVALID_OR_EXPIRED'), { statusCode: 400 });
+  const {
+    email,
+    otp,
+    password,
+    fullName,
+    phoneNumber,
+    dateOfBirth,
+    gender,
+    cccd,
+    address
+  } = payload;
 
-  const ex = await Account.findOne({ where: { email } });
-  if (ex) throw Object.assign(new Error('EMAIL_EXISTS'), { statusCode: 409 });
+  if (!email || !otp || !password || !fullName) {
+    throw Object.assign(new Error('MISSING_FIELDS'), { statusCode: 400 });
+  }
+
+  const normalizedEmail = email.toLowerCase().trim();
+
+  // Verify OTP
+  if (!_verifyOtp(normalizedEmail, otp)) {
+    throw Object.assign(new Error('OTP_INVALID_OR_EXPIRED'), { statusCode: 400 });
+  }
+
+  // Double-check email (case-insensitive)
+  const ex = await Account.findOne({
+    where: sequelize.where(
+      sequelize.fn('LOWER', sequelize.col('email')),
+      normalizedEmail
+    )
+  });
+
+  if (ex) {
+    throw Object.assign(new Error('EMAIL_EXISTS'), { statusCode: 409 });
+  }
+
   if (cccd) {
     const er = await Reader.findOne({ where: { cccd } });
-    if (er) throw Object.assign(new Error('CCCD_EXISTS'), { statusCode: 409 });
+    if (er) {
+      throw Object.assign(new Error('CCCD_EXISTS'), { statusCode: 409 });
+    }
   }
 
   const tx = await sequelize.transaction();
+
   try {
     const saltRounds = Number(process.env.BCRYPT_SALT_ROUNDS) || 10;
     const passwordHash = await bcrypt.hash(password, saltRounds);
 
     const account = await Account.create({
-      email,
+      email: normalizedEmail,
       phoneNumber: phoneNumber || null,
       passwordHash,
       status: 'active',
@@ -448,27 +534,44 @@ async function verifyOtpAndCreateAccountService(payload) {
 
     await tx.commit();
 
-    // return minimal info (do not modify existing token logic in your file)
-    return { account: { accountId: account.accountId, email: account.email }, reader: { readerId: reader.readerId, fullName: reader.fullName } };
+    console.log(`✅ Account created: ${account.email} | Reader: ${reader.readerId}`);
+
+    return {
+      account: {
+        accountId: account.accountId,
+        email: account.email
+      },
+      reader: {
+        readerId: reader.readerId,
+        fullName: reader.fullName
+      }
+    };
   } catch (err) {
     await tx.rollback();
+    console.error('❌ Transaction failed:', err.message);
     throw err;
   }
 }
 
-/**
- * completeRegistrationService({ readerId, cardTypeId, action='SKIP'|'PAY', extraInfo })
- */
+// =============================
+// 🎫 COMPLETE REGISTRATION
+// =============================
 async function completeRegistrationService({ readerId, cardTypeId, action = 'SKIP', extraInfo = {} }) {
-  if (!readerId || !cardTypeId) throw Object.assign(new Error('MISSING_FIELDS'), { statusCode: 400 });
+  if (!readerId || !cardTypeId) {
+    throw Object.assign(new Error('MISSING_FIELDS'), { statusCode: 400 });
+  }
+
   const cardType = await CardType.findOne({ where: { cardTypeId, deleted: false } });
-  if (!cardType) throw Object.assign(new Error('CARD_TYPE_NOT_FOUND'), { statusCode: 404 });
+  if (!cardType) {
+    throw Object.assign(new Error('CARD_TYPE_NOT_FOUND'), { statusCode: 404 });
+  }
 
   if (action === 'SKIP' || Number(cardType.price) <= 0) {
     const cardNumber = generateCardNumber();
     const today = new Date();
     const issueDate = today.toISOString().slice(0, 10);
     const expiryDate = new Date(today.getTime() + (cardType.duration || 365) * 24 * 3600 * 1000).toISOString().slice(0, 10);
+
     const mc = await MemberCard.create({
       readerId,
       cardNumber,
@@ -479,10 +582,11 @@ async function completeRegistrationService({ readerId, cardTypeId, action = 'SKI
       status: 'ACTIVE',
       note: 'created_via_registration_skip_or_free'
     });
+
     return { ok: true, free: true, memberCard: mc };
   }
 
-  // Paid flow: create Payment PENDING and create PayOS link
+  // Paid flow
   const orderCode = `REG${Date.now()}-${readerId}`;
   const payment = await Payment.create({
     loanSlipId: null,
@@ -503,19 +607,40 @@ async function completeRegistrationService({ readerId, cardTypeId, action = 'SKI
 
   let payosResp;
   try {
-    payosResp = await payosService.createPaymentLink({ orderCode, amount: Number(cardType.price), description: `Mua thẻ ${cardType.typeName}`, returnUrl, cancelUrl });
+    payosResp = await payosService.createPaymentLink({
+      orderCode,
+      amount: Number(cardType.price),
+      description: `Mua thẻ ${cardType.typeName}`,
+      returnUrl,
+      cancelUrl
+    });
   } catch (err) {
-    await payment.update({ status: 'FAILED', note: (payment.note || '') + '|payos_create_failed' });
+    await payment.update({
+      status: 'FAILED',
+      note: (payment.note || '') + '|payos_create_failed'
+    });
     throw Object.assign(new Error('PAYOS_CREATE_FAILED'), { statusCode: 500 });
   }
 
   const payosData = payosResp?.data || payosResp || {};
-  await payment.update({ note: (payment.note || '') + `|payos:${JSON.stringify({ paymentLinkId: payosData.paymentLinkId, qr: payosData.qr || payosData.deepLink || null })}` });
+  await payment.update({
+    note: (payment.note || '') + `|payos:${JSON.stringify({
+      paymentLinkId: payosData.paymentLinkId,
+      qr: payosData.qr || payosData.deepLink || null
+    })}`
+  });
 
-  return { ok: true, paymentId: payment.paymentId, amount: payment.amount, payos: payosData };
+  return {
+    ok: true,
+    paymentId: payment.paymentId,
+    amount: payment.amount,
+    payos: payosData
+  };
 }
 
-/** finalizePaymentAndCreateMemberCard(paymentOrId) - used by webhook */
+// =============================
+// 💳 FINALIZE PAYMENT AND CREATE MEMBER CARD
+// =============================
 async function finalizePaymentAndCreateMemberCard(paymentOrId) {
   let payment = paymentOrId;
   if (!payment || !payment.paymentId) {
@@ -523,7 +648,6 @@ async function finalizePaymentAndCreateMemberCard(paymentOrId) {
   }
   if (!payment) throw new Error('PAYMENT_NOT_FOUND');
 
-  // if already completed, return (idempotent)
   if (String(payment.status).toUpperCase() === 'COMPLETED' || String(payment.status).toUpperCase() === 'PAID') {
     return payment;
   }
@@ -532,13 +656,11 @@ async function finalizePaymentAndCreateMemberCard(paymentOrId) {
   const m = /cardType:(\d+)/.exec(note);
   const cardTypeId = m ? Number(m[1]) : null;
 
-  // if no card type tracked in note, mark complete but warn
   if (!cardTypeId) {
     await payment.update({ status: 'COMPLETED', note: note + '|no_cardType_found' });
     return payment;
   }
 
-  // check existing active member card for reader
   const existing = await MemberCard.findOne({
     where: { readerId: payment.readerId, status: 'ACTIVE', deleted: false }
   });
@@ -549,7 +671,6 @@ async function finalizePaymentAndCreateMemberCard(paymentOrId) {
     return { payment: await Payment.findByPk(payment.paymentId), memberCard: existing };
   }
 
-  // create new member card
   const cardType = await CardType.findByPk(cardTypeId);
   const cardNumber = generateCardNumber();
   const today = new Date();
@@ -572,7 +693,6 @@ async function finalizePaymentAndCreateMemberCard(paymentOrId) {
 
   return { payment: await Payment.findByPk(payment.paymentId), memberCard: card };
 }
-
 
 // =============================
 // EXPORT
