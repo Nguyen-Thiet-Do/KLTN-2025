@@ -63,11 +63,18 @@ async function createPaymentLink({ orderCode, amount, description, returnUrl, ca
             throw new Error('orderCode phải là số nguyên dương');
         }
 
-        // ❌ BỎ clientId ra khỏi payload - PayOS không cần field này trong body
+        // ✅ Payload theo chuẩn PayOS v2 - items là BẮT BUỘC
         const payload = {
             orderCode: numericOrderCode,
             amount: Number(amount),
             description: description || 'Thanh toán',
+            items: [
+                {
+                    name: description || 'Thanh toán',
+                    quantity: 1,
+                    price: Number(amount)
+                }
+            ],
             returnUrl: returnUrl || `${cfg.appBaseUrl}/pay/return`,
             cancelUrl: cancelUrl || `${cfg.appBaseUrl}/pay/cancel`
         };
