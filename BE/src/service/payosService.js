@@ -1,4 +1,5 @@
 // src/service/payosService.js
+const PayOS = require('@payos/node').default; // ✅ Thử import default
 const { createHmac } = require('crypto');
 const cfg = require('../config/payosConfig');
 
@@ -7,60 +8,49 @@ function getEnv(key, fallback) {
 }
 
 // ============================================================
-// 🔧 KHỞI TẠO PAYOS - TRY MULTIPLE PATTERNS
+// 🔧 KHỞI TẠO PAYOS THEO DOCS CHÍNH THỨC
 // ============================================================
-let payos = null;
+const clientId = getEnv('PAYOS_CLIENT_ID', cfg.clientId);
+const apiKey = getEnv('PAYOS_API_KEY', cfg.apiKey);
+const checksumKey = getEnv('PAYOS_CHECKSUM_KEY', cfg.checksumKey);
+
+console.log('🔑 PayOS credentials:', {
+    clientId: clientId?.substring(0, 10) + '...',
+    apiKey: apiKey?.substring(0, 10) + '...',
+    checksumKey: checksumKey?.substring(0, 10) + '...'
+});
+
+let payos;
 
 try {
-    // Pattern 1: Thử default export
-    const PayOSModule = require('@payos/node');
+    // Method 1: Using default export
+    payos = new PayOS(clientId, apiKey, checksumKey);
+    console.log('✅ PayOS initialized via default export');
+} catch (e1) {
+    console.error('❌ Default export failed:', e1.message);
 
-    console.log('📦 PayOS module keys:', Object.keys(PayOSModule));
-    console.log('📦 PayOS module type:', typeof PayOSModule);
+    try {
+        // Method 2: Using named export
+        const PayOSClass = require('@payos/node').PayOS;
+        payos = new PayOSClass(clientId, apiKey, checksumKey);
+        console.log('✅ PayOS initialized via named export');
+    } catch (e2) {
+        console.error('❌ Named export failed:', e2.message);
 
-    // Case 1: Named export { PayOS }
-    if (PayOSModule.PayOS && typeof PayOSModule.PayOS === 'function') {
-        console.log('✅ Found PayOS as named export');
-        payos = new PayOSModule.PayOS(
-            getEnv('PAYOS_CLIENT_ID', cfg.clientId),
-            getEnv('PAYOS_API_KEY', cfg.apiKey),
-            getEnv('PAYOS_CHECKSUM_KEY', cfg.checksumKey)
-        );
+        try {
+            // Method 3: Direct require
+            const PayOSModule = require('@payos/node');
+            payos = PayOSModule(clientId, apiKey, checksumKey);
+            console.log('✅ PayOS initialized via direct call');
+        } catch (e3) {
+            console.error('❌ All initialization methods failed');
+            throw new Error('Cannot initialize PayOS - check package installation');
+        }
     }
-    // Case 2: Default export is constructor
-    else if (typeof PayOSModule === 'function') {
-        console.log('✅ PayOS is default export (function)');
-        payos = new PayOSModule(
-            getEnv('PAYOS_CLIENT_ID', cfg.clientId),
-            getEnv('PAYOS_API_KEY', cfg.apiKey),
-            getEnv('PAYOS_CHECKSUM_KEY', cfg.checksumKey)
-        );
-    }
-    // Case 3: Default export has default property
-    else if (PayOSModule.default && typeof PayOSModule.default === 'function') {
-        console.log('✅ Found PayOS as default.default');
-        payos = new PayOSModule.default(
-            getEnv('PAYOS_CLIENT_ID', cfg.clientId),
-            getEnv('PAYOS_API_KEY', cfg.apiKey),
-            getEnv('PAYOS_CHECKSUM_KEY', cfg.checksumKey)
-        );
-    }
-    // Case 4: Already initialized client
-    else if (PayOSModule.createPaymentLink && typeof PayOSModule.createPaymentLink === 'function') {
-        console.log('✅ PayOS already initialized');
-        payos = PayOSModule;
-    }
-    else {
-        throw new Error('Cannot find PayOS constructor in module');
-    }
-
-    console.log('✅ PayOS initialized successfully');
-    console.log('   Has createPaymentLink:', typeof payos.createPaymentLink);
-
-} catch (error) {
-    console.error('❌ Failed to initialize PayOS:', error.message);
-    throw error;
 }
+
+// Verify methods exist
+console.log('📋 Available PayOS methods:', Object.getOwnPropertyNames(Object.getPrototypeOf(payos)));
 
 // ============================================================
 // HELPER FUNCTIONS
@@ -93,7 +83,6 @@ function calcHmacSha256Hex(dataStr, secret) {
 
 function verifyWebhookSignature(data, signature) {
     const sigStr = buildSignatureString(data);
-    const checksumKey = getEnv('PAYOS_CHECKSUM_KEY', cfg.checksumKey);
     const expected = calcHmacSha256Hex(sigStr, checksumKey);
     return expected === signature;
 }
@@ -142,7 +131,8 @@ async function createPaymentLink(params) {
             throw new Error('orderCode không hợp lệ');
         }
 
-        const payload = {
+        // ✅ Payload theo docs PayOS chính thức
+        const paymentData = {
             orderCode: orderCode,
             amount: Number(amount),
             description: description || 'Thanh toán thẻ thành viên',
@@ -157,18 +147,34 @@ async function createPaymentLink(params) {
             ]
         };
 
-        console.log('📦 Creating PayOS payment:', JSON.stringify(payload, null, 2));
+        console.log('📦 Creating PayOS payment:', JSON.stringify(paymentData, null, 2));
 
-        // Try multiple method names
+        // ✅ Gọi API PayOS - thử tất cả method names có thể
         let result;
+
         if (typeof payos.createPaymentLink === 'function') {
-            result = await payos.createPaymentLink(payload);
-        } else if (typeof payos.create === 'function') {
-            result = await payos.create(payload);
-        } else if (typeof payos.createPayment === 'function') {
-            result = await payos.createPayment(payload);
-        } else {
-            throw new Error('PayOS client has no create method');
+            console.log('🔄 Using createPaymentLink()');
+            result = await payos.createPaymentLink(paymentData);
+        }
+        else if (typeof payos.createPayment === 'function') {
+            console.log('🔄 Using createPayment()');
+            result = await payos.createPayment(paymentData);
+        }
+        else if (typeof payos.create === 'function') {
+            console.log('🔄 Using create()');
+            result = await payos.create(paymentData);
+        }
+        else if (typeof payos.payment?.create === 'function') {
+            console.log('🔄 Using payment.create()');
+            result = await payos.payment.create(paymentData);
+        }
+        else {
+            // List all available methods for debugging
+            const availableMethods = Object.getOwnPropertyNames(Object.getPrototypeOf(payos))
+                .filter(name => typeof payos[name] === 'function');
+
+            console.error('❌ No create method found. Available methods:', availableMethods);
+            throw new Error(`PayOS client missing create method. Available: ${availableMethods.join(', ')}`);
         }
 
         console.log('✅ PayOS response:', JSON.stringify(result, null, 2));
@@ -182,7 +188,8 @@ async function createPaymentLink(params) {
         console.error('❌ PayOS API Error:', {
             message: error.message,
             response: error.response?.data,
-            status: error.response?.status
+            status: error.response?.status,
+            stack: error.stack
         });
         throw error;
     }

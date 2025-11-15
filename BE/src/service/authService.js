@@ -556,6 +556,9 @@ async function verifyOtpAndCreateAccountService(payload) {
 // =============================
 // 🎫 COMPLETE REGISTRATION (FIXED)
 // =============================
+// =============================
+// 🎫 COMPLETE REGISTRATION (FIXED)
+// =============================
 async function completeRegistrationService({ readerId, cardTypeId, action = 'SKIP', extraInfo = {} }) {
   if (!readerId || !cardTypeId) {
     throw Object.assign(new Error('MISSING_FIELDS'), { statusCode: 400 });
@@ -626,9 +629,15 @@ async function completeRegistrationService({ readerId, cardTypeId, action = 'SKI
     payosResp = await payosService.createPaymentLink({
       orderCode: orderCode, // ✅ Number, không phải string
       amount: Number(cardType.price),
-      description: `Mua thẻ ${cardType.typeName || cardType.cardTypeName}`,
+      description: `Mua thẻ ${cardType.cardTypeName || cardType.typeName || 'Membership'}`,
       returnUrl,
-      cancelUrl
+      cancelUrl,
+      // ✅ Thêm items array (bắt buộc với PayOS)
+      items: [{
+        name: cardType.cardTypeName || cardType.typeName || 'Membership Card',
+        quantity: 1,
+        price: Number(cardType.price)
+      }]
     });
 
     console.log('✅ PayOS response:', JSON.stringify(payosResp, null, 2));

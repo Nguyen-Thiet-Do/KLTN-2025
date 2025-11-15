@@ -6,12 +6,28 @@ const authService = require('../service/authService'); // để finalize và t�
 // POST /api/payos/create
 // body: { orderCode, amount, description, returnUrl, cancelUrl }
 // (in our registration flow you can call with { readerId, cardTypeId } and build orderCode in service)
+// POST /api/payos/create
 async function createPayment(req, res) {
     try {
         const { orderCode, amount, description, returnUrl, cancelUrl } = req.body;
-        if (!orderCode || !amount) return res.status(400).json({ ok: false, message: 'orderCode & amount required' });
+        if (!amount) return res.status(400).json({ ok: false, message: 'amount required' });
 
-        const resp = await payosService.createPaymentLink({ orderCode, amount, description, returnUrl, cancelUrl });
+        // ✅ Đảm bảo có items array
+        const items = req.body.items || [{
+            name: description || 'Payment',
+            quantity: 1,
+            price: Number(amount)
+        }];
+
+        const resp = await payosService.createPaymentLink({
+            orderCode, // Có thể null, service sẽ tự tạo
+            amount,
+            description,
+            returnUrl,
+            cancelUrl,
+            items // ✅ Thêm items
+        });
+
         return res.json({ ok: true, data: resp });
     } catch (err) {
         console.error('createPayment error', err?.response?.data || err.message);
