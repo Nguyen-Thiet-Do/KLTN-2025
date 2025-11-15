@@ -1,5 +1,5 @@
 // src/service/payosService.js
-const PayOS = require('@payos/node').default; // ✅ Thử import default
+const { PayOS } = require('@payos/node'); // ✅ Named import
 const { createHmac } = require('crypto');
 const cfg = require('../config/payosConfig');
 
@@ -8,49 +8,17 @@ function getEnv(key, fallback) {
 }
 
 // ============================================================
-// 🔧 KHỞI TẠO PAYOS THEO DOCS CHÍNH THỨC
+// 🔧 KHỞI TẠO PAYOS
 // ============================================================
 const clientId = getEnv('PAYOS_CLIENT_ID', cfg.clientId);
 const apiKey = getEnv('PAYOS_API_KEY', cfg.apiKey);
 const checksumKey = getEnv('PAYOS_CHECKSUM_KEY', cfg.checksumKey);
 
-console.log('🔑 PayOS credentials:', {
-    clientId: clientId?.substring(0, 10) + '...',
-    apiKey: apiKey?.substring(0, 10) + '...',
-    checksumKey: checksumKey?.substring(0, 10) + '...'
-});
+console.log('🔑 PayOS credentials loaded');
 
-let payos;
+const payos = new PayOS(clientId, apiKey, checksumKey);
 
-try {
-    // Method 1: Using default export
-    payos = new PayOS(clientId, apiKey, checksumKey);
-    console.log('✅ PayOS initialized via default export');
-} catch (e1) {
-    console.error('❌ Default export failed:', e1.message);
-
-    try {
-        // Method 2: Using named export
-        const PayOSClass = require('@payos/node').PayOS;
-        payos = new PayOSClass(clientId, apiKey, checksumKey);
-        console.log('✅ PayOS initialized via named export');
-    } catch (e2) {
-        console.error('❌ Named export failed:', e2.message);
-
-        try {
-            // Method 3: Direct require
-            const PayOSModule = require('@payos/node');
-            payos = PayOSModule(clientId, apiKey, checksumKey);
-            console.log('✅ PayOS initialized via direct call');
-        } catch (e3) {
-            console.error('❌ All initialization methods failed');
-            throw new Error('Cannot initialize PayOS - check package installation');
-        }
-    }
-}
-
-// Verify methods exist
-console.log('📋 Available PayOS methods:', Object.getOwnPropertyNames(Object.getPrototypeOf(payos)));
+console.log('✅ PayOS initialized successfully');
 
 // ============================================================
 // HELPER FUNCTIONS
@@ -95,29 +63,37 @@ function safeOrderCodeToNumber(orderCode) {
     if (typeof orderCode === 'number') {
         return Math.floor(orderCode);
     }
-
+    
     const match = String(orderCode).match(/(\d{13,})/);
     if (match) {
         return Number(match[1]);
     }
-
+    
     console.warn('⚠️ Cannot parse orderCode, generating new one:', orderCode);
     return Date.now();
 }
 
 // ============================================================
-// CORE API WRAPPERS
+// 🔐 TẠO SIGNATURE CHO PAYMENT REQUEST
+// ============================================================
+function generatePaymentSignature(data) {
+    const sigStr = buildSignatureString(data);
+    return calcHmacSha256Hex(sigStr, checksumKey);
+}
+
+// ============================================================
+// CORE API WRAPPERS - SỬ DỤNG HTTP CLIENT
 // ============================================================
 async function createPaymentLink(params) {
     try {
         const { amount, description } = params;
-
+        
         if (!amount) {
             throw new Error('amount là bắt buộc');
         }
 
         let orderCode = params.orderCode;
-
+        
         if (!orderCode) {
             orderCode = generateOrderCode();
         } else if (typeof orderCode === 'string') {
@@ -125,13 +101,13 @@ async function createPaymentLink(params) {
         } else {
             orderCode = Math.floor(Number(orderCode));
         }
-
+        
         if (isNaN(orderCode) || orderCode <= 0) {
             console.error('❌ Invalid orderCode:', params.orderCode);
             throw new Error('orderCode không hợp lệ');
         }
 
-        // ✅ Payload theo docs PayOS chính thức
+        // ✅ Payload theo PayOS API docs
         const paymentData = {
             orderCode: orderCode,
             amount: Number(amount),
@@ -147,41 +123,39 @@ async function createPaymentLink(params) {
             ]
         };
 
+        // ✅ Tạo signature
+        const signature = generatePaymentSignature(paymentData);
+        paymentData.signature = signature;
+
         console.log('📦 Creating PayOS payment:', JSON.stringify(paymentData, null, 2));
 
-        // ✅ Gọi API PayOS - thử tất cả method names có thể
+        // ✅ Gọi API PayOS - PayOS client có method post()
         let result;
-
-        if (typeof payos.createPaymentLink === 'function') {
-            console.log('🔄 Using createPaymentLink()');
-            result = await payos.createPaymentLink(paymentData);
+        
+        try {
+            // Endpoint: POST /v2/payment-requests
+            result = await payos.post('/v2/payment-requests', paymentData);
+            console.log('✅ PayOS raw response:', JSON.stringify(result, null, 2));
+        } catch (err) {
+            console.error('❌ POST /v2/payment-requests failed:', err.message);
+            console.error('Error details:', err.response?.data || err.data);
+            throw err;
         }
-        else if (typeof payos.createPayment === 'function') {
-            console.log('🔄 Using createPayment()');
-            result = await payos.createPayment(paymentData);
-        }
-        else if (typeof payos.create === 'function') {
-            console.log('🔄 Using create()');
-            result = await payos.create(paymentData);
-        }
-        else if (typeof payos.payment?.create === 'function') {
-            console.log('🔄 Using payment.create()');
-            result = await payos.payment.create(paymentData);
-        }
-        else {
-            // List all available methods for debugging
-            const availableMethods = Object.getOwnPropertyNames(Object.getPrototypeOf(payos))
-                .filter(name => typeof payos[name] === 'function');
-
-            console.error('❌ No create method found. Available methods:', availableMethods);
-            throw new Error(`PayOS client missing create method. Available: ${availableMethods.join(', ')}`);
+        
+        // Response structure từ PayOS: { code, desc, data: { ... } }
+        if (result.code && result.code !== '00' && String(result.code) !== '00') {
+            throw new Error(`PayOS error [${result.code}]: ${result.desc || result.message || 'Unknown error'}`);
         }
 
-        console.log('✅ PayOS response:', JSON.stringify(result, null, 2));
-
+        const responseData = result.data || result;
+        
+        // ✅ Normalize response
         return {
-            ...result,
-            orderCode: orderCode
+            ...responseData,
+            orderCode: orderCode,
+            checkoutUrl: responseData.checkoutUrl || responseData.checkout_url,
+            qrCode: responseData.qrCode || responseData.qr,
+            paymentLinkId: responseData.paymentLinkId || responseData.id
         };
 
     } catch (error) {
@@ -189,7 +163,7 @@ async function createPaymentLink(params) {
             message: error.message,
             response: error.response?.data,
             status: error.response?.status,
-            stack: error.stack
+            data: error.data
         });
         throw error;
     }
@@ -201,16 +175,15 @@ async function inquiryPayment(orderCode) {
         if (isNaN(code) || code <= 0) {
             throw new Error('orderCode không hợp lệ');
         }
-
-        if (typeof payos.getPaymentLinkInformation === 'function') {
-            return await payos.getPaymentLinkInformation(code);
-        } else if (typeof payos.getPaymentInfo === 'function') {
-            return await payos.getPaymentInfo(code);
-        } else if (typeof payos.inquiry === 'function') {
-            return await payos.inquiry(code);
+        
+        // GET /v2/payment-requests/{orderCode}
+        const result = await payos.get(`/v2/payment-requests/${code}`);
+        
+        if (result.code && result.code !== '00' && String(result.code) !== '00') {
+            throw new Error(`PayOS error: ${result.desc || 'Query failed'}`);
         }
-
-        throw new Error('PayOS client has no inquiry method');
+        
+        return result.data || result;
     } catch (error) {
         console.error('❌ Inquiry error:', error.message);
         throw error;
@@ -223,14 +196,17 @@ async function cancelPayment(orderCode, reason) {
         if (isNaN(code) || code <= 0) {
             throw new Error('orderCode không hợp lệ');
         }
-
-        if (typeof payos.cancelPaymentLink === 'function') {
-            return await payos.cancelPaymentLink(code, reason);
-        } else if (typeof payos.cancel === 'function') {
-            return await payos.cancel(code, reason);
+        
+        // POST /v2/payment-requests/{orderCode}/cancel
+        const result = await payos.post(`/v2/payment-requests/${code}/cancel`, {
+            cancellationReason: reason || 'User cancelled'
+        });
+        
+        if (result.code && result.code !== '00' && String(result.code) !== '00') {
+            throw new Error(`PayOS error: ${result.desc || 'Cancel failed'}`);
         }
-
-        throw new Error('PayOS client has no cancel method');
+        
+        return result.data || result;
     } catch (error) {
         console.error('❌ Cancel error:', error.message);
         throw error;
@@ -239,18 +215,20 @@ async function cancelPayment(orderCode, reason) {
 
 function verifyPaymentWebhookData(webhookData) {
     try {
+        // Nếu PayOS SDK có method verify, dùng nó
         if (payos && typeof payos.verifyPaymentWebhookData === 'function') {
             return payos.verifyPaymentWebhookData(webhookData);
         }
-
-        const signature = webhookData.signature || webhookData.sign || webhookData.data?.signature;
+        
+        // Fallback: tự verify
+        const signature = webhookData.signature || webhookData.sign;
         const data = webhookData.data || webhookData;
-
+        
         if (!signature) {
             console.warn('⚠️ No signature in webhook data');
             return false;
         }
-
+        
         return verifyWebhookSignature(data, signature);
     } catch (err) {
         console.error('❌ verifyPaymentWebhookData error:', err?.message || err);
@@ -267,5 +245,6 @@ module.exports = {
     buildSignatureString,
     calcHmacSha256Hex,
     generateOrderCode,
-    safeOrderCodeToNumber
+    safeOrderCodeToNumber,
+    generatePaymentSignature
 };
