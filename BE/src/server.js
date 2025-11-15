@@ -23,6 +23,8 @@ const adminLoanSlipRoutes = require('./route/adminLoanSlip.routes');
 const readerLoanSlipRoutes = require('./route/readerLoanSlip.routes');
 const statisticRoutes = require('./route/statisticRoutes');
 const payosRoutes = require('./route/payos.routes');
+const nodemailer = require('nodemailer');
+
 
 const app = express();
 const port = process.env.PORT || 8080;
@@ -101,24 +103,7 @@ app.get('/health', (req, res) => {
     port: port
   });
 });
-// ============================================================
-// TEST MAILER
-// ============================================================
-const nodemailer = require('nodemailer');
-app.get("/test-mail", async (req, res) => {
-  try {
-    await transporter.sendMail({
-      from: process.env.MAIL_FROM,
-      to: "thietdo134@gmail.com",
-      subject: "Test SMTP",
-      text: "SMTP OK!"
-    });
-    res.send("OK");
-  } catch (e) {
-    console.error("SMTP ERROR:", e);
-    res.status(500).send(e);
-  }
-});
+
 
 // ============================================================
 // ERROR HANDLING
