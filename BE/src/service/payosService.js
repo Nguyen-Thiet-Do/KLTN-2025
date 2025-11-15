@@ -113,14 +113,9 @@ async function createPaymentLink(params) {
     const { orderCode, amount } = params;
     if (!orderCode || !amount) throw new Error('orderCode và amount là bắt buộc');
 
-    // normalize orderCode -> number
-    let num = orderCode;
-    if (typeof num === 'string') num = parseInt(num.replace(/\D/g, ''), 10);
-    num = Number(num);
-    if (isNaN(num) || num <= 0) throw new Error('orderCode phải là số nguyên dương');
-
+    // ✅ GIỮ NGUYÊN orderCode dạng string/number như client gửi
     const payload = {
-        orderCode: num,
+        orderCode: orderCode, // Không convert
         amount: Number(amount),
         description: params.description || 'Thanh toán',
         returnUrl: params.returnUrl || `${cfg.appBaseUrl}/pay/return`,
