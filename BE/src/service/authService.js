@@ -652,7 +652,7 @@ async function finalizePaymentAndCreateMemberCard(paymentOrId) {
     if (!payment || !payment.paymentId) {
       payment = await Payment.findByPk(paymentOrId);
     }
-    
+
     if (!payment) {
       console.error('❌ Payment not found');
       throw new Error('PAYMENT_NOT_FOUND');
@@ -667,10 +667,10 @@ async function finalizePaymentAndCreateMemberCard(paymentOrId) {
 
     // ✅ KIỂM TRA CARD TRƯỚC (quan trọng nhất)
     const existingCard = await MemberCard.findOne({
-      where: { 
-        readerId: payment.readerId, 
-        status: 'ACTIVE', 
-        deleted: false 
+      where: {
+        readerId: payment.readerId,
+        status: 'ACTIVE',
+        deleted: false
       }
     });
 
@@ -693,7 +693,7 @@ async function finalizePaymentAndCreateMemberCard(paymentOrId) {
 
     // ✅ Get CardType
     const cardType = await CardType.findByPk(cardTypeId);
-    
+
     if (!cardType) {
       console.error('❌ CardType not found:', cardTypeId);
       throw new Error('CARD_TYPE_NOT_FOUND');
@@ -724,7 +724,7 @@ async function finalizePaymentAndCreateMemberCard(paymentOrId) {
       readerId: payment.readerId,
       cardNumber,
       cardTypeId,
-      balance: 0.0,
+      balance: Number(payment.amount),
       issueDate,
       expiryDate,
       status: 'ACTIVE',
@@ -745,10 +745,10 @@ async function finalizePaymentAndCreateMemberCard(paymentOrId) {
 
     // ✅ Return fresh data
     const updatedPayment = await Payment.findByPk(payment.paymentId);
-    
-    return { 
-      payment: updatedPayment, 
-      memberCard: card 
+
+    return {
+      payment: updatedPayment,
+      memberCard: card
     };
 
   } catch (error) {
