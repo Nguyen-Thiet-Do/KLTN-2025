@@ -16,17 +16,14 @@ const initOpts = {
 let payos = null;
 let initErrors = [];
 
-// ----- Try multiple ways to initialize based on observed export shapes -----
+// ----- Initialize PayOS -----
 try {
-    // Case A: module exports named PayOS class: require('@payos/node').PayOS
     if (payosModule && typeof payosModule.PayOS === 'function') {
         try {
-            // try constructor with object
             payos = new payosModule.PayOS(initOpts);
         } catch (e1) {
             initErrors.push('PayOS constructor with object failed: ' + (e1.message || e1));
             try {
-                // try constructor with positional args (clientId, apiKey, checksum)
                 payos = new payosModule.PayOS(initOpts.clientId, initOpts.apiKey, initOpts.checksumKey);
             } catch (e2) {
                 initErrors.push('PayOS constructor with positional args failed: ' + (e2.message || e2));
@@ -34,7 +31,6 @@ try {
         }
     }
 
-    // Case B: module itself is a function (initializer)
     if (!payos && typeof payosModule === 'function') {
         try {
             payos = payosModule(initOpts);
@@ -43,7 +39,6 @@ try {
         }
     }
 
-    // Case C: default export (ESM compiled to CommonJS)
     if (!payos && payosModule && typeof payosModule.default === 'function') {
         try {
             payos = payosModule.default(initOpts);
@@ -52,12 +47,10 @@ try {
         }
     }
 
-    // Case D: module already a client-like object (has common methods)
     if (!payos && payosModule && (typeof payosModule.createPaymentLink === 'function' || typeof payosModule.getPaymentLinkInformation === 'function')) {
         payos = payosModule;
     }
 
-    // Case E: named factory method createClient/create
     if (!payos && payosModule && typeof payosModule.createClient === 'function') {
         try {
             payos = payosModule.createClient(initOpts);
@@ -66,7 +59,6 @@ try {
         }
     }
 
-    // If still no client, show keys to help debug (but do not crash silently)
     if (!payos) {
         console.error('@payos/node: unexpected export shape, keys =', Object.keys(payosModule || {}));
         console.error('Init attempts failed:', initErrors);
@@ -88,6 +80,7 @@ function deepSortObj(v) {
     }
     return v;
 }
+
 function buildSignatureString(data) {
     const sorted = deepSortObj(data || {});
     const parts = [];
@@ -99,47 +92,102 @@ function buildSignatureString(data) {
     });
     return parts.join('&');
 }
+
 function calcHmacSha256Hex(dataStr, secret) {
     return createHmac('sha256', secret).update(dataStr).digest('hex');
 }
+
 function verifyWebhookSignature(data, signature) {
     const sigStr = buildSignatureString(data);
     const expected = calcHmacSha256Hex(sigStr, initOpts.checksumKey);
     return expected === signature;
 }
 
+// ✅ Tạo orderCode số nguyên duy nhất
+function generateOrderCode() {
+    // Timestamp (ms) + random 3 chữ số
+    return Date.now() * 1000 + Math.floor(Math.random() * 1000);
+}
+
 // ---------------- core wrappers ----------------
 async function createPaymentLink(params) {
-    const { orderCode, amount } = params;
-    if (!orderCode || !amount) throw new Error('orderCode và amount là bắt buộc');
+    const { amount, description, readerId, cardTypeId } = params;
 
-    // ✅ GIỮ NGUYÊN orderCode dạng string/number như client gửi
+    if (!amount) throw new Error('amount là bắt buộc');
+
+    // ✅ Tạo orderCode là số nguyên
+    const orderCode = params.orderCode || generateOrderCode();
+
+    // ✅ PayOS yêu cầu đầy đủ các trường
     const payload = {
-        orderCode: orderCode, // Không convert
+        orderCode: Number(orderCode), // ⚠️ Phải là NUMBER
         amount: Number(amount),
-        description: params.description || 'Thanh toán',
+        description: description || 'Thanh toán thẻ thành viên',
+
+        // ✅ Không có query params trong returnUrl/cancelUrl ban đầu
         returnUrl: params.returnUrl || `${cfg.appBaseUrl}/pay/return`,
-        cancelUrl: params.cancelUrl || `${cfg.appBaseUrl}/pay/cancel`
+        cancelUrl: params.cancelUrl || `${cfg.appBaseUrl}/pay/cancel`,
+
+        // ✅ Thêm items array (bắt buộc với một số merchant)
+        items: params.items || [
+            {
+                name: description || 'Thẻ thành viên',
+                quantity: 1,
+                price: Number(amount)
+            }
+        ],
+
+        // Optional: buyer info nếu có
+        ...(params.buyerName && { buyerName: params.buyerName }),
+        ...(params.buyerPhone && { buyerPhone: params.buyerPhone }),
+        ...(params.buyerEmail && { buyerEmail: params.buyerEmail })
     };
 
-    console.log('📦 Creating PayOS payment:', payload);
+    console.log('📦 Creating PayOS payment:', JSON.stringify(payload, null, 2));
 
-    if (typeof payos.createPaymentLink === 'function') return await payos.createPaymentLink(payload);
-    if (typeof payos.create === 'function') return await payos.create(payload);
-    if (typeof payos.pay === 'function') return await payos.pay(payload);
+    try {
+        let result;
+        if (typeof payos.createPaymentLink === 'function') {
+            result = await payos.createPaymentLink(payload);
+        } else if (typeof payos.create === 'function') {
+            result = await payos.create(payload);
+        } else if (typeof payos.pay === 'function') {
+            result = await payos.pay(payload);
+        } else {
+            throw new Error('PayOS client missing create method');
+        }
 
-    throw new Error('PayOS client missing create method');
+        console.log('✅ PayOS response:', JSON.stringify(result, null, 2));
+        return result;
+
+    } catch (error) {
+        console.error('❌ PayOS API Error:', {
+            message: error.message,
+            response: error.response?.data,
+            status: error.response?.status,
+            payload
+        });
+        throw error;
+    }
 }
 
 async function inquiryPayment(orderCode) {
-    if (typeof payos.getPaymentLinkInformation === 'function') return await payos.getPaymentLinkInformation(orderCode);
-    if (typeof payos.inquiry === 'function') return await payos.inquiry(orderCode);
+    if (typeof payos.getPaymentLinkInformation === 'function') {
+        return await payos.getPaymentLinkInformation(Number(orderCode));
+    }
+    if (typeof payos.inquiry === 'function') {
+        return await payos.inquiry(Number(orderCode));
+    }
     throw new Error('PayOS client missing inquiry method');
 }
 
 async function cancelPayment(orderCode, reason) {
-    if (typeof payos.cancelPaymentLink === 'function') return await payos.cancelPaymentLink(orderCode, reason);
-    if (typeof payos.cancel === 'function') return await payos.cancel(orderCode, reason);
+    if (typeof payos.cancelPaymentLink === 'function') {
+        return await payos.cancelPaymentLink(Number(orderCode), reason);
+    }
+    if (typeof payos.cancel === 'function') {
+        return await payos.cancel(Number(orderCode), reason);
+    }
     throw new Error('PayOS client missing cancel method');
 }
 
@@ -165,5 +213,6 @@ module.exports = {
     verifyWebhookSignature,
     verifyPaymentWebhookData,
     buildSignatureString,
-    calcHmacSha256Hex
+    calcHmacSha256Hex,
+    generateOrderCode // Export để có thể dùng bên ngoài
 };
