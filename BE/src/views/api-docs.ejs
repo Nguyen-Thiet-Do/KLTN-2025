@@ -168,6 +168,42 @@
             border-top: 1px solid #dee2e6;
         }
 
+        .description-text {
+            margin-bottom: 15px;
+            padding: 15px;
+            background: white;
+            border-radius: 8px;
+            line-height: 1.6;
+            color: #495057;
+        }
+
+        .detailed-description {
+            margin-bottom: 15px;
+            padding: 15px;
+            background: #e7f3ff;
+            border-left: 4px solid #007bff;
+            border-radius: 6px;
+            line-height: 1.7;
+            color: #004085;
+            font-size: 14px;
+        }
+
+        .note-box {
+            margin-top: 15px;
+            padding: 15px;
+            background: #fff3cd;
+            border-left: 4px solid #ffc107;
+            border-radius: 6px;
+            line-height: 1.6;
+            color: #856404;
+            font-size: 14px;
+        }
+
+        .note-box::before {
+            content: '⚠️ ';
+            font-weight: bold;
+        }
+
         .detail-section {
             margin-bottom: 15px;
         }
@@ -191,6 +227,48 @@
             padding: 8px;
             background: #f8f9fa;
             border-radius: 4px;
+        }
+
+        .example-section {
+            margin-top: 15px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            border: 1px solid #dee2e6;
+        }
+
+        .example-section h5 {
+            color: #495057;
+            margin-bottom: 10px;
+            font-size: 13px;
+            font-weight: 600;
+        }
+
+        .example-code {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 15px;
+            border-radius: 6px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            overflow-x: auto;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+
+        .response-examples {
+            margin-top: 15px;
+        }
+
+        .response-example {
+            margin-bottom: 15px;
+        }
+
+        .response-example h6 {
+            color: #667eea;
+            margin-bottom: 8px;
+            font-size: 12px;
+            font-weight: 600;
         }
 
         .test-section {
@@ -306,6 +384,25 @@
             color: #6c757d;
             border-top: 2px solid #e9ecef;
         }
+
+        .error-codes {
+            margin-top: 15px;
+        }
+
+        .error-item {
+            padding: 8px 12px;
+            margin-bottom: 6px;
+            background: #fff5f5;
+            border-left: 3px solid #dc3545;
+            border-radius: 4px;
+            font-size: 13px;
+        }
+
+        .error-code {
+            font-weight: bold;
+            color: #dc3545;
+            font-family: 'Courier New', monospace;
+        }
     </style>
 </head>
 <body>
@@ -344,7 +441,17 @@
                             </div>
                             
                             <div class="endpoint-details" id="endpoint-<%= group.group.replace(/\s+/g, '-') %>-<%= index %>" style="display: none;">
-                                <p style="margin-bottom: 15px; color: #6c757d;"><%= route.description %></p>
+                                <!-- Short Description -->
+                                <div class="description-text">
+                                    <strong>📝 Mô tả:</strong> <%= route.description %>
+                                </div>
+
+                                <!-- Detailed Description -->
+                                <% if (route.detailedDescription) { %>
+                                    <div class="detailed-description">
+                                        <%= route.detailedDescription %>
+                                    </div>
+                                <% } %>
                                 
                                 <% if (route.role) { %>
                                     <div class="detail-section">
@@ -386,6 +493,99 @@
                                     </div>
                                 <% } %>
 
+                                <!-- Response Structure -->
+                                <% if (route.response) { %>
+                                    <div class="detail-section">
+                                        <h4>✅ Response Structure</h4>
+                                        <div class="response-examples">
+                                            <% if (route.response.success) { %>
+                                                <div class="response-example">
+                                                    <h6>Success Response:</h6>
+                                                    <div class="example-code"><%= typeof route.response.success === 'object' ? JSON.stringify(route.response.success, null, 2) : route.response.success %></div>
+                                                </div>
+                                            <% } %>
+                                            <% if (route.response.error) { %>
+                                                <div class="error-codes">
+                                                    <h6>❌ Error Codes:</h6>
+                                                    <% Object.keys(route.response.error).forEach(function(code) { %>
+                                                        <div class="error-item">
+                                                            <span class="error-code"><%= code %></span>: <%= route.response.error[code] %>
+                                                        </div>
+                                                    <% }); %>
+                                                </div>
+                                            <% } %>
+                                            <% if (route.response.skip_or_free) { %>
+                                                <div class="response-example">
+                                                    <h6>Response (SKIP/FREE):</h6>
+                                                    <div class="example-code"><%= JSON.stringify(route.response.skip_or_free, null, 2) %></div>
+                                                </div>
+                                            <% } %>
+                                            <% if (route.response.pay) { %>
+                                                <div class="response-example">
+                                                    <h6>Response (PAY):</h6>
+                                                    <div class="example-code"><%= JSON.stringify(route.response.pay, null, 2) %></div>
+                                                </div>
+                                            <% } %>
+                                            <% if (route.response.reader) { %>
+                                                <div class="response-example">
+                                                    <h6>Response (Reader):</h6>
+                                                    <div class="example-code"><%= JSON.stringify(route.response.reader, null, 2) %></div>
+                                                </div>
+                                            <% } %>
+                                            <% if (route.response.admin_librarian) { %>
+                                                <div class="response-example">
+                                                    <h6>Response (Admin/Librarian):</h6>
+                                                    <div class="example-code"><%= JSON.stringify(route.response.admin_librarian, null, 2) %></div>
+                                                </div>
+                                            <% } %>
+                                        </div>
+                                    </div>
+                                <% } %>
+
+                                <!-- Examples -->
+                                <% if (route.example) { %>
+                                    <div class="example-section">
+                                        <h4 style="color: #667eea; margin-bottom: 15px;">📋 Examples</h4>
+                                        
+                                        <% if (route.example.request || route.example.request_skip || route.example.request_pay) { %>
+                                            <% if (route.example.request) { %>
+                                                <h5>Request Example:</h5>
+                                                <div class="example-code"><%= JSON.stringify(route.example.request, null, 2) %></div>
+                                            <% } %>
+                                            <% if (route.example.request_skip) { %>
+                                                <h5>Request Example (SKIP):</h5>
+                                                <div class="example-code"><%= JSON.stringify(route.example.request_skip, null, 2) %></div>
+                                            <% } %>
+                                            <% if (route.example.request_pay) { %>
+                                                <h5 style="margin-top: 15px;">Request Example (PAY):</h5>
+                                                <div class="example-code"><%= JSON.stringify(route.example.request_pay, null, 2) %></div>
+                                            <% } %>
+                                        <% } %>
+                                        
+                                        <% if (route.example.response || route.example.response_skip || route.example.response_pay) { %>
+                                            <% if (route.example.response) { %>
+                                                <h5 style="margin-top: 15px;">Response Example:</h5>
+                                                <div class="example-code"><%= JSON.stringify(route.example.response, null, 2) %></div>
+                                            <% } %>
+                                            <% if (route.example.response_skip) { %>
+                                                <h5 style="margin-top: 15px;">Response Example (SKIP):</h5>
+                                                <div class="example-code"><%= JSON.stringify(route.example.response_skip, null, 2) %></div>
+                                            <% } %>
+                                            <% if (route.example.response_pay) { %>
+                                                <h5 style="margin-top: 15px;">Response Example (PAY):</h5>
+                                                <div class="example-code"><%= JSON.stringify(route.example.response_pay, null, 2) %></div>
+                                            <% } %>
+                                        <% } %>
+                                    </div>
+                                <% } %>
+
+                                <!-- Note -->
+                                <% if (route.note) { %>
+                                    <div class="note-box">
+                                        <%= route.note %>
+                                    </div>
+                                <% } %>
+
                                 <!-- Test Section -->
                                 <div class="test-section">
                                     <h4 style="color: #667eea; margin-bottom: 15px;">🧪 Test API</h4>
@@ -413,7 +613,6 @@
 
                                         <% if (route.body) { %>
                                             <% 
-                                                // Tạo dữ liệu mẫu dựa trên type
                                                 var sampleBody = {};
                                                 Object.keys(route.body).forEach(function(key) {
                                                     var type = route.body[key].toLowerCase();
@@ -473,7 +672,6 @@
     </div>
 
     <script>
-        // Load saved token on page load
         window.addEventListener('DOMContentLoaded', function() {
             const savedToken = localStorage.getItem('accessToken');
             if (savedToken) {
@@ -525,10 +723,8 @@
             const responseStatus = document.getElementById(`response-status-${group}-${index}`);
             const responseBody = document.getElementById(`response-body-${group}-${index}`);
             
-            // Build URL
             let url = '<%= baseUrl %>' + path;
             
-            // Replace URL params
             const paramInputs = document.querySelectorAll(`[id^="param-${group}-${index}-"]`);
             paramInputs.forEach(input => {
                 const paramName = input.id.split('-').pop();
@@ -538,7 +734,6 @@
                 }
             });
             
-            // Add query params
             const queryInputs = document.querySelectorAll(`[id^="query-${group}-${index}-"]`);
             const queryParams = new URLSearchParams();
             queryInputs.forEach(input => {
@@ -552,7 +747,6 @@
                 url += '?' + queryParams.toString();
             }
             
-            // Build request options
             const options = {
                 method: method,
                 headers: {
@@ -560,7 +754,6 @@
                 }
             };
             
-            // Add auth token if required
             if (requireAuth) {
                 const token = document.getElementById('accessToken').value.trim();
                 if (!token) {
@@ -570,7 +763,6 @@
                 options.headers['Authorization'] = `Bearer ${token}`;
             }
             
-            // Add body for POST/PUT
             if (method === 'POST' || method === 'PUT') {
                 const bodyInput = document.getElementById(`body-${group}-${index}`);
                 if (bodyInput && bodyInput.value.trim()) {
@@ -583,7 +775,6 @@
                 }
             }
             
-            // Show loading
             responseSection.style.display = 'block';
             responseBody.textContent = 'Loading...';
             
@@ -591,18 +782,15 @@
                 const response = await fetch(url, options);
                 const data = await response.json();
                 
-                // Show status
                 responseStatus.innerHTML = `<span class="response-status ${response.ok ? 'status-success' : 'status-error'}">
                     Status: ${response.status} ${response.statusText}
                 </span>`;
                 
-                // Show response body
                 responseBody.textContent = JSON.stringify(data, null, 2);
                 
-                // Auto-save token if this is a login request
-                if (path.includes('/login') && response.ok && data.accessToken) {
-                    document.getElementById('accessToken').value = data.accessToken;
-                    localStorage.setItem('accessToken', data.accessToken);
+                if (path.includes('/login') && response.ok && data.data && data.data.accessToken) {
+                    document.getElementById('accessToken').value = data.data.accessToken;
+                    localStorage.setItem('accessToken', data.data.accessToken);
                     showAuthStatus('Token đã được tự động lưu từ response!', 'success');
                 }
                 

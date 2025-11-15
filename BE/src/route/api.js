@@ -28,66 +28,312 @@ routeApi.get('/', (req, res) => {
           },
           {
             method: 'POST',
-            path: '/api/auth/register',
-            description: 'Đăng ký tài khoản độc giả mới',
+            path: '/api/auth/register/init',
+            description: 'Bước 1: Khởi tạo đăng ký - Gửi mã OTP đến email',
+            detailedDescription: 'Endpoint này bắt đầu quy trình đăng ký bằng cách gửi mã OTP 6 số đến email của người dùng. Hệ thống sẽ kiểm tra email có tồn tại trong database chưa và từ chối nếu email đã được đăng ký. OTP có hiệu lực trong 10 phút.',
             auth: false,
             body: {
-              email: 'string (required)',
-              password: 'string (required, min 6 chars)',
-              fullName: 'string (required)',
-              phoneNumber: 'string (optional, 10-11 digits)',
-              dateOfBirth: 'date (optional)',
-              gender: 'number (optional, 0=Female, 1=Male)',
-              cccd: 'string (optional, 9-12 digits)',
-              address: 'string (optional)',
-              note: 'string (optional)'
+              email: 'string (required, valid email format) - Email người dùng muốn đăng ký'
+            },
+            response: {
+              success: {
+                ok: true,
+                message: 'OTP_SENT - OTP đã được gửi đến email'
+              },
+              error: {
+                'EMAIL_EXISTS': 'Email đã được sử dụng để đăng ký tài khoản khác',
+                'MISSING_EMAIL': 'Thiếu thông tin email',
+                'INVALID_EMAIL': 'Định dạng email không hợp lệ'
+              }
+            },
+            example: {
+              request: {
+                email: 'user@example.com'
+              },
+              response: {
+                ok: true,
+                message: 'OTP_SENT'
+              }
             }
           },
           {
             method: 'POST',
-            path: '/api/auth/login',
-            description: 'Đăng nhập vào hệ thống',
+            path: '/api/auth/register/verify',
+            description: 'Bước 2: Xác thực OTP và tạo tài khoản độc giả',
+            detailedDescription: 'Endpoint này xác thực mã OTP nhận được từ email và tạo tài khoản độc giả mới trong hệ thống. Sau khi xác thực thành công, hệ thống sẽ tạo Account (với roleId=3) và Reader record tương ứng. Trả về accountId và readerId để sử dụng cho bước tiếp theo.',
             auth: false,
             body: {
-              email: 'string (required)',
-              password: 'string (required)'
+              email: 'string (required) - Email đã dùng ở bước 1',
+              otp: 'string (required, 6 digits) - Mã OTP nhận được từ email',
+              password: 'string (required, min 6 chars) - Mật khẩu cho tài khoản',
+              fullName: 'string (required) - Họ và tên đầy đủ',
+              phoneNumber: 'string (optional, 10-11 digits) - Số điện thoại',
+              dateOfBirth: 'date (optional, format: YYYY-MM-DD) - Ngày sinh',
+              gender: 'string (optional, "male" or "female") - Giới tính',
+              cccd: 'string (optional, 9-12 digits) - Số CMND/CCCD',
+              address: 'string (optional) - Địa chỉ'
+            },
+            response: {
+              success: {
+                ok: true,
+                data: {
+                  account: {
+                    accountId: 'number - ID tài khoản vừa tạo',
+                    email: 'string - Email đã đăng ký'
+                  },
+                  reader: {
+                    readerId: 'number - ID độc giả (dùng cho bước 3)',
+                    fullName: 'string - Họ tên độc giả'
+                  }
+                }
+              },
+              error: {
+                'OTP_INVALID_OR_EXPIRED': 'Mã OTP không đúng hoặc đã hết hạn (10 phút)',
+                'EMAIL_EXISTS': 'Email đã được đăng ký bởi người khác',
+                'CCCD_EXISTS': 'Số CMND/CCCD đã được đăng ký',
+                'MISSING_FIELDS': 'Thiếu các trường bắt buộc (email, otp, password, fullName)',
+                'WEAK_PASSWORD': 'Mật khẩu phải có ít nhất 6 ký tự'
+              }
+            },
+            example: {
+              request: {
+                email: 'user@example.com',
+                otp: '123456',
+                password: 'mypassword123',
+                fullName: 'Nguyễn Văn A',
+                phoneNumber: '0123456789',
+                dateOfBirth: '2000-01-15',
+                gender: 'male',
+                cccd: '001234567890',
+                address: 'Hà Nội'
+              },
+              response: {
+                ok: true,
+                data: {
+                  account: {
+                    accountId: 120260,
+                    email: 'user@example.com'
+                  },
+                  reader: {
+                    readerId: 120351,
+                    fullName: 'Nguyễn Văn A'
+                  }
+                }
+              }
+            }
+          },
+          {
+            method: 'POST',
+            path: '/api/auth/register/complete',
+            description: 'Bước 3: Chọn loại thẻ thành viên và hoàn tất đăng ký',
+            detailedDescription: 'Endpoint cuối cùng trong quy trình đăng ký, cho phép người dùng chọn loại thẻ thành viên (FREE hoặc PREMIUM). Nếu chọn SKIP hoặc thẻ miễn phí, hệ thống sẽ tạo MemberCard ngay lập tức. Nếu chọn PAY với thẻ trả phí (PREMIUM - 150,000đ), hệ thống sẽ tạo payment record và trả về QR code PayOS để thanh toán. Sau khi thanh toán thành công, webhook sẽ tự động tạo MemberCard với balance = số tiền đã trả.',
+            auth: false,
+            body: {
+              readerId: 'number (required) - ID độc giả từ bước 2',
+              cardTypeId: 'number (required) - Loại thẻ: 1=FREE (miễn phí), 2=PREMIUM (150,000đ)',
+              action: 'string (required) - Hành động: "SKIP" (bỏ qua/miễn phí) hoặc "PAY" (thanh toán)',
+              extraInfo: 'object (optional) - Thông tin bổ sung (nếu cần)'
+            },
+            response: {
+              skip_or_free: {
+                ok: true,
+                free: true,
+                memberCard: {
+                  memberCardId: 'number - ID thẻ thành viên',
+                  cardNumber: 'string - Mã số thẻ (dạng C + timestamp)',
+                  cardTypeId: 'number - Loại thẻ đã chọn',
+                  balance: 'number - Số dư trong thẻ (0 nếu FREE, hoặc = giá thẻ)',
+                  status: 'string - Trạng thái thẻ (ACTIVE)',
+                  issueDate: 'date - Ngày cấp thẻ',
+                  expiryDate: 'date - Ngày hết hạn (issueDate + duration)'
+                }
+              },
+              pay: {
+                ok: true,
+                paymentId: 'number - ID bản ghi thanh toán',
+                orderCode: 'number - Mã đơn hàng PayOS (timestamp)',
+                amount: 'number - Số tiền cần thanh toán',
+                payos: {
+                  checkoutUrl: 'string - URL trang thanh toán PayOS',
+                  qrCode: 'string - Mã QR code để quét thanh toán',
+                  paymentLinkId: 'string - ID link thanh toán PayOS'
+                }
+              },
+              error: {
+                'CARD_TYPE_NOT_FOUND': 'Loại thẻ không tồn tại hoặc đã bị xóa',
+                'MISSING_FIELDS': 'Thiếu readerId hoặc cardTypeId',
+                'PAYOS_CREATE_FAILED': 'Không thể tạo link thanh toán PayOS'
+              }
+            },
+            example: {
+              request_skip: {
+                readerId: 120351,
+                cardTypeId: 1,
+                action: 'SKIP'
+              },
+              response_skip: {
+                ok: true,
+                free: true,
+                memberCard: {
+                  memberCardId: 68,
+                  cardNumber: 'C1731654231835',
+                  cardTypeId: 1,
+                  balance: 0,
+                  status: 'ACTIVE',
+                  issueDate: '2025-11-15',
+                  expiryDate: '2026-11-15'
+                }
+              },
+              request_pay: {
+                readerId: 120351,
+                cardTypeId: 2,
+                action: 'PAY'
+              },
+              response_pay: {
+                ok: true,
+                paymentId: 319,
+                orderCode: 1763173347531,
+                amount: 150000,
+                payos: {
+                  checkoutUrl: 'https://pay.payos.vn/web/2c43f9579705408dbf2a0723950211aa',
+                  qrCode: '00020101021238570010A000000727012700069704220113VQRQAFHJG27860208QRIBFTTA530370454061500005802VN62190815Mua the PREMIUM6304CB92',
+                  paymentLinkId: '2c43f9579705408dbf2a0723950211aa'
+                }
+              }
+            },
+            note: '⚠️ Quan trọng: Với action="PAY", sau khi user thanh toán thành công qua QR code, PayOS sẽ gửi webhook đến /api/payos/webhook. Webhook sẽ tự động tạo MemberCard với balance = 150,000đ. User cần đăng nhập lại hoặc gọi /api/auth/profile để xem thẻ vừa được tạo.'
+          },
+          {
+            method: 'POST',
+            path: '/api/auth/login',
+            description: 'Đăng nhập vào hệ thống (dành cho Admin và Thủ thư)',
+            detailedDescription: 'Endpoint đăng nhập cho Admin (roleId=1) và Librarian/Thủ thư (roleId=2). Sử dụng email và password để xác thực. Trả về access token (hết hạn sau 1 giờ), refresh token (hết hạn sau 7 ngày) và thông tin profile đầy đủ của người dùng.',
+            auth: false,
+            body: {
+              email: 'string (required) - Email tài khoản',
+              password: 'string (required) - Mật khẩu'
+            },
+            response: {
+              success: {
+                account: 'object - Thông tin tài khoản',
+                profile: 'object - Thông tin admin/librarian',
+                profileType: 'string - Loại profile (admin/librarian)',
+                accessToken: 'string - JWT access token',
+                refreshToken: 'string - JWT refresh token'
+              },
+              error: {
+                'INVALID_CREDENTIALS': 'Email hoặc mật khẩu không đúng',
+                'ACCOUNT_DELETED': 'Tài khoản đã bị vô hiệu hóa',
+                'INACTIVE_ACCOUNT': 'Tài khoản chưa được kích hoạt'
+              }
             }
           },
           {
             method: 'POST',
             path: '/api/auth/login/reader',
-            description: 'Đăng nhập vào hệ thống cho độc giả',
+            description: 'Đăng nhập vào hệ thống cho độc giả (roleId = 3)',
+            detailedDescription: 'Endpoint đăng nhập dành riêng cho độc giả (Reader). Chỉ cho phép tài khoản với roleId=3 đăng nhập. Trả về access token, refresh token và thông tin profile bao gồm cả thẻ thành viên (MemberCard) nếu có, cùng thống kê số phiếu mượn.',
             auth: false,
             body: {
-              email: 'string (required)',
-              password: 'string (required)'
+              email: 'string (required) - Email tài khoản độc giả',
+              password: 'string (required) - Mật khẩu'
+            },
+            response: {
+              success: {
+                account: 'object - Thông tin tài khoản',
+                profile: 'object - Thông tin độc giả (bao gồm memberCard, loanCounts)',
+                profileType: 'string - "reader"',
+                accessToken: 'string - JWT access token (1h)',
+                refreshToken: 'string - JWT refresh token (7 days)'
+              },
+              error: {
+                'INVALID_CREDENTIALS': 'Email hoặc mật khẩu không đúng',
+                'ACCOUNT_DELETED': 'Tài khoản đã bị vô hiệu hóa',
+                'FORBIDDEN': 'Chỉ tài khoản độc giả được phép đăng nhập tại endpoint này'
+              }
             }
           },
           {
             method: 'POST',
             path: '/api/auth/refresh-token',
-            description: 'Làm mới access token',
+            description: 'Làm mới access token khi hết hạn',
+            detailedDescription: 'Endpoint này cho phép làm mới access token mà không cần đăng nhập lại. Gửi refresh token còn hiệu lực (7 ngày) để nhận access token và refresh token mới. Hệ thống sẽ vô hiệu hóa refresh token cũ và lưu refresh token mới vào database.',
             auth: false,
             body: {
-              refreshToken: 'string (required)'
+              refreshToken: 'string (required) - Refresh token nhận được khi đăng nhập'
+            },
+            response: {
+              success: {
+                accessToken: 'string - Access token mới (1h)',
+                refreshToken: 'string - Refresh token mới (7 days)'
+              },
+              error: {
+                'INVALID_REFRESH_TOKEN': 'Refresh token không hợp lệ hoặc đã hết hạn',
+                'INACTIVE_ACCOUNT': 'Tài khoản không hoạt động'
+              }
             }
           },
           {
             method: 'POST',
             path: '/api/auth/logout',
             description: 'Đăng xuất khỏi hệ thống',
-            auth: true
+            detailedDescription: 'Endpoint đăng xuất sẽ xóa refresh token khỏi database, vô hiệu hóa tất cả refresh token của người dùng. Client cần tự xóa access token và refresh token đã lưu ở local storage.',
+            auth: true,
+            response: {
+              success: {
+                message: 'Đăng xuất thành công'
+              }
+            }
           },
           {
             method: 'GET',
             path: '/api/auth/profile',
-            description: 'Lấy thông tin profile người dùng',
-            auth: true
+            description: 'Lấy thông tin profile đầy đủ của người dùng hiện tại',
+            detailedDescription: 'Endpoint này trả về thông tin chi tiết của người dùng dựa trên access token. Đối với độc giả (roleId=3), response bao gồm thông tin thẻ thành viên (memberCard) và thống kê phiếu mượn (loanCounts: pending, waitingPickup, borrowing, returned). Đối với admin/librarian, trả về thông tin librarian profile.',
+            auth: true,
+            response: {
+              reader: {
+                account: 'object - Thông tin tài khoản (accountId, email, phoneNumber, status, roleId)',
+                profile: {
+                  readerId: 'number',
+                  fullName: 'string',
+                  dateOfBirth: 'date',
+                  gender: 'string',
+                  cccd: 'string',
+                  address: 'string',
+                  totalBorrow: 'number',
+                  memberCard: {
+                    memberCardId: 'number',
+                    cardNumber: 'string',
+                    cardTypeId: 'number',
+                    balance: 'number - Số dư trong thẻ',
+                    status: 'string - ACTIVE/EXPIRED/CANCELLED',
+                    issueDate: 'date',
+                    expiryDate: 'date',
+                    cardType: 'object - Thông tin loại thẻ'
+                  },
+                  loanCounts: {
+                    pending: 'number - Số phiếu đang chờ duyệt',
+                    waitingPickup: 'number - Số phiếu chờ lấy sách',
+                    borrowing: 'number - Số phiếu đang mượn',
+                    activeTotal: 'number - Tổng số phiếu đang hoạt động'
+                  },
+                  returnedCount: 'number - Số phiếu đã trả'
+                },
+                profileType: 'string - "reader"'
+              },
+              admin_librarian: {
+                account: 'object - Thông tin tài khoản',
+                profile: 'object - Thông tin librarian',
+                profileType: 'string - "admin" hoặc "librarian"'
+              }
+            }
           },
           {
             method: 'GET',
             path: '/api/auth/admin',
-            description: 'Route dành cho admin (ví dụ)',
+            description: 'Route dành riêng cho Admin (ví dụ)',
+            detailedDescription: 'Endpoint mẫu để kiểm tra phân quyền. Chỉ tài khoản với roleId=1 (Admin) mới có thể truy cập. Được bảo vệ bởi middleware checkRole.',
             auth: true,
             role: 'Admin (roleId = 1)'
           }
