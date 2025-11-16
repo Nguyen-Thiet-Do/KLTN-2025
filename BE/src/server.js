@@ -24,6 +24,7 @@ const readerLoanSlipRoutes = require('./route/readerLoanSlip.routes');
 const statisticRoutes = require('./route/statisticRoutes');
 const payosRoutes = require('./route/payos.routes');
 const nodemailer = require('nodemailer');
+const { scheduleDailyJob } = require('./service/notificationJob.service');
 
 
 const app = express();
@@ -144,6 +145,14 @@ const startServer = async () => {
     await sequelize.authenticate();
     console.log('✅ Kết nối database thành công');
     console.log(`📊 Database: ${process.env.DB_NAME}`);
+
+    // Lên lịch công việc hàng ngày
+    try {
+      scheduleDailyJob();
+      console.log('⏰ Notification job scheduled (daily).');
+    } catch (jobErr) {
+      console.error('❌ Không thể đăng ký notification job:', jobErr);
+    }
 
     app.listen(port, '0.0.0.0', () => {
       console.log('='.repeat(50));

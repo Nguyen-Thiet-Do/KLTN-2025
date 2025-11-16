@@ -257,7 +257,8 @@ async function createLoanSlipService(body) {
     e.status = 400; throw e;
   }
 
-  return await sequelize.transaction(async (t) => {
+  // Transaction: tạo slip + loanDetail + update DocumentCopy -> BORROWED
+  const txResult = await sequelize.transaction(async (t) => {
     const [reader, librarian] = await Promise.all([
       Reader.findByPk(readerId, { transaction: t }),
       Librarian.findByPk(librarianId, { transaction: t }),
@@ -265,7 +266,7 @@ async function createLoanSlipService(body) {
     if (!reader) { const e = new Error('Không tìm thấy độc giả'); e.status = 404; throw e; }
     if (!librarian) { const e = new Error('Không tìm thấy thủ thư'); e.status = 404; throw e; }
 
-    // --- LẤY THẺ (MemberCard) CỦA ĐỘC GIẢ -> RỒI LẤY CardType ---
+    // LẤY THẺ (MemberCard) CỦA ĐỘC GIẢ -> RỒI LẤY CardType
     const memberCard = await MemberCard.findOne({
       where: { readerId, deleted: false, status: 'ACTIVE' },
       order: [['issueDate', 'DESC']],
@@ -282,7 +283,6 @@ async function createLoanSlipService(body) {
     if (memberCard.expiryDate) {
       const expiry = parseDateOnly(memberCard.expiryDate);
       if (!expiry) {
-        // nếu expiryDate không đúng định dạng, coi là không hợp lệ
         const e = new Error('Ngày hết hạn trên thẻ không hợp lệ');
         e.status = 403; throw e;
       }
@@ -430,7 +430,6 @@ async function createLoanSlipService(body) {
 
     for (const it of items) {
       const cp = copyById.get(Number(it.documentCopyId));
-      // === CHỈNH: luôn ưu tiên lấy DocumentCopy.conditionNote ===
       const borrowCond = sanitizeBorrowCondition(
         cp?.conditionNote ?? it.conditionBorrow ?? cp?.conditionGrade ?? null
       );
@@ -450,14 +449,84 @@ async function createLoanSlipService(body) {
       );
     }
 
+    // Lấy email từ account (nếu reader.accountId tồn tại)
+    let readerEmail = null;
+    try {
+      if (reader.accountId) {
+        const Account = require('../model').Account;
+        const account = await Account.findByPk(reader.accountId, {
+          attributes: ['email'],
+          transaction: t,
+          lock: t.LOCK.UPDATE
+        });
+        readerEmail = account?.email || null;
+      }
+    } catch (err) {
+      readerEmail = null;
+    }
+
     return {
       loanSlip: slip,
       items,
       payment: null,
-      message: 'Phiếu mượn được tạo và kích hoạt (BORROWING).'
+      message: 'Phiếu mượn được tạo và kích hoạt (BORROWING).',
+      readerEmail
     };
-  });
+  }); // end transaction
+
+  // Gửi mail thông báo (nếu có email)
+  try {
+    const finalEmail = txResult.readerEmail || process.env.ADMIN_NOTIFICATION_EMAIL || null;
+    if (finalEmail) {
+      // Lấy tên reader để gửi (nếu cần)
+      const reader = await Reader.findByPk(readerId);
+      const readerName = reader?.fullName || 'Độc giả';
+
+      // Lấy danh sách loan details + thông tin Document để build itemsForMail (an toàn)
+      const loanDetails = await LoanDetail.findAll({
+        where: { loanSlipId: txResult.loanSlip.loanSlipId },
+        include: [
+          {
+            model: DocumentCopy,
+            attributes: ['documentCopyId'],
+            include: [{ model: Document, attributes: ['documentId', 'title'] }]
+          }
+        ]
+      });
+
+      const itemsForMail = loanDetails.map(d => ({
+        title: d.DocumentCopy?.Document?.title || null,
+        documentId: d.DocumentCopy?.Document?.documentId || null,
+        documentCopyId: d.documentCopyId || d.DocumentCopy?.documentCopyId || null
+      }));
+
+      await mailService.sendLoanIssuedEmail(finalEmail, {
+        fullName: readerName,
+        slipId: txResult.loanSlip.loanSlipId,
+        items: itemsForMail,
+        loanDate: loanDateStr,
+        dueDate: txResult.loanSlip.dueDate,
+        pickUpLocation: process.env.LIBRARY_ADDRESS,
+        supportEmail: process.env.SUPPORT_EMAIL,
+        supportPhone: process.env.SUPPORT_PHONE,
+        libraryName: process.env.LIBRARY_NAME
+      });
+      console.log('✅ Loan issued email sent to', finalEmail);
+    } else {
+      console.warn('⚠️ No email available to notify about newly created loan slip', txResult.loanSlip.loanSlipId);
+    }
+  } catch (err) {
+    console.error('❌ Failed to send loan issued email for slip', txResult.loanSlip.loanSlipId, err?.message || err);
+  }
+
+  return {
+    loanSlip: txResult.loanSlip,
+    message: txResult.message,
+    readerEmail: txResult.readerEmail || null
+  };
 }
+
+
 
 /**
  * Duyệt phiếu đặt trước -> chuyển sang WAITING_FOR_PICKUP

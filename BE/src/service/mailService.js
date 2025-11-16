@@ -397,10 +397,106 @@ async function sendReservationApprovedEmail(to, data = {}) {
 
   return sendEmail(to, subject, html, text);
 }
+
+// -----------------------------
+// Template: gửi mail khi thủ thư tạo phiếu mượn (TRỰC TIẾP BORROWING)
+// data: { fullName, slipId, items: [{ title, documentId, documentCopyId }], loanDate, dueDate, pickUpLocation?, supportEmail?, supportPhone?, libraryName?, year? }
+// -----------------------------
+async function sendLoanIssuedEmail(to, data = {}) {
+  if (!to) throw new Error('sendLoanIssuedEmail: missing "to"');
+
+  const {
+    fullName = '',
+    slipId = '',
+    items = [],
+    loanDate = '',
+    dueDate = '',
+    pickUpLocation = process.env.LIBRARY_ADDRESS || 'Thư viện Book Tech — Số 1, Đường ABC, Quận XYZ',
+    supportEmail = process.env.SUPPORT_EMAIL || SUPPORT_EMAIL,
+    supportPhone = process.env.SUPPORT_PHONE || SUPPORT_PHONE,
+    libraryName = process.env.LIBRARY_NAME || 'Thư viện Book Tech',
+    year = new Date().getFullYear()
+  } = data;
+
+  const subject = `[${libraryName}] Thông báo phiếu mượn #${slipId} — Vui lòng giữ gìn tài liệu và trả đúng hạn`;
+
+  // Plain text
+  const textLines = [
+    `Kính gửi ${fullName},`,
+    '',
+    `Phiếu mượn của bạn (Mã: ${slipId}) đã được tạo bởi thủ thư và kích hoạt (Đã mượn).`,
+    `Ngày mượn: ${loanDate}`,
+    `Hạn trả: ${dueDate}`,
+    '',
+    `Danh sách tài liệu:`,
+    ...items.map(it => `- ${it.title || ('Tài liệu #' + it.documentId)} (Bản sao: ${it.documentCopyId || '—'})`),
+    '',
+    `Lưu ý quan trọng:`,
+    `- Vui lòng giữ gìn tài liệu khi mượn (không làm mất, không tẩy xóa, không làm rách).`,
+    `- Trả đúng hạn: nếu trả muộn sẽ phát sinh phí trễ hạn theo quy định.`,
+    `- Nếu làm mất hoặc hư hỏng nặng, bạn có thể phải bồi thường theo giá bìa/giá trị tài liệu.`,
+    '',
+    `Bạn có thể xem chi tiết phiếu tại: https://booktechv2.netlify.app/loan/${slipId}`,
+    '',
+    `Nếu cần hỗ trợ, liên hệ:`,
+    `- Email: ${supportEmail}`,
+    `- SĐT: ${supportPhone}`,
+    '',
+    `Trân trọng,`,
+    `${libraryName}`,
+    `© ${year} ${libraryName}`
+  ];
+  const text = textLines.join('\n');
+
+  // HTML
+  const itemsHtml = items.map(it => `<li>${escapeHtml(it.title || `Tài liệu #${it.documentId}`)} — Bản sao: ${escapeHtml(String(it.documentCopyId || '—'))}</li>`).join('');
+  const html = `
+  <!doctype html>
+  <html>
+  <head><meta charset="utf-8"></head>
+  <body style="font-family:Arial, sans-serif; color:#333;">
+    <div style="max-width:680px; margin:20px auto; padding:22px; border:1px solid #eee; border-radius:8px;">
+      <h2 style="color:#0b5cff; margin-top:0;">Thông báo: Phiếu mượn đã được tạo</h2>
+      <p>Xin chào <strong>${escapeHtml(fullName)}</strong>,</p>
+
+      <p>Phiếu mượn <strong>#${escapeHtml(String(slipId))}</strong> đã được thủ thư tạo và kích hoạt.</p>
+
+      <p><strong>Ngày mượn:</strong> ${escapeHtml(loanDate)}<br>
+      <strong>Hạn trả:</strong> ${escapeHtml(dueDate)}</p>
+
+      <p><strong>Danh sách tài liệu:</strong></p>
+      <ul>${itemsHtml}</ul>
+
+      <div style="padding:12px; background:#fff7e6; border-radius:6px; margin-top:12px;">
+        <p style="margin:0;"><strong>Lưu ý khi mượn</strong></p>
+        <ul style="margin-top:6px;">
+          <li>Giữ gìn tài liệu, không làm rách, vẽ bậy hay tẩy xóa.</li>
+          <li>Trả đúng hạn để tránh phí trễ hạn. (Quy trình & mức phạt theo quy định của thư viện.)</li>
+          <li>Nếu làm mất hoặc hư hỏng nặng, người mượn có thể phải bồi thường theo giá bìa hoặc mức bồi thường quy định.</li>
+        </ul>
+      </div>
+
+      <p style="margin-top:12px;">Xem chi tiết phiếu: <a href="https://booktechv2.netlify.app/loan/${escapeHtml(String(slipId))}" target="_blank" rel="noopener">Mở chi tiết phiếu</a></p>
+
+      <hr style="border:none; border-top:1px solid #eee; margin:18px 0;">
+
+      <p style="font-size:13px; color:#555;">Hỗ trợ: ${escapeHtml(supportEmail)} | ${escapeHtml(supportPhone)}</p>
+      <p style="font-size:12px; color:#999;">Đây là email tự động. Vui lòng không trả lời trực tiếp.<br>&copy; ${year} ${escapeHtml(libraryName)}</p>
+    </div>
+  </body>
+  </html>
+  `;
+
+  return sendEmail(to, subject, html, text);
+}
+
+
+
 module.exports = {
   sendOtpEmail,
   sendEmail,
   sendMemberCardIssuedEmail,
   sendReservationConfirmationEmail,
-  sendReservationApprovedEmail
+  sendReservationApprovedEmail,
+  sendLoanIssuedEmail
 };
