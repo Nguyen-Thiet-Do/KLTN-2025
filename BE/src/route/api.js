@@ -1063,8 +1063,166 @@ routeApi.get('/', (req, res) => {
               note: 'string (optional)'
             }
           }
-
-
+        ]
+      },
+      {
+        group: 'Notifications',
+        icon: '🔔',
+        routes: [
+          {
+            method: 'GET',
+            path: '/api/notifications',
+            description: 'Lấy danh sách thông báo của user hiện tại (phân trang, tìm kiếm, lọc theo trạng thái đọc)',
+            auth: true,
+            role: 'Reader (roleId = 3) hoặc bất kỳ tài khoản có readerId',
+            query: {
+              page: 'number (optional, default=1)',
+              limit: 'number (optional, default=20, max=200)',
+              isRead: "0|1 (optional) - lọc theo trạng thái đọc",
+              q: 'string (optional) - tìm kiếm theo title hoặc content',
+              sortBy: 'string (optional, default="created_at")',
+              sortDir: 'string (optional, "ASC" | "DESC", default="DESC")'
+            },
+            response: {
+              success: 'boolean',
+              pagination: '{ page, limit, total, totalPages }',
+              data: '[{ notification object }]'
+            },
+            example: {
+              request: 'GET /api/notifications?page=1&limit=20&isRead=0&q=thông%20báo',
+              response: {
+                success: true,
+                pagination: { page: 1, limit: 20, total: 12, totalPages: 1 },
+                data: [
+                  {
+                    notificationID: 101,
+                    readerId: 12,
+                    type: 'SYSTEM',
+                    title: 'Thông báo bảo trì thư viện',
+                    content: 'Thư viện đóng cửa vào thứ 7',
+                    isRead: 0,
+                    created_at: '2025-11-10T08:00:00Z'
+                  }
+                ]
+              }
+            }
+          },
+          {
+            method: 'GET',
+            path: '/api/notifications/:id',
+            description: 'Lấy chi tiết 1 thông báo (user chỉ được xem thông báo của chính mình)',
+            auth: true,
+            params: {
+              id: 'number (required) - notificationID'
+            },
+            response: {
+              success: 'boolean',
+              data: 'notification object'
+            },
+            example: {
+              request: 'GET /api/notifications/101',
+              response: {
+                success: true,
+                data: {
+                  notificationID: 101,
+                  readerId: 12,
+                  type: 'SYSTEM',
+                  title: 'Thông báo bảo trì thư viện',
+                  content: 'Thư viện đóng cửa vào thứ 7',
+                  isRead: 0,
+                  readAt: null,
+                  created_at: '2025-11-10T08:00:00Z'
+                }
+              }
+            }
+          },
+          {
+            method: 'POST',
+            path: '/api/notifications/:id/mark-read',
+            description: 'Đánh dấu 1 thông báo là đã đọc (update isRead=true, readAt=now)',
+            auth: true,
+            params: {
+              id: 'number (required) - notificationID'
+            },
+            response: {
+              success: 'boolean',
+              data: 'updated notification object (isRead: 1, readAt: datetime)'
+            },
+            example: {
+              request: 'POST /api/notifications/101/mark-read',
+              response: {
+                success: true,
+                data: { notificationID: 101, isRead: 1, readAt: '2025-11-11T09:12:00Z' }
+              }
+            }
+          },
+          {
+            method: 'POST',
+            path: '/api/notifications/:id/mark-unread',
+            description: 'Đánh dấu 1 thông báo là chưa đọc (isRead=false, readAt=null)',
+            auth: true,
+            params: {
+              id: 'number (required) - notificationID'
+            },
+            response: {
+              success: 'boolean',
+              data: 'updated notification object (isRead: 0, readAt: null)'
+            }
+          },
+          {
+            method: 'POST',
+            path: '/api/notifications/mark-all-read',
+            description: 'Đánh dấu tất cả thông báo của user hiện tại là đã đọc',
+            auth: true,
+            body: {
+              // không cần body — dùng readerId từ token
+            },
+            response: {
+              success: 'boolean',
+              updated: 'number - số bản ghi đã cập nhật'
+            },
+            example: {
+              request: 'POST /api/notifications/mark-all-read',
+              response: { success: true, updated: 8 }
+            }
+          },
+          {
+            method: 'POST',
+            path: '/api/notifications/create',
+            description: 'Tạo thông báo (dành cho admin/test) - tạo 1 thông báo cho 1 reader cụ thể',
+            auth: true,
+            note: 'Nên giới hạn endpoint này cho Admin/Librarian bằng middleware trước khi đưa vào production',
+            body: {
+              readerId: 'number (required) - ID độc giả nhận thông báo',
+              type: 'string (optional) - e.g. SYSTEM, INFO, ALERT',
+              title: 'string (required, max 200 chars)',
+              content: 'string (optional)',
+              link: 'string (optional) - URL liên kết',
+              priority: "string (optional) - 'NORMAL'|'HIGH' (default='NORMAL')"
+            },
+            response: {
+              success: 'boolean',
+              data: 'created notification object'
+            },
+            example: {
+              request: {
+                readerId: 12,
+                type: 'SYSTEM',
+                title: 'Nhắc trả sách',
+                content: 'Bạn có 1 sách đến hạn trả vào ngày mai'
+              },
+              response: {
+                success: true,
+                data: {
+                  notificationID: 999,
+                  readerId: 12,
+                  title: 'Nhắc trả sách',
+                  isRead: 0,
+                  created_at: '2025-11-17T03:00:00Z'
+                }
+              }
+            }
+          }
         ]
       },
       {

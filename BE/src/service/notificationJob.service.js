@@ -3,6 +3,7 @@ const cron = require('node-cron');
 const { Op } = require('sequelize');
 const sequelize = require('../config/database');
 const mailService = require('./mailService');
+const { emitToUser } = require('../config/socket'); // <- emit realtime
 
 const {
   LoanSlip,
@@ -127,11 +128,36 @@ async function createNotificationRow({ readerId, type, title, content, link = nu
 async function sendEmailAndMarkNotification(notificationRecord, toEmail, subject, htmlBody, textBody) {
   try {
     await mailService.sendEmail(toEmail, subject, htmlBody, textBody); // sử dụng sendEmail của bạn
-    await notificationRecord.update({ emailAt: new Date() });
+    const now = new Date();
+    await notificationRecord.update({ emailAt: now });
+
+    // Emit realtime update: notification email sent (client có thể cập nhật UI)
+    try {
+      if (notificationRecord && notificationRecord.readerId) {
+        const payload = {
+          notificationID: notificationRecord.notificationID,
+          type: notificationRecord.type,
+          title: notificationRecord.title,
+          content: notificationRecord.content,
+          emailAt: now,
+          isRead: notificationRecord.isRead
+        };
+        // emit via socket (if socket not ready, emitToUser sẽ xử lý / log)
+        emitToUser(notificationRecord.readerId, 'notification:email_sent', payload);
+      }
+    } catch (emitErr) {
+      console.warn('Warning: emit notification email_sent failed', emitErr?.message || emitErr);
+    }
+
     return { ok: true };
   } catch (err) {
     // nếu gửi lỗi thì vẫn cập nhật content->ghi lỗi (không throw để job tiếp tục)
-    await notificationRecord.update({ content: (notificationRecord.content || '') + `\n\nERROR: ${String(err?.message || err)}`.slice(0, 2000) });
+    const appended = `\n\nERROR: ${String(err?.message || err)}`.slice(0, 2000);
+    try {
+      await notificationRecord.update({ content: (notificationRecord.content || '') + appended });
+    } catch (uErr) {
+      console.error('Failed to update notification content with error', uErr);
+    }
     console.error('Error sending mail for notificationID', notificationRecord.notificationID, err?.message || err);
     return { ok: false, error: err };
   }
@@ -174,7 +200,7 @@ async function runNotificationJob() {
 
       // if we have sent today for this reader & slip, skip (we check by loanSlipId in content/title to be safe)
       if (alreadyToday) {
-        const lastEmailDate = alreadyToday.emailAt ? new Date(alreadyToday.emailAt).toISOString().slice(0,10) : null;
+        const lastEmailDate = alreadyToday.emailAt ? new Date(alreadyToday.emailAt).toISOString().slice(0, 10) : null;
         if (lastEmailDate === today && String(alreadyToday.content || '').includes(String(slip.loanSlipId))) {
           continue;
         }
@@ -201,8 +227,22 @@ async function runNotificationJob() {
         readerId: slip.readerId,
         type: 'REMINDER_DUE',
         title: payloadTitle,
-        content: `Slip:${slip.loanSlipId}\nDaysLeft:${daysLeft}\nItems:${items.map(i=>i.title).join(';')}`
+        content: `Slip:${slip.loanSlipId}\nDaysLeft:${daysLeft}\nItems:${items.map(i => i.title).join(';')}`
       });
+
+      // Emit realtime: new notification created (client có thể hiển thị)
+      try {
+        emitToUser(slip.readerId, 'notification:new', {
+          notificationID: notif.notificationID,
+          type: notif.type,
+          title: notif.title,
+          content: notif.content,
+          isRead: notif.isRead,
+          created_at: notif.created_at
+        });
+      } catch (emitErr) {
+        console.warn('Warning: emit notification:new failed', emitErr?.message || emitErr);
+      }
 
       if (!toEmail) {
         // đánh dấu lỗi (không throw)
@@ -257,7 +297,7 @@ async function runNotificationJob() {
         limit: 1
       });
       if (alreadyToday) {
-        const lastEmailDate = alreadyToday.emailAt ? new Date(alreadyToday.emailAt).toISOString().slice(0,10) : null;
+        const lastEmailDate = alreadyToday.emailAt ? new Date(alreadyToday.emailAt).toISOString().slice(0, 10) : null;
         if (lastEmailDate === fmtToday() && String(alreadyToday.content || '').includes(String(slip.loanSlipId))) {
           continue;
         }
@@ -277,7 +317,7 @@ async function runNotificationJob() {
       const items = await buildItemsForSlip(slip.loanSlipId);
 
       const title = `[QUÁ HẠN] Phiếu #${slip.loanSlipId} — quá hạn ${overdueDays} ngày`;
-      const content = `Slip:${slip.loanSlipId}\nOverdueDays:${overdueDays}\nItems:${items.map(i=>i.title).join(';')}`;
+      const content = `Slip:${slip.loanSlipId}\nOverdueDays:${overdueDays}\nItems:${items.map(i => i.title).join(';')}`;
 
       const notif = await createNotificationRow({
         readerId: slip.readerId,
@@ -285,6 +325,20 @@ async function runNotificationJob() {
         title,
         content
       });
+
+      // Emit realtime: new overdue notification created
+      try {
+        emitToUser(slip.readerId, 'notification:new', {
+          notificationID: notif.notificationID,
+          type: notif.type,
+          title: notif.title,
+          content: notif.content,
+          isRead: notif.isRead,
+          created_at: notif.created_at
+        });
+      } catch (emitErr) {
+        console.warn('Warning: emit notification:new failed', emitErr?.message || emitErr);
+      }
 
       if (!toEmail) {
         await notif.update({ content: (notif.content || '') + '\n\nNO_EMAIL' });

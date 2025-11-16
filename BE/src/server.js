@@ -10,6 +10,12 @@ const httpsRedirect = require('./middleware/httpsRedirect');
 const cors = require('cors');
 const sequelize = require('./config/database');
 const passport = require('./config/passport'); // passport sử dụng JWT_SECRET từ .env
+
+// ⚡ THÊM SOCKET.IO
+const http = require("http");
+const { initSocket } = require("./config/socket");
+
+// ROUTES
 const authRoutes = require('./route/authRoutes');
 const routeApi = require('./route/api');
 const librarianRoutes = require("./route/librarianRoutes");
@@ -23,9 +29,11 @@ const adminLoanSlipRoutes = require('./route/adminLoanSlip.routes');
 const readerLoanSlipRoutes = require('./route/readerLoanSlip.routes');
 const statisticRoutes = require('./route/statisticRoutes');
 const payosRoutes = require('./route/payos.routes');
+const notificationRoutes = require('./route/notificationRoutes');
+
+
 const nodemailer = require('nodemailer');
 const { scheduleDailyJob } = require('./service/notificationJob.service');
-
 
 const app = express();
 const port = process.env.PORT || 8080;
@@ -37,9 +45,7 @@ const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',') || ['http://local
 
 app.use(cors({
   origin: function (origin, callback) {
-    // Cho phép request không có origin (Postman, mobile app,...)
     if (!origin) return callback(null, true);
-
     if (allowedOrigins.indexOf(origin) !== -1 || allowedOrigins.includes('*')) {
       callback(null, true);
     } else {
@@ -66,15 +72,12 @@ app.use(express.urlencoded({ extended: true, limit: '10mb', verify: rawBodySaver
 
 // Khởi tạo Passport
 app.use(passport.initialize());
-
 app.set('trust proxy', 1);
 app.use(httpsRedirect);
 
 // ============================================================
 // ROUTES
 // ============================================================
-
-// Auth routes (JWT authentication)
 app.use('/api/auth', authRoutes);
 app.use('/api/librarian', librarianRoutes);
 app.use('/api/reader', readerRoutes);
@@ -86,11 +89,10 @@ app.use('/api/metadata', metadataRoutes);
 app.use('/api/documents/admin', documentAdminRoutes);
 app.use('/api/loans/admin', adminLoanSlipRoutes);
 app.use('/api/loans/reader', readerLoanSlipRoutes);
-
 app.use('/api/statistics', statisticRoutes);
-
-app.use('/api/payos', payosRoutes);  // API root: /api/payos/create  và /api/payos/webhook
+app.use('/api/payos', payosRoutes);
 app.use('/pay', payosRoutes);
+app.use('/api/notifications', notificationRoutes);
 
 
 // ============================================================
@@ -105,12 +107,9 @@ app.get('/health', (req, res) => {
   });
 });
 
-
 // ============================================================
 // ERROR HANDLING
 // ============================================================
-
-// 404 handler
 app.use((req, res, next) => {
   res.status(404).json({
     success: false,
@@ -118,7 +117,6 @@ app.use((req, res, next) => {
   });
 });
 
-// Global error handler
 app.use((err, req, res, next) => {
   console.error('Error:', err);
 
@@ -154,12 +152,16 @@ const startServer = async () => {
       console.error('❌ Không thể đăng ký notification job:', jobErr);
     }
 
-    app.listen(port, '0.0.0.0', () => {
+    // ⚡ KHỞI TẠO HTTP SERVER + SOCKET.IO
+    const server = http.createServer(app);
+    initSocket(server);
+
+    server.listen(port, '0.0.0.0', () => {
       console.log('='.repeat(50));
       console.log(`🚀 Server đang chạy tại port ${port}`);
       console.log(`📍 Environment: ${process.env.NODE_ENV}`);
       console.log(`🔗 API Base: http://localhost:${port}`);
-      console.log(`🔐 Auth API: http://localhost:${port}/api/auth`);
+      console.log(`⚡ WebSocket: ENABLED`);
       console.log(`❤️  Health Check: http://localhost:${port}/health`);
       console.log('='.repeat(50));
     });
