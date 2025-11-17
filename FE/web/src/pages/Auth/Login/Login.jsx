@@ -1,3 +1,4 @@
+// FILE 1: Login.jsx - FULL CODE FIXED
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -42,8 +43,7 @@ export default function Login() {
   // Tự động chuyển trang nếu đã đăng nhập
   useEffect(() => {
     if (isAuthenticated && user) {
-      // const routes = { 1: '/admin', 2: '/librarian', 3: '/reader' };
-         const routes = { 1: '/admin', 2: '/librarian', 3: '/' };
+      const routes = { 1: '/admin', 2: '/librarian', 3: '/' };
       navigate(routes[user.roleId] || '/admin', { replace: true });
     }
   }, [isAuthenticated, user, navigate]);
@@ -75,7 +75,7 @@ export default function Login() {
     if (apiError) setApiError('');
   };
 
-  const handleSubmit = async (e) => {
+   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!validateForm()) return;
 
@@ -83,24 +83,34 @@ export default function Login() {
     setApiError('');
 
     try {
-      if (remember) localStorage.setItem('last_login_email', formData.email);
-      else localStorage.removeItem('last_login_email');
+     const account = await login(formData.email, formData.password);
 
-      const account = await login(formData.email, formData.password);
-      // const routes = { 1: '/admin', 2: '/librarian', 3: '/reader' };
-         const routes = { 1: '/admin', 2: '/librarian', 3: '/' };
-      navigate(routes[account.roleId] || '/admin');
+// ✔ LẤY READER ID CHUẨN
+const readerId =
+  account.profileType === "reader"
+    ? account.profile.readerId
+    : null;
+
+// ✔ LƯU VÀO SESSION
+sessionStorage.setItem("readerId", String(readerId));
+sessionStorage.setItem("roleId", String(account.account.roleId));
+sessionStorage.setItem("accountId", String(account.account.accountId));
+
+
+   
+
+      const routes = { 1: '/admin', 2: '/librarian', 3: '/' };
+      navigate(routes[account.account.roleId] || '/', { replace: true });
+
     } catch (error) {
-      console.error('Login error:', error);
-      setApiError(error.message || 'Đăng nhập thất bại. Vui lòng thử lại.');
+      setApiError(error.message || 'Đăng nhập thất bại.');
     } finally {
       setIsSubmitting(false);
     }
   };
-
-  // Prefill email từ localStorage
+  // Prefill email từ sessionStorage
   useEffect(() => {
-    const saved = localStorage.getItem('last_login_email');
+    const saved = sessionStorage.getItem('last_login_email');
     if (saved) setFormData((p) => ({ ...p, email: saved }));
   }, []);
 
@@ -112,8 +122,7 @@ export default function Login() {
         display: 'grid',
         placeItems: 'center',
         p: { xs: 2, sm: 3 },
-        overflow: 'hidden', // Ẩn thanh cuộn cho chính component này
-        // Nền được tối ưu
+        overflow: 'hidden',
         backgroundImage: `
           linear-gradient(135deg, rgba(102,126,234,0.15) 0%, rgba(118,75,162,0.15) 100%),
           radial-gradient(1200px 600px at 50% 100%, rgba(0,0,0,0.4), rgba(0,0,0,0.7)),
@@ -158,7 +167,6 @@ export default function Login() {
             0 8px 20px -8px rgba(0,0,0,0.3),
             inset 0 1px 0 rgba(255,255,255,0.2)
           `,
-          // Viền gradient
           '&::before': {
             content: '""',
             position: 'absolute',

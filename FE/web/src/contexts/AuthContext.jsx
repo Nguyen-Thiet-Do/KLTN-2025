@@ -66,11 +66,13 @@ export const AuthProvider = ({ children }) => {
       }
       
       // Merge account + profile để hiển thị đầy đủ thông tin
-      const userData = {
-        ...account,
-        ...(profile && profile)
-      };
-      
+     const userData = {
+  accountId: account.accountId,
+  roleId: account.roleId,
+  email: account.email,
+  ...profile   // chứa readerId, fullName,...
+};
+
       // Update state
       setUser(userData);
       

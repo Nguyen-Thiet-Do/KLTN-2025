@@ -12,18 +12,29 @@ import LibraryHome from "../pages/LibraryHome";
 import DocumentDetail from "../pages/ReaderHome/DocumentDetail";
 import EbookReader from "../pages/ReaderHome/EbookReader";
 
+// ▼ ADD: Cart
+import CartPage from "../pages/cart";
+
+import LoanHistoryPage from "../pages/reader/LoanHistoryPage";
+
+
 export const router = createBrowserRouter([
   {
     path: "/",
+    
     children: [
       { index: true, element: <LibraryHome /> },
       { path: "books", element: <ReaderHome type="book" /> },
       { path: "newspapers", element: <ReaderHome type="newspaper" /> },
       { path: "magazines", element: <ReaderHome type="magazine" /> },
 
-      // ▼ Trang chi tiết tài liệu
+      // ▼ ADD CART ROUTE
+      { path: "cart", element: <CartPage /> },
+{ path: "reader/loans/my", element: <LoanHistoryPage /> },
+
+      // ▼ Chi tiết tài liệu
       { path: "reader/documents/:id", element: <DocumentDetail /> },
-      { path: "/reader/ebook/:id", element: < EbookReader /> },
+      { path: "/reader/ebook/:id", element: <EbookReader /> },
     ],
   },
 

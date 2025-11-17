@@ -1,21 +1,26 @@
-// src/pages/ReaderHome/DocumentDetail.jsx
 import { useEffect, useRef, useState } from "react";
+import axios from "axios";
+import api from "../../services/api";
+
 import { useParams, useNavigate } from "react-router-dom";
 import {
-    Box, Stack, Typography, Chip, Divider, Button,
-    Alert, Paper, Breadcrumbs, Link,
+  Box, Stack, Typography, Chip, Divider, Button,
+  Alert, Paper, Breadcrumbs, Link, Snackbar
 } from "@mui/material";
+
+
 import {
-    ArrowBack as ArrowBackIcon,
-    MenuBook as MenuBookIcon,
-    CalendarToday as CalendarIcon,
-    Language as LanguageIcon,
-    LibraryBooks as LibraryIcon,
-    Person as PersonIcon,
-    Business as BusinessIcon,
-    LocalLibrary as LocalLibraryIcon,
-    AutoStories as EbookIcon
+  ArrowBack as ArrowBackIcon,
+  MenuBook as MenuBookIcon,
+  CalendarToday as CalendarIcon,
+  Language as LanguageIcon,
+  LibraryBooks as LibraryIcon,
+  Person as PersonIcon,
+  Business as BusinessIcon,
+  LocalLibrary as LocalLibraryIcon,
+  AutoStories as EbookIcon
 } from "@mui/icons-material";
+
 import ReaderHeader from "../../components/layouts/ReaderHeader";
 import ReaderFooter from "../../components/layouts/ReaderFooter";
 import ReaderCard from "../../components/layouts/ReaderCard";
@@ -23,484 +28,343 @@ import { documentApi } from "../../services/documentApi";
 import ButtonLoader from "../../components/Loading/ButtonLoader";
 
 const isAbort = (e) =>
-    e?.code === "ERR_CANCELED" ||
-    e?.name === "CanceledError" ||
-    e?.name === "AbortError" ||
-    e?.message?.includes?.("canceled") ||
-    e?.message?.includes?.("aborted");
+  e?.code === "ERR_CANCELED" ||
+  e?.name === "CanceledError" ||
+  e?.name === "AbortError" ||
+  e?.message?.includes?.("canceled") ||
+  e?.message?.includes?.("aborted");
 
 const fmtVND = (v) => {
-    const n = Number(v);
-    if (Number.isNaN(n)) return "—";
-    return `${new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 0 }).format(n)}₫`;
+  const n = Number(v);
+  if (Number.isNaN(n)) return "—";
+  return `${new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 0 }).format(n)}₫`;
 };
 
 const InfoItem = ({ icon, label, value }) => (
-    <Stack direction="row" spacing={2} alignItems="flex-start">
-        <Box sx={{ color: 'primary.main', mt: 0.5, minWidth: 24 }}>{icon}</Box>
-        <Box sx={{ flex: 1 }}>
-            <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600, textTransform: 'uppercase' }}>
-                {label}
-            </Typography>
-            <Typography variant="body2" sx={{ fontWeight: 500, mt: 0.5 }}>
-                {value}
-            </Typography>
-        </Box>
-    </Stack>
+  <Stack direction="row" spacing={2} alignItems="flex-start">
+    <Box sx={{ color: 'primary.main', mt: 0.5, minWidth: 24 }}>{icon}</Box>
+    <Box sx={{ flex: 1 }}>
+      <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>
+        {label}
+      </Typography>
+      <Typography variant="body2" sx={{ fontWeight: 500, mt: 0.5 }}>
+        {value}
+      </Typography>
+    </Box>
+  </Stack>
 );
 
 export default function DocumentDetail() {
-    const { id } = useParams();
-    const navigate = useNavigate();
+  const { id } = useParams();
+  const navigate = useNavigate();
 
-    const [doc, setDoc] = useState(null);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState("");
+  const [doc, setDoc] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [similar, setSimilar] = useState([]);
+  const [loadingSimilar, setLoadingSimilar] = useState(false);
 
-    const [similar, setSimilar] = useState([]);
-    const [loadingSimilar, setLoadingSimilar] = useState(false);
+  const [userId, setUserId] = useState(sessionStorage.getItem("userId"));
 
-    const abortDetailRef = useRef(null);
-    const abortSimilarRef = useRef(null);
+  const [snack, setSnack] = useState({
+    open: false,
+    message: "",
+    severity: "success",
+  });
 
-    // ✅ chống race & StrictMode: chỉ nhận kết quả của request mới nhất
-    const loadDetailIdRef = useRef(0);
-    const loadSimilarIdRef = useRef(0);
+  const abortDetailRef = useRef(null);
+  const abortSimilarRef = useRef(null);
+  const loadDetailIdRef = useRef(0);
+  const loadSimilarIdRef = useRef(0);
 
-    const newDetailSignal = () => {
-        if (abortDetailRef.current) abortDetailRef.current.abort();
-        abortDetailRef.current = new AbortController();
-        return abortDetailRef.current.signal;
-    };
-    const newSimilarSignal = () => {
-        if (abortSimilarRef.current) abortSimilarRef.current.abort();
-        abortSimilarRef.current = new AbortController();
-        return abortSimilarRef.current.signal;
-    };
-
-    const load = async () => {
-        const myId = ++loadDetailIdRef.current;
-        setLoading(true);
-        setError("");
-        try {
-            const signal = newDetailSignal();
-            const detail = await documentApi.getDocumentDetail(Number(id), { signal });
-            // chỉ set state nếu request còn là mới nhất
-            if (myId === loadDetailIdRef.current) {
-                setDoc(detail);
-            }
-        } catch (e) {
-            if (isAbort(e)) return; // ❌ bị huỷ: không chạm state (tránh nhấp nháy)
-            if (myId === loadDetailIdRef.current) {
-                setError(e?.response?.data?.message || e?.message || "Không tải được chi tiết tài liệu");
-            }
-        } finally {
-            if (myId === loadDetailIdRef.current) {
-                setLoading(false);
-            }
+  // ⭐ ĐỒNG BỘ USERID KHI THAY ĐỔI (storage event từ tab khác)
+  useEffect(() => {
+    const handleStorageChange = (e) => {
+      if (e.key === "userId") {
+        const newUserId = e.newValue;
+        console.log("DocumentDetail: userId changed from storage event:", newUserId);
+        
+        if (newUserId !== userId) {
+          setUserId(newUserId);
         }
+      }
     };
 
-    const loadSimilar = async () => {
-        const myId = ++loadSimilarIdRef.current;
-        setLoadingSimilar(true);
-        try {
-            const signal = newSimilarSignal();
-            const { items } = await documentApi.getSimilarDocuments(Number(id), { limit: 8, signal });
-            if (myId === loadSimilarIdRef.current) {
-                setSimilar(items || []);
-            }
-        } catch {
-            // ignore
-        } finally {
-            if (myId === loadSimilarIdRef.current) {
-                setLoadingSimilar(false);
-            }
-        }
+    window.addEventListener("storage", handleStorageChange);
+    return () => window.removeEventListener("storage", handleStorageChange);
+  }, [userId]);
+
+  // ⭐ KIỂM TRA USERID KHI COMPONENT MOUNT
+  useEffect(() => {
+    const currentUserId = sessionStorage.getItem("userId");
+    if (currentUserId !== userId) {
+      console.log("DocumentDetail: userId changed on mount:", currentUserId);
+      setUserId(currentUserId);
+    }
+  }, []);
+
+  const newDetailSignal = () => {
+    if (abortDetailRef.current) abortDetailRef.current.abort();
+    abortDetailRef.current = new AbortController();
+    return abortDetailRef.current.signal;
+  };
+
+  const newSimilarSignal = () => {
+    if (abortSimilarRef.current) abortSimilarRef.current.abort();
+    abortSimilarRef.current = new AbortController();
+    return abortSimilarRef.current.signal;
+  };
+
+  const load = async () => {
+    const myId = ++loadDetailIdRef.current;
+    setLoading(true);
+    setError("");
+
+    try {
+      const signal = newDetailSignal();
+      const detail = await documentApi.getDocumentDetail(Number(id), { signal });
+
+      if (myId === loadDetailIdRef.current) setDoc(detail);
+    } catch (e) {
+      if (!isAbort(e) && myId === loadDetailIdRef.current) {
+        setError(e?.response?.data?.message || "Không tải được chi tiết tài liệu");
+      }
+    } finally {
+      if (myId === loadDetailIdRef.current) setLoading(false);
+    }
+  };
+
+  const loadSimilar = async () => {
+    const myId = ++loadSimilarIdRef.current;
+    setLoadingSimilar(true);
+
+    try {
+      const signal = newSimilarSignal();
+      const { items } = await documentApi.getSimilarDocuments(Number(id), { limit: 8, signal });
+
+      if (myId === loadSimilarIdRef.current) setSimilar(items || []);
+    } catch { }
+    finally {
+      if (myId === loadSimilarIdRef.current) setLoadingSimilar(false);
+    }
+  };
+
+  useEffect(() => {
+    load();
+    loadSimilar();
+    return () => {
+      abortDetailRef.current?.abort();
+      abortSimilarRef.current?.abort();
     };
+  }, [id]);
 
-    useEffect(() => {
-        load();
-        loadSimilar();
-        return () => {
-            abortDetailRef.current?.abort();
-            abortSimilarRef.current?.abort();
-        };
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [id]);
+  const openEbook = async () => {
+    try {
+      const { ebookUrl } = await documentApi.getEbookUrl(Number(id));
+      if (ebookUrl) navigate(`/reader/ebook/${id}`);
+    } catch {
+      alert("Không lấy được URL ebook");
+    }
+  };
 
-    const openEbook = async () => {
-        try {
-            const { ebookUrl } = await documentApi.getEbookUrl(Number(id));
-            if (ebookUrl) navigate(`/reader/ebook/${id}`);
-        } catch (e) {
-            alert(e?.response?.data?.message || e?.message || "Không lấy được URL ebook");
-        }
-    };
+   const addToCart = async () => {
+    const token = sessionStorage.getItem("accessToken");
 
-    // ---- Mapping an toàn từ payload của bạn ----
-    const title = doc?.title ?? "—";
-    const language = doc?.language ?? "—";
-    const publicationYear = doc?.publicationYear ?? "—";
+    if (!token) {
+      setSnack({
+        open: true,
+        message: "Vui lòng đăng nhập để thêm sách vào giỏ!",
+        severity: "error"
+      });
+      return;
+    }
 
-    // objects
-    const categoryName = doc?.category?.name ?? "—";
-    const publisherName = doc?.publisher?.name ?? "—";
-
-    // book.*
-    const isbn = doc?.book?.isbn ?? "—";
-    const edition = doc?.book?.edition ?? "—";
-    const pageCount = doc?.book?.pageCount ?? "—";
+    try {
 
 
+    await api.post("/cart/add", {
+      documentId: doc.documentId 
+     });
 
-    // copies
-    const available = doc?.availableCopiesEffective ?? 0;
-    const total = doc?.totalCopies ?? doc?.numberOfCopy ?? 0;
+      setSnack({
+        open: true,
+        message: "Đã thêm vào giỏ sách!",
+        severity: "success",
+      });
 
-    // authors[]
-    const authorNames = (doc?.authors || [])
-        .sort((a, b) => (a?.ord ?? 0) - (b?.ord ?? 0))
-        .map(a => a?.fullName)
-        .filter(Boolean)
-        .join(", ") || "—";
+    } catch (err) {
+      setSnack({
+        open: true,
+        message: err.message || "Không thể thêm vào giỏ",
+        severity: "error",
+      });
+    }
+  };
 
-    // genres[]
-    const genres = (doc?.genres || []).map(g => g?.name).filter(Boolean);
 
-    return (
-        <>
-            <ReaderHeader />
+  const title = doc?.title ?? "—";
+  const language = doc?.language ?? "—";
+  const publicationYear = doc?.publicationYear ?? "—";
+  const categoryName = doc?.category?.name ?? "—";
+  const publisherName = doc?.publisher?.name ?? "—";
+  const isbn = doc?.book?.isbn ?? "—";
+  const edition = doc?.book?.edition ?? "—";
+  const pageCount = doc?.book?.pageCount ?? "—";
+  const available = doc?.availableCopiesEffective ?? 0;
+  const total = doc?.totalCopies ?? doc?.numberOfCopy ?? 0;
 
-            <Box sx={{
-                px: { xs: 2, md: 3 },
-                py: 3,
-                maxWidth: 1280,
-                mx: "auto",
-                background: 'linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%)',
-                minHeight: '100vh'
-            }}>
-                {/* Breadcrumbs */}
-                <Paper sx={{
-                    p: 2,
-                    mb: 3,
-                    background: 'rgba(255, 255, 255, 0.9)',
-                    backdropFilter: 'blur(20px)',
-                    borderRadius: 3,
-                    boxShadow: '0 4px 20px rgba(0,0,0,0.08)',
-                    border: '1px solid rgba(255, 255, 255, 0.3)'
-                }}>
-                    <Breadcrumbs sx={{ mb: 1 }}>
-                        <Link
-                            underline="hover"
-                            color="inherit"
-                            onClick={() => navigate(-1)}
-                            sx={{
-                                cursor: "pointer",
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: 0.5,
-                                fontWeight: 600,
-                                color: 'primary.main',
-                                '&:hover': { color: 'primary.dark' }
-                            }}
-                        >
-                            <ArrowBackIcon fontSize="small" />
-                            Quay lại
-                        </Link>
-                        <Typography color="text.primary" fontWeight={600}>
-                            Chi tiết tài liệu
-                        </Typography>
-                    </Breadcrumbs>
-                </Paper>
+  const authorNames = (doc?.authors || [])
+    .sort((a, b) => (a?.ord ?? 0) - (b?.ord ?? 0))
+    .map(a => a?.fullName)
+    .filter(Boolean)
+    .join(", ") || "—";
 
-                {loading ? (
-                    // ✅ Chỉ hiển thị loader, không rơi vào nhánh "không tìm thấy"
-                    <Box sx={{
-                        display: "flex",
-                        justifyContent: "center",
-                        alignItems: "center",
-                        py: 12,
-                        background: 'rgba(255,255,255,0.8)',
-                        borderRadius: 4,
-                        backdropFilter: 'blur(10px)'
-                    }}>
-                        <Stack spacing={2} alignItems="center">
-                            <ButtonLoader size={60} />
-                            <Typography variant="h6" color="text.secondary">
-                                Đang tải thông tin...
-                            </Typography>
-                        </Stack>
-                    </Box>
-                ) : error ? (
-                    <Alert
-                        severity="error"
-                        sx={{
-                            borderRadius: 3,
-                            background: 'rgba(255,255,255,0.9)',
-                            backdropFilter: 'blur(10px)',
-                            boxShadow: '0 4px 20px rgba(0,0,0,0.1)',
-                            fontWeight: 500
-                        }}
+  const genres = (doc?.genres || []).map(g => g?.name).filter(Boolean);
+
+  return (
+    <>
+      <ReaderHeader />
+
+      <Box sx={{
+        px: { xs: 2, md: 3 },
+        py: 3,
+        maxWidth: 1280,
+        mx: "auto",
+        minHeight: "100vh"
+      }}>
+        {loading ? (
+          <Box sx={{ display: "flex", justifyContent: "center", py: 10 }}>
+            <ButtonLoader size={60} />
+          </Box>
+        ) : error ? (
+          <Alert severity="error">{error}</Alert>
+        ) : !doc ? (
+          <Alert severity="warning">Không tìm thấy tài liệu.</Alert>
+        ) : (
+          <Stack spacing={3}>
+
+            <Paper sx={{ p: 4, borderRadius: 4 }}>
+              <Stack direction={{ xs: "column", md: "row" }} spacing={4}>
+                
+                {/* ẢNH BÌA */}
+                <Box sx={{ width: 280 }}>
+                  <Box
+                    component="img"
+                    src={doc.coverPhoto || "/no-cover.png"}
+                    alt={title}
+                    sx={{ width: 1, height: 380, objectFit: "cover", borderRadius: 3 }}
+                  />
+                  <Chip
+                    label={`Sẵn có: ${available}/${total}`}
+                    color={available > 0 ? "success" : "error"}
+                    sx={{ mt: 1 }}
+                  />
+                </Box>
+
+                {/* THÔNG TIN */}
+                <Box sx={{ flexGrow: 1 }}>
+                  <Typography variant="h3" fontWeight={800}>
+                    {title}
+                  </Typography>
+
+                  <Stack direction="row" spacing={1} sx={{ mt: 2, flexWrap: "wrap" }}>
+                    {language !== "—" && <Chip label={language} />}
+                    {publicationYear !== "—" && <Chip label={publicationYear} />}
+                    {edition !== "—" && <Chip label={`Tái bản ${edition}`} />}
+                    {pageCount !== "—" && <Chip label={`${pageCount} trang`} />}
+                  </Stack>
+
+                  <Divider sx={{ my: 3 }} />
+
+                  <Box sx={{
+                    display: "grid",
+                    gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr" },
+                    gap: 3
+                  }}>
+                    <InfoItem icon={<PersonIcon />} label="Tác giả" value={authorNames} />
+                    <InfoItem icon={<BusinessIcon />} label="Nhà xuất bản" value={publisherName} />
+                    <InfoItem icon={<LocalLibraryIcon />} label="Thể loại" value={categoryName} />
+                    <InfoItem icon={<MenuBookIcon />} label="ISBN" value={isbn} />
+                    <InfoItem icon={<CalendarIcon />} label="Giá bìa" value={fmtVND(doc.coverPrice)} />
+                  </Box>
+
+                  {/* BUTTONS */}
+                  <Stack direction={{ xs: "column", sm: "row" }} spacing={2} sx={{ mt: 4 }}>
+                    <Button variant="contained" onClick={openEbook}>
+                      Đọc Ebook
+                    </Button>
+
+                    <Button
+                      variant="contained"
+                      color="success"
+                      onClick={addToCart}
                     >
-                        {error}
-                    </Alert>
-                ) : !doc ? (
-                    <Alert
-                        severity="warning"
-                        sx={{
-                            borderRadius: 3,
-                            background: 'rgba(255,255,255,0.9)',
-                            backdropFilter: 'blur(10px)'
-                        }}
-                    >
-                        Không tìm thấy tài liệu.
-                    </Alert>
-                ) : (
-                    <Stack spacing={3}>
-                        {/* Main Content Card */}
-                        <Paper sx={{
-                            p: { xs: 2, md: 4 },
-                            background: 'rgba(255, 255, 255, 0.95)',
-                            backdropFilter: 'blur(20px)',
-                            borderRadius: 4,
-                            boxShadow: '0 8px 32px rgba(0,0,0,0.1)',
-                            border: '1px solid rgba(255, 255, 255, 0.3)'
-                        }}>
-                            <Stack direction={{ xs: "column", md: "row" }} spacing={4}>
-                                {/* Book Cover */}
-                                <Box sx={{ width: { xs: '100%', md: 280 }, flexShrink: 0, position: 'relative' }}>
-                                    <Box
-                                        component="img"
-                                        src={doc.coverPhoto || "/no-cover.png"}
-                                        alt={title}
-                                        onError={(e) => { e.currentTarget.src = "/no-cover.png"; }}
-                                        sx={{
-                                            width: 1, height: 380, objectFit: "cover", borderRadius: 3,
-                                            boxShadow: '0 12px 40px rgba(0,0,0,0.15)', transition: 'all 0.3s ease',
-                                            '&:hover': { transform: 'translateY(-4px)', boxShadow: '0 20px 50px rgba(0,0,0,0.2)' }
-                                        }}
-                                    />
-                                    <Chip
-                                        label={`Sẵn có: ${available}/${total}`}
-                                        size="small"
-                                        color={available > 0 ? "success" : "error"}
-                                        sx={{
-                                            position: 'absolute', top: 12, right: 12, fontWeight: 700,
-                                            background: available > 0
-                                                ? 'linear-gradient(135deg, #10B981 0%, #059669 100%)'
-                                                : 'linear-gradient(135deg, #EF4444 0%, #DC2626 100%)',
-                                            color: 'white', boxShadow: '0 4px 12px rgba(0,0,0,0.15)'
-                                        }}
-                                    />
-                                </Box>
+                      Thêm vào giỏ sách
+                    </Button>
 
-                                {/* Book Details */}
-                                <Box sx={{ flexGrow: 1, minWidth: 0 }}>
-                                    <Typography
-                                        variant="h3"
-                                        fontWeight={800}
-                                        gutterBottom
-                                        sx={{
-                                            background: 'linear-gradient(135deg, #1e293b 0%, #475569 100%)',
-                                            backgroundClip: 'text',
-                                            WebkitBackgroundClip: 'text',
-                                            WebkitTextFillColor: 'transparent',
-                                            lineHeight: 1.2, fontSize: { xs: '2rem', md: '2.5rem' }
-                                        }}
-                                    >
-                                        {title}
-                                    </Typography>
+                    <Button variant="outlined" onClick={() => navigate(-1)}>
+                      Quay lại
+                    </Button>
+                  </Stack>
+                </Box>
+              </Stack>
+            </Paper>
 
-                                    {/* Tags */}
-                                    <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mb: 3 }}>
-                                        {language && language !== "—" && (
-                                            <Chip icon={<LanguageIcon />} label={language} size="small" variant="outlined"
-                                                sx={{ borderColor: 'primary.main', color: 'primary.main', fontWeight: 600 }} />
-                                        )}
-                                        {publicationYear && publicationYear !== "—" && (
-                                            <Chip icon={<CalendarIcon />} label={publicationYear} size="small" variant="outlined"
-                                                sx={{ borderColor: 'secondary.main', color: 'secondary.main', fontWeight: 600 }} />
-                                        )}
-                                        {edition !== "—" && (
-                                            <Chip icon={<LibraryIcon />} label={`Tái bản ${edition}`} size="small"
-                                                sx={{ background: 'linear-gradient(135deg, #8B5CF6 0%, #A78BFA 100%)', color: 'white', fontWeight: 600 }} />
-                                        )}
-                                        {pageCount !== "—" && (
-                                            <Chip label={`${pageCount} trang`} size="small"
-                                                sx={{ background: 'rgba(100, 116, 139, 0.1)', color: 'slate.600', fontWeight: 600 }} />
-                                        )}
-                                    </Stack>
+            {/* MÔ TẢ */}
+            {doc.description && (
+              <Paper sx={{ p: 4, borderRadius: 4 }}>
+                <Typography variant="h5" fontWeight={700} gutterBottom>
+                  Mô tả
+                </Typography>
+                <Typography>{doc.description}</Typography>
+              </Paper>
+            )}
 
-                                    {/* Genres */}
-                                    {genres.length > 0 && (
-                                        <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mb: 3 }}>
-                                            {genres.map((genre, index) => (
-                                                <Chip
-                                                    key={genre}
-                                                    label={genre}
-                                                    size="small"
-                                                    sx={{
-                                                        background: index % 2 === 0
-                                                            ? 'linear-gradient(135deg, #3B82F6 0%, #1D4ED8 100%)'
-                                                            : 'linear-gradient(135deg, #EC4899 0%, #DB2777 100%)',
-                                                        color: 'white', fontWeight: 600, boxShadow: '0 2px 8px rgba(0,0,0,0.15)'
-                                                    }}
-                                                />
-                                            ))}
-                                        </Stack>
-                                    )}
+            {/* SÁCH TƯƠNG TỰ */}
+            <Paper sx={{ p: 4, borderRadius: 4 }}>
+              <Typography variant="h5" fontWeight={700} mb={2}>
+                Sách tương tự
+              </Typography>
 
-                                    <Divider sx={{
-                                        my: 3,
-                                        background: 'linear-gradient(90deg, transparent 0%, rgba(99,102,241,0.3) 50%, transparent 100%)',
-                                        height: 2
-                                    }} />
+              {loadingSimilar ? (
+                <ButtonLoader size={40} />
+              ) : similar.length === 0 ? (
+                <Typography textAlign="center">Chưa có sách tương tự.</Typography>
+              ) : (
+                <Box
+                  sx={{
+                    display: "grid",
+                    gap: 3,
+                    gridTemplateColumns: {
+                      xs: "1fr",
+                      sm: "repeat(2, 1fr)",
+                      md: "repeat(3, 1fr)",
+                      lg: "repeat(4, 1fr)"
+                    }
+                  }}
+                >
+                  {similar.map((s) => (
+                    <ReaderCard key={s.documentId} doc={s} />
+                  ))}
+                </Box>
+              )}
+            </Paper>
+          </Stack>
+        )}
+      </Box>
 
-                                    {/* Information Grid */}
-                                    <Box sx={{
-                                        display: 'grid',
-                                        gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' },
-                                        gap: 3, mb: 4
-                                    }}>
-                                        <InfoItem icon={<PersonIcon />} label="Tác giả" value={authorNames} />
-                                        <InfoItem icon={<BusinessIcon />} label="Nhà xuất bản" value={publisherName} />
-                                        <InfoItem icon={<LocalLibraryIcon />} label="Thể loại" value={categoryName} />
-                                        <InfoItem icon={<MenuBookIcon />} label="ISBN" value={isbn} />
-                                        <InfoItem icon={<CalendarIcon />} label="Giá bìa" value={fmtVND(doc.coverPrice)} />
-                                    </Box>
+      <ReaderFooter />
 
-                                    {/* Action Buttons */}
-                                    <Stack direction={{ xs: "column", sm: "row" }} spacing={2} sx={{ mt: 4 }}>
-                                        <Button
-                                            variant="contained"
-                                            onClick={openEbook}
-                                            disabled={!doc.ebookUrl && !doc.hasEbook}
-                                            startIcon={<EbookIcon />}
-                                            sx={{
-                                                borderRadius: 3, px: 4, py: 1.5,
-                                                background: 'linear-gradient(135deg, #667EEA 0%, #764BA2 100%)',
-                                                fontWeight: 700, fontSize: '1rem',
-                                                boxShadow: '0 4px 20px rgba(102,126,234,0.4)',
-                                                transition: 'all 0.3s ease',
-                                                '&:hover': {
-                                                    background: 'linear-gradient(135deg, #5A67D8 0%, #6B46C1 100%)',
-                                                    boxShadow: '0 8px 30px rgba(102,126,234,0.6)',
-                                                    transform: 'translateY(-2px)'
-                                                },
-                                                '&:disabled': { background: 'grey.300', boxShadow: 'none' }
-                                            }}
-                                        >
-                                            Đọc Ebook
-                                        </Button>
-                                        <Button
-                                            variant="outlined"
-                                            onClick={() => navigate(-1)}
-                                            startIcon={<ArrowBackIcon />}
-                                            sx={{
-                                                borderRadius: 3, px: 4, py: 1.5,
-                                                borderColor: 'slate.300', color: 'slate.700',
-                                                fontWeight: 600, fontSize: '1rem',
-                                                '&:hover': {
-                                                    borderColor: 'primary.main',
-                                                    backgroundColor: 'rgba(99,102,241,0.04)',
-                                                    transform: 'translateY(-2px)',
-                                                    boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
-                                                }
-                                            }}
-                                        >
-                                            Quay lại
-                                        </Button>
-                                    </Stack>
-                                </Box>
-                            </Stack>
-                        </Paper>
-
-                        {/* Description Section */}
-                        {doc.description && (
-                            <Paper sx={{
-                                p: { xs: 2, md: 4 },
-                                background: 'rgba(255, 255, 255, 0.95)',
-                                backdropFilter: 'blur(20px)',
-                                borderRadius: 4,
-                                boxShadow: '0 8px 32px rgba(0,0,0,0.1)',
-                                border: '1px solid rgba(255, 255, 255, 0.3)'
-                            }}>
-                                <Typography
-                                    variant="h5"
-                                    fontWeight={700}
-                                    gutterBottom
-                                    sx={{
-                                        background: 'linear-gradient(135deg, #1e293b 0%, #475569 100%)',
-                                        backgroundClip: 'text',
-                                        WebkitBackgroundClip: 'text',
-                                        WebkitTextFillColor: 'transparent',
-                                        display: 'flex', alignItems: 'center', gap: 1
-                                    }}
-                                >
-                                    <MenuBookIcon color="primary" />
-                                    Mô tả
-                                </Typography>
-                                <Typography variant="body1" whiteSpace="pre-line" sx={{ lineHeight: 1.7, color: 'text.primary', fontSize: '1.1rem' }}>
-                                    {doc.description}
-                                </Typography>
-                            </Paper>
-                        )}
-
-                        {/* Similar Documents Section */}
-                        <Paper sx={{
-                            p: { xs: 2, md: 4 },
-                            background: 'rgba(255, 255, 255, 0.95)',
-                            backdropFilter: 'blur(20px)',
-                            borderRadius: 4,
-                            boxShadow: '0 8px 32px rgba(0,0,0,0.1)',
-                            border: '1px solid rgba(255, 255, 255, 0.3)'
-                        }}>
-                            <Typography
-                                variant="h5"
-                                fontWeight={700}
-                                gutterBottom
-                                sx={{
-                                    background: 'linear-gradient(135deg, #1e293b 0%, #475569 100%)',
-                                    backgroundClip: 'text',
-                                    WebkitBackgroundClip: 'text',
-                                    WebkitTextFillColor: 'transparent',
-                                    display: 'flex', alignItems: 'center', gap: 1, mb: 3
-                                }}
-                            >
-                                <LocalLibraryIcon color="primary" />
-                                Sách tương tự
-                            </Typography>
-
-                            {loadingSimilar ? (
-                                <Box sx={{ display: "flex", justifyContent: "center", alignItems: "center", py: 6 }}>
-                                    <Stack spacing={2} alignItems="center">
-                                        <ButtonLoader size={40} />
-                                        <Typography variant="body2" color="text.secondary">
-                                            Đang tải sách tương tự...
-                                        </Typography>
-                                    </Stack>
-                                </Box>
-                            ) : similar.length === 0 ? (
-                                <Typography variant="body1" color="text.secondary" textAlign="center" sx={{ py: 4 }}>
-                                    Chưa có sách tương tự được đề xuất.
-                                </Typography>
-                            ) : (
-                                <Box sx={{
-                                    display: "grid", gap: 3,
-                                    gridTemplateColumns: {
-                                        xs: "1fr", sm: "repeat(2, 1fr)", md: "repeat(3, 1fr)", lg: "repeat(4, 1fr)"
-                                    }
-                                }}>
-                                    {similar.map((s) => (<ReaderCard key={s.documentId} doc={s} />))}
-                                </Box>
-                            )}
-                        </Paper>
-                    </Stack>
-                )}
-            </Box>
-
-            <ReaderFooter maxContentWidth={1280} />
-        </>
-    );
+      {/* SNACKBAR */}
+      <Snackbar
+        open={snack.open}
+        autoHideDuration={2500}
+        onClose={() => setSnack({ ...snack, open: false })}
+      >
+        <Alert severity={snack.severity} variant="filled">
+          {snack.message}
+        </Alert>
+      </Snackbar>
+    </>
+  );
 }
