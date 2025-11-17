@@ -34,7 +34,7 @@ const debugJobRoutes = require("./route/debugJob.routes");
 
 
 const nodemailer = require('nodemailer');
-const { scheduleDailyJob } = require('./service/notificationJob.service');
+const { scheduleDailyJob, runNotificationJob } = require('./service/notificationJob.service');
 
 const app = express();
 const port = process.env.PORT || 8080;
@@ -157,6 +157,29 @@ const startServer = async () => {
     } catch (jobErr) {
       console.error('❌ Không thể đăng ký notification job:', jobErr);
     }
+
+    // ----- One-off startup check: nếu server khởi động sau 02:00 (TZ cấu hình), chạy job ngay -----
+    (async () => {
+      try {
+        const tz = process.env.SERVER_TIMEZONE || 'Asia/Ho_Chi_Minh';
+        const now = new Date();
+        // Lấy giờ theo timezone cấu hình (string rồi parse lại Date để lấy giờ cục bộ theo TZ)
+        const localNowStr = now.toLocaleString('en-US', { timeZone: tz });
+        const localHour = new Date(localNowStr).getHours();
+
+        // Nếu server khởi động sau 02:00 (theo TZ), thì chạy one-off để bắt các cron bị missed
+        if (localHour >= 2) {
+          console.log('[notificationJob] Startup detected after 02:00 (TZ=' + tz + '), running one-off check at', new Date().toISOString());
+          await runNotificationJob();
+          console.log('[notificationJob] Startup one-off check finished at', new Date().toISOString());
+        } else {
+          console.log('[notificationJob] Startup before 02:00 (TZ=' + tz + '), skipping one-off run');
+        }
+      } catch (err) {
+        console.error('[notificationJob] startup one-off error', err);
+      }
+    })();
+
 
     // ⚡ KHỞI TẠO HTTP SERVER + SOCKET.IO
     const server = http.createServer(app);

@@ -440,5 +440,6 @@ function scheduleDailyJob() {
 
 module.exports = {
   runNotificationJob,
-  scheduleDailyJob
+  scheduleDailyJob,
+  buildItemsForSlip
 };

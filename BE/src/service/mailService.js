@@ -489,7 +489,232 @@ async function sendLoanIssuedEmail(to, data = {}) {
 
   return sendEmail(to, subject, html, text);
 }
+// -----------------------------
+// Template: gửi mail khi 1 LoanDetail bị xóa (removed from slip)
+// data: {
+//   fullName, slipId, loanDetailId, title, documentId, documentCopyId,
+//   reason, librarianName, supportEmail?, supportPhone?, libraryName?, year?
+// }
+// -----------------------------
+async function sendLoanDetailRemovedEmail(to, data = {}) {
+  if (!to) throw new Error('sendLoanDetailRemovedEmail: missing "to"');
 
+  const {
+    fullName = '',
+    slipId = '',
+    loanDetailId = '',
+    title = '',
+    documentId = '',
+    documentCopyId = '',
+    reason = '',
+    librarianName = '',
+    supportEmail = SUPPORT_EMAIL,
+    supportPhone = SUPPORT_PHONE,
+    libraryName = process.env.LIBRARY_NAME || 'Thư viện Book Tech',
+    year = new Date().getFullYear()
+  } = data;
+
+  const subject = `[${libraryName}] Thông báo: Một mục trong phiếu #${slipId} đã bị hủy`;
+
+  const textLines = [
+    `Kính gửi ${fullName},`,
+    '',
+    `Thông báo: một mục trong phiếu mượn (Mã: ${slipId}) của bạn đã bị hủy bởi thủ thư${librarianName ? `: ${librarianName}` : ''}.`,
+    `- Mã loanDetail: ${loanDetailId}`,
+    `- Tài liệu: ${title || ('ID: ' + documentId)}`,
+    `- Bản sao (copyId): ${documentCopyId || '—'}`,
+    `- Lý do: ${reason || 'Không có lý do cụ thể'}`,
+    '',
+    `Nếu bạn có thắc mắc hoặc cần hỗ trợ, vui lòng liên hệ:`,
+    `- Email: ${supportEmail}`,
+    `- SĐT: ${supportPhone}`,
+    '',
+    `Trân trọng,`,
+    `${libraryName}`,
+    `© ${year} ${libraryName}`
+  ];
+  const text = textLines.join('\n');
+
+  const html = `
+  <!doctype html>
+  <html>
+  <head><meta charset="utf-8"></head>
+  <body style="font-family:Arial, sans-serif; color:#333;">
+    <div style="max-width:680px; margin:12px auto; padding:18px; border:1px solid #eee; border-radius:8px;">
+      <h2 style="color:#0b5cff; margin-top:0;">Thông báo mục bị hủy — Phiếu #${escapeHtml(String(slipId))}</h2>
+      <p>Xin chào <strong>${escapeHtml(fullName)}</strong>,</p>
+      <p>Một mục trong phiếu mượn <strong>#${escapeHtml(String(slipId))}</strong> của bạn đã bị hủy${librarianName ? ` bởi <strong>${escapeHtml(librarianName)}</strong>` : ''}.</p>
+      <ul>
+        <li><strong>Mã loanDetail:</strong> ${escapeHtml(String(loanDetailId))}</li>
+        <li><strong>Tài liệu:</strong> ${escapeHtml(title || ('ID: ' + documentId))}</li>
+        <li><strong>Bản sao (copyId):</strong> ${escapeHtml(String(documentCopyId || '—'))}</li>
+        <li><strong>Lý do:</strong> ${escapeHtml(reason || 'Không có lý do cụ thể')}</li>
+      </ul>
+      <p>Nếu bạn cần hỗ trợ, liên hệ: <a href="mailto:${escapeHtml(supportEmail)}">${escapeHtml(supportEmail)}</a> — ${escapeHtml(supportPhone)}</p>
+      <hr style="border:none; border-top:1px solid #eee; margin:12px 0;">
+      <p style="font-size:12px; color:#777;">Email này được gửi tự động. Vui lòng không trả lời trực tiếp.</p>
+      <p style="font-size:12px; color:#999;">&copy; ${year} ${escapeHtml(libraryName)}</p>
+    </div>
+  </body>
+  </html>
+  `;
+
+  return sendEmail(to, subject, html, text);
+}
+
+// -----------------------------
+// Template: gửi mail khi toàn bộ phiếu bị hủy (cancel slip)
+// data: {
+//   fullName, slipId, items: [{title, documentId, documentCopyId}], reason, librarianName,
+//   supportEmail?, supportPhone?, libraryName?, year?
+// }
+// -----------------------------
+async function sendLoanSlipCancelledEmail(to, data = {}) {
+  if (!to) throw new Error('sendLoanSlipCancelledEmail: missing "to"');
+
+  const {
+    fullName = '',
+    slipId = '',
+    items = [],
+    reason = '',
+    librarianName = '',
+    supportEmail = SUPPORT_EMAIL,
+    supportPhone = SUPPORT_PHONE,
+    libraryName = process.env.LIBRARY_NAME || 'Thư viện Book Tech',
+    year = new Date().getFullYear()
+  } = data;
+
+  const subject = `[${libraryName}] Thông báo: Phiếu mượn #${slipId} đã bị hủy`;
+
+  const textLines = [
+    `Kính gửi ${fullName},`,
+    '',
+    `Phiếu mượn (Mã: ${slipId}) của bạn đã bị hủy${librarianName ? ` bởi ${librarianName}` : ''}.`,
+    `Lý do: ${reason || 'Không có lý do cụ thể'}`,
+    '',
+    `Danh sách mục đã bị hủy:`,
+    ...items.map(it => `- ${it.title || ('ID:' + it.documentId)} (copyId: ${it.documentCopyId || '—'})`),
+    '',
+    `Nếu bạn cần hỗ trợ, vui lòng liên hệ:`,
+    `- Email: ${supportEmail}`,
+    `- SĐT: ${supportPhone}`,
+    '',
+    `Trân trọng,`,
+    `${libraryName}`,
+    `© ${year} ${libraryName}`
+  ];
+  const text = textLines.join('\n');
+
+  const itemsHtml = items.map(it => `<li>${escapeHtml(it.title || ('ID:' + it.documentId))} — Bản sao: ${escapeHtml(String(it.documentCopyId || '—'))}</li>`).join('');
+
+  const html = `
+  <!doctype html>
+  <html>
+  <head><meta charset="utf-8"></head>
+  <body style="font-family:Arial, sans-serif; color:#333;">
+    <div style="max-width:720px; margin:12px auto; padding:18px; border:1px solid #eee; border-radius:8px;">
+      <h2 style="color:#0b5cff; margin-top:0;">Phiếu mượn #${escapeHtml(String(slipId))} — Đã bị hủy</h2>
+      <p>Xin chào <strong>${escapeHtml(fullName)}</strong>,</p>
+      <p>Phiếu mượn <strong>#${escapeHtml(String(slipId))}</strong> của bạn đã bị hủy${librarianName ? ` bởi <strong>${escapeHtml(librarianName)}</strong>` : ''}.</p>
+      <p><strong>Lý do:</strong> ${escapeHtml(reason || 'Không có lý do cụ thể')}</p>
+
+      <p><strong>Danh sách các mục bị hủy:</strong></p>
+      <ul>${itemsHtml}</ul>
+
+      <p>Nếu bạn cần hỗ trợ hoặc muốn đặt lại yêu cầu, vui lòng liên hệ: <a href="mailto:${escapeHtml(supportEmail)}">${escapeHtml(supportEmail)}</a> — ${escapeHtml(supportPhone)}</p>
+
+      <hr style="border:none; border-top:1px solid #eee; margin:12px 0;">
+      <p style="font-size:12px; color:#777;">Email này được gửi tự động. Vui lòng không trả lời trực tiếp.</p>
+      <p style="font-size:12px; color:#999;">&copy; ${year} ${escapeHtml(libraryName)}</p>
+    </div>
+  </body>
+  </html>
+  `;
+
+  return sendEmail(to, subject, html, text);
+}
+// -----------------------------
+// Template: gửi mail khi HỦY PHIẾU ĐẶT TRƯỚC (reservation cancel)
+// data: {
+//   fullName, slipId, items: [{requestedDocumentId?, title?, originalNote?}], reason, librarianName,
+//   supportEmail?, supportPhone?, libraryName?, year?
+// }
+// -----------------------------
+async function sendReservationCancelledEmail(to, data = {}) {
+  if (!to) throw new Error('sendReservationCancelledEmail: missing "to"');
+
+  const {
+    fullName = '',
+    slipId = '',
+    items = [],
+    reason = '',
+    librarianName = '',
+    supportEmail = SUPPORT_EMAIL,
+    supportPhone = SUPPORT_PHONE,
+    libraryName = process.env.LIBRARY_NAME || 'Thư viện Book Tech',
+    year = new Date().getFullYear()
+  } = data;
+
+  const subject = `[${libraryName}] Thông báo: Phiếu đặt trước #${slipId} đã bị hủy`;
+
+  const textLines = [
+    `Kính gửi ${fullName},`,
+    '',
+    `Phiếu đặt trước (Mã: ${slipId}) của bạn đã bị hủy${librarianName ? ` bởi ${librarianName}` : ''}.`,
+    `Lý do: ${reason || 'Không có lý do cụ thể'}`,
+    '',
+    `Danh sách mục trong phiếu:`,
+    ...items.map(it => {
+      const titlePart = it.title ? `${it.title}` : (it.requestedDocumentId ? `ID: ${it.requestedDocumentId}` : '—');
+      const notePart = it.originalNote ? ` (Ghi chú: ${it.originalNote})` : '';
+      return `- ${titlePart}${notePart}`;
+    }),
+    '',
+    `Nếu bạn cần hỗ trợ hoặc muốn đặt lại, vui lòng liên hệ:`,
+    `- Email: ${supportEmail}`,
+    `- SĐT: ${supportPhone}`,
+    '',
+    `Trân trọng,`,
+    `${libraryName}`,
+    `© ${year} ${libraryName}`
+  ];
+  const text = textLines.join('\n');
+
+  // HTML
+  const itemsHtml = items.length
+    ? items.map(it => {
+        const titlePart = it.title ? escapeHtml(it.title) : (it.requestedDocumentId ? `ID: ${escapeHtml(String(it.requestedDocumentId))}` : '—');
+        const notePart = it.originalNote ? ` — <em>${escapeHtml(it.originalNote)}</em>` : '';
+        return `<li>${titlePart}${notePart}</li>`;
+      }).join('')
+    : '<li>—</li>';
+
+  const html = `
+  <!doctype html>
+  <html>
+  <head><meta charset="utf-8"></head>
+  <body style="font-family:Arial, sans-serif; color:#333;">
+    <div style="max-width:720px; margin:12px auto; padding:18px; border:1px solid #eee; border-radius:8px;">
+      <h2 style="color:#0b5cff; margin-top:0;">Phiếu đặt trước #${escapeHtml(String(slipId))} — Đã bị hủy</h2>
+      <p>Xin chào <strong>${escapeHtml(fullName)}</strong>,</p>
+      <p>Phiếu đặt trước <strong>#${escapeHtml(String(slipId))}</strong> của bạn đã bị hủy${librarianName ? ` bởi <strong>${escapeHtml(librarianName)}</strong>` : ''}.</p>
+      <p><strong>Lý do:</strong> ${escapeHtml(reason || 'Không có lý do cụ thể')}</p>
+
+      <p><strong>Danh sách mục trong phiếu:</strong></p>
+      <ul>${itemsHtml}</ul>
+
+      <p>Nếu bạn cần hỗ trợ hoặc muốn đặt lại yêu cầu, vui lòng liên hệ: <a href="mailto:${escapeHtml(supportEmail)}">${escapeHtml(supportEmail)}</a> — ${escapeHtml(supportPhone)}</p>
+
+      <hr style="border:none; border-top:1px solid #eee; margin:12px 0;">
+      <p style="font-size:12px; color:#777;">Email này được gửi tự động. Vui lòng không trả lời trực tiếp.</p>
+      <p style="font-size:12px; color:#999;">&copy; ${year} ${escapeHtml(libraryName)}</p>
+    </div>
+  </body>
+  </html>
+  `;
+
+  return sendEmail(to, subject, html, text);
+}
 
 
 module.exports = {
@@ -498,5 +723,8 @@ module.exports = {
   sendMemberCardIssuedEmail,
   sendReservationConfirmationEmail,
   sendReservationApprovedEmail,
-  sendLoanIssuedEmail
+  sendLoanIssuedEmail,
+  sendLoanDetailRemovedEmail,
+  sendLoanSlipCancelledEmail,
+  sendReservationApprovedEmail
 };

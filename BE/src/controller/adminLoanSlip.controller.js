@@ -2,12 +2,14 @@
 const {
   getAllLoanSlipsService,
   createLoanSlipService,
-  // createLoanSlipPaymentQRService, // removed
-  // confirmLoanSlipPaymentService,  // removed
   approveReservationService,
   getBorrowableCopiesService,
   returnSingleItemService,
   returnBulkItemsService,
+  pickupLoanSlipService,
+  cancelLoanSlipService,
+  removeLoanDetailService,
+  cancelReservationService
 } = require('../service/adminLoanSlip.service');
 
 exports.getAllLoanSlips = async (req, res) => {
@@ -38,17 +40,15 @@ exports.createLoanSlip = async (req, res) => {
   }
 };
 
-// note: payment-related controllers removed because service no longer exports them
-
 exports.approveReservation = async (req, res) => {
   try {
     const { loanSlipId } = req.params;
     const {
       librarianId,
       dueDate,
-      pricingMode,    // 'AUTO_MIN' | 'AUTO_MAX' | 'MANUAL'
-      assignments,    // [{ loanDetailId, documentCopyId }]
-      // deposits and createPayment removed
+      pricingMode,
+      assignments,
+      conditions
     } = req.body || {};
 
     const result = await approveReservationService({
@@ -57,6 +57,7 @@ exports.approveReservation = async (req, res) => {
       dueDate,
       pricingMode,
       assignments,
+      conditions
     });
 
     return res.json({ success: true, ...result });
@@ -70,10 +71,6 @@ exports.approveReservation = async (req, res) => {
   }
 };
 
-/**
- * NEW: Lấy danh sách bản sao có thể mượn (AVAILABLE) của 1 document
- * Query hỗ trợ: ?page=1&limit=20&q=barcode&exclude=10,11
- */
 exports.getBorrowableCopies = async (req, res) => {
   try {
     const { documentId } = req.params;
@@ -101,31 +98,12 @@ exports.getBorrowableCopies = async (req, res) => {
   }
 };
 
-/**
- * TRẢ TỪNG QUYỂN
- * POST /api/loans/admin/items/return
- * Body: {
- *   loanDetailId: number,
- *   returnDate: 'YYYY-MM-DD',
- *   conditionReturn: number (0-100),
- *   isLost?: boolean,
- *   note?: string,
- *   librarianId: number  ← FE truyền lên
- * }
- */
 exports.returnSingleItem = async (req, res) => {
   try {
-    // Lấy librarianId từ body (FE truyền lên)
     const librarianId = req.body.librarianId;
-
-    // Validate
     if (!librarianId) {
-      return res.status(400).json({
-        success: false,
-        message: 'Thiếu librarianId trong request body'
-      });
+      return res.status(400).json({ success: false, message: 'Thiếu librarianId trong request body' });
     }
-
     const result = await returnSingleItemService(req.body, librarianId);
     return res.json({ success: true, ...result });
   } catch (err) {
@@ -139,33 +117,17 @@ exports.returnSingleItem = async (req, res) => {
   }
 };
 
-/**
- * TRẢ TOÀN BỘ PHIẾU
- * POST /api/loans/admin/slips/:loanSlipId/return
- * Body: {
- *   librarianId: number,  ← FE truyền lên
- *   returnDate: 'YYYY-MM-DD',
- *   items: [ { loanDetailId, conditionReturn, isLost?, note? } ]
- * }
- */
 exports.returnBulkItems = async (req, res) => {
   try {
     const { loanSlipId } = req.params;
     const librarianId = req.body.librarianId;
-
-    // Validate
     if (!librarianId) {
-      return res.status(400).json({
-        success: false,
-        message: 'Thiếu librarianId trong request body'
-      });
+      return res.status(400).json({ success: false, message: 'Thiếu librarianId trong request body' });
     }
-
     const result = await returnBulkItemsService(
       { loanSlipId: Number(loanSlipId), ...req.body },
       librarianId
     );
-
     return res.json({ success: true, ...result });
   } catch (err) {
     const code = err.status || 500;
@@ -177,3 +139,144 @@ exports.returnBulkItems = async (req, res) => {
     });
   }
 };
+
+/**
+ * PICKUP - Xác nhận độc giả đã đến nhận
+ * POST /api/loans/admin/slips/:loanSlipId/pickup
+ * Body: {
+ *   librarianId: number,   // required
+ *   pickupDate?: 'YYYY-MM-DD',
+ *   dueDate?: 'YYYY-MM-DD',
+ *   items?: [loanDetailId, ...],
+ *   preserveLoanDate?: boolean
+ * }
+ */
+exports.pickupLoanSlip = async (req, res) => {
+  try {
+    const { loanSlipId } = req.params;
+    const payload = {
+      loanSlipId: Number(loanSlipId),
+      librarianId: Number(req.body.librarianId),
+      pickupDate: req.body.pickupDate,
+      dueDate: req.body.dueDate,
+      items: req.body.items,
+      preserveLoanDate: Boolean(req.body.preserveLoanDate)
+    };
+
+    if (!payload.librarianId) {
+      return res.status(400).json({ success: false, message: 'Thiếu librarianId trong request body' });
+    }
+
+    const result = await pickupLoanSlipService(payload);
+    return res.json({ success: true, ...result });
+  } catch (err) {
+    const code = err.status || 500;
+    return res.status(code).json({
+      success: false,
+      message: 'Lỗi xác nhận pickup',
+      error: err.message,
+      details: err.details
+    });
+  }
+};
+
+/**
+ * XÓA 1 LOAN DETAIL (bỏ 1 quyển khỏi phiếu)
+ * DELETE /api/loans/admin/slips/:loanSlipId/details/:loanDetailId
+ * Body: { librarianId: number, reason?: string }
+ */
+exports.removeLoanDetail = async (req, res) => {
+  try {
+    const { loanSlipId, loanDetailId } = req.params;
+    const librarianId = Number(req.body.librarianId);
+    const reason = req.body.reason || null;
+
+    if (!librarianId) {
+      return res.status(400).json({ success: false, message: 'Thiếu librarianId trong request body' });
+    }
+
+    const result = await removeLoanDetailService({
+      slipId: Number(loanSlipId),
+      loanDetailId: Number(loanDetailId),
+      reason,
+      librarianId
+    });
+
+    return res.json({ success: true, ...result });
+  } catch (err) {
+    const code = err.status || 500;
+    return res.status(code).json({
+      success: false,
+      message: 'Lỗi xóa tài liệu trong phiếu',
+      error: err.message,
+      details: err.details
+    });
+  }
+};
+
+/**
+ * HỦY TOÀN BỘ PHIẾU
+ * DELETE /api/loans/admin/slips/:loanSlipId
+ * Body: { librarianId: number, reason?: string }
+ */
+exports.cancelLoanSlip = async (req, res) => {
+  try {
+    const { loanSlipId } = req.params;
+    const librarianId = Number(req.body.librarianId);
+    const reason = req.body.reason || null;
+
+    if (!librarianId) {
+      return res.status(400).json({ success: false, message: 'Thiếu librarianId trong request body' });
+    }
+
+    const result = await cancelLoanSlipService({
+      slipId: Number(loanSlipId),
+      reason,
+      librarianId
+    });
+
+    return res.json({ success: true, ...result });
+  } catch (err) {
+    const code = err.status || 500;
+    return res.status(code).json({
+      success: false,
+      message: 'Lỗi hủy phiếu mượn',
+      error: err.message,
+      details: err.details
+    });
+  }
+};
+
+/**
+ * HỦY PHIẾU ĐẶT TRƯỚC (PENDING)
+ * DELETE /api/loans/admin/reservations/:loanSlipId
+ * Body: { librarianId: number, reason?: string }
+ */
+exports.cancelReservation = async (req, res) => {
+  try {
+    const { loanSlipId } = req.params;
+    const librarianId = Number(req.body.librarianId);
+    const reason = req.body.reason || null;
+
+    if (!librarianId) {
+      return res.status(400).json({ success: false, message: 'Thiếu librarianId trong request body' });
+    }
+
+    const result = await cancelReservationService({
+      loanSlipId: Number(loanSlipId),
+      reason,
+      librarianId
+    });
+
+    return res.json({ success: true, ...result });
+  } catch (err) {
+    const code = err.status || 500;
+    return res.status(code).json({
+      success: false,
+      message: 'Lỗi hủy phiếu đặt trước',
+      error: err.message,
+      details: err.details
+    });
+  }
+};
+module.exports = exports;

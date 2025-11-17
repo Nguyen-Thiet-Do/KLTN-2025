@@ -1004,14 +1004,15 @@ routeApi.get('/', (req, res) => {
               items: 'array (required) — [{ documentCopyId:number, note?:string }]',
             },
             examples: [
-              '{ "readerId": 10, "librarianId": 2, "items":[{"documentCopyId":101 }'
+              '{ "readerId": 10, "librarianId": 2, "items":[{"documentCopyId":101 }]}'
             ]
           },
-          // ================== MỚI: DUYỆT PHIẾU ĐẶT TRƯỚC ==================
+
+          // ================== DUYỆT PHIẾU ĐẶT TRƯỚC ==================
           {
             method: 'POST',
             path: '/api/loans/admin/reservations/:loanSlipId/approve',
-            description: 'Duyệt phiếu đặt trước (PENDING, borrowForm=RESERVATION) -> WAITING_FOR_PICKUP; gán bản sao & chốt cọc',
+            description: 'Duyệt phiếu đặt trước (borrowForm=RESERVATION) → WAITING_FOR_PICKUP; gán bản sao & chốt cọc',
             auth: true,
             role: 'Admin (roleId = 1), Librarian (roleId = 2)',
             params: {
@@ -1028,6 +1029,105 @@ routeApi.get('/', (req, res) => {
               message: 'string',
               loanSlipId: 'number',
               slipStatus: 'string (WAITING_FOR_PICKUP)',
+            }
+          },
+
+          // =====================================================================
+          // ===================   CÁC API MỚI (THEO YÊU CẦU)  =====================
+          // =====================================================================
+
+          // 1) PICKUP — độc giả đến lấy
+          {
+            method: 'POST',
+            path: '/api/loans/admin/slips/:loanSlipId/pickup',
+            description: 'Xác nhận độc giả đến lấy (PICKUP) — chuyển sang BORROWING và gán loanDate/dueDate',
+            auth: true,
+            role: 'Admin (roleId = 1), Librarian (roleId = 2)',
+            params: {
+              loanSlipId: 'number (required)'
+            },
+            body: {
+              librarianId: 'number (required)',
+              pickupDate: "date (optional, 'YYYY-MM-DD') — nếu không truyền sẽ dùng ngày hiện tại",
+              dueDate: "date (optional, 'YYYY-MM-DD')",
+              items: 'array (optional) — nếu chỉ pickup một số tài liệu',
+              preserveLoanDate: 'boolean (optional, default=false)'
+            },
+            response: {
+              success: 'boolean',
+              message: 'string',
+              slipStatus: 'BORROWING'
+            }
+          },
+
+          // 2) XÓA 1 TÀI LIỆU KHỎI PHIẾU
+          {
+            method: 'DELETE',
+            path: '/api/loans/admin/slips/:loanSlipId/details/:loanDetailId',
+            description: 'Xóa 1 tài liệu khỏi phiếu. Nếu tài liệu cuối cùng → hệ thống tự hủy toàn bộ phiếu',
+            auth: true,
+            role: 'Admin (roleId = 1), Librarian (roleId = 2)',
+            params: {
+              loanSlipId: 'number (required)',
+              loanDetailId: 'number (required)'
+            },
+            body: {
+              librarianId: 'number (required)',
+              reason: 'string (optional, lưu vào note và gửi email)'
+            },
+            response: {
+              success: 'boolean',
+              message: 'string',
+              deletedSlip: 'boolean — true nếu phiếu bị xóa hoàn toàn'
+            }
+          },
+
+          // 3) HỦY TOÀN BỘ PHIẾU
+          {
+            method: 'DELETE',
+            path: '/api/loans/admin/slips/:loanSlipId',
+            description: 'Hủy toàn bộ phiếu mượn — trả bản sao, xóa loanDetails, gửi email hủy phiếu',
+            auth: true,
+            role: 'Admin (roleId = 1), Librarian (roleId = 2)',
+            params: {
+              loanSlipId: 'number (required)'
+            },
+            body: {
+              librarianId: 'number (required)',
+              reason: 'string (optional, lưu vào note và gửi email)'
+            },
+            response: {
+              success: 'boolean',
+              message: 'string'
+            }
+          },
+
+          // 4) HỦY PHIẾU ĐẶT TRƯỚC (MỚI) — PENDING (chưa có bản sao)
+          {
+            method: 'DELETE',
+            path: '/api/loans/admin/reservations/:loanSlipId',
+            description: 'Hủy phiếu đặt trước ở trạng thái PENDING (chưa gán bản sao). Lý do lưu vào cột note của phiếu; gửi email thông báo cho độc giả (nếu có email).',
+            auth: true,
+            role: 'Admin (roleId = 1), Librarian (roleId = 2)',
+            params: {
+              loanSlipId: 'number (required)'
+            },
+            body: {
+              librarianId: 'number (required) — người hủy',
+              reason: 'string (optional, lưu vào LoanSlip.note và gửi trong email)'
+            },
+            behavior: [
+              'Kiểm tra phiếu tồn tại và đang ở trạng thái PENDING (nếu không: 409 error).',
+              'Lưu "reason" vào cột note của LoanSlip.',
+              'Xóa tất cả LoanDetail liên quan (chúng không có documentCopyId).',
+              'Xóa LoanSlip.',
+              'Gửi email thông báo hủy phiếu cho độc giả (nếu có account.email), nội dung bao gồm lý do và danh sách tài liệu đã đặt (title/ids).',
+              'Nếu không có email độc giả, có thể fallback gửi tới ADMIN_NOTIFICATION_EMAIL (nếu cấu hình).'
+            ],
+            response: {
+              success: 'boolean',
+              message: 'string — ví dụ: "Đã hủy phiếu đặt trước thành công"',
+              loanSlipId: 'number'
             }
           }
         ]
