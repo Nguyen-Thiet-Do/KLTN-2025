@@ -4,7 +4,7 @@ const router = express.Router();
 const { Op } = require("sequelize");
 
 // middleware bảo vệ
-const { requireAuth, requireRole } = require("../middleware/authMiddleware");
+const { requireAuth, requireRole } = require('../middleware/auth');
 
 // services
 const { runNotificationJob } = require("../service/notificationJob.service");
