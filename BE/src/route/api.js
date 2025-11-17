@@ -1234,6 +1234,12 @@ routeApi.get('/', (req, res) => {
             path: '/tests',
             description: 'Lấy danh sách test',
             auth: false
+          },
+          {
+            method: 'POST',
+            path: '/api/debug/run-notification-job',
+            description: 'Tạo job debug',
+            auth: false
           }
         ]
       },
