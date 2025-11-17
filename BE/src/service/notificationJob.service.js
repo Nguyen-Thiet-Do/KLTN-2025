@@ -1,6 +1,6 @@
 // src/service/notificationJob.service.js
 const cron = require('node-cron');
-const { Op } = require('sequelize');
+const { Op, fn, col, where } = require('sequelize');
 const sequelize = require('../config/database');
 const mailService = require('./mailService');
 const { emitToUser } = require('../config/socket'); // <- emit realtime
@@ -16,14 +16,39 @@ const {
 } = require('../model');
 
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+const TZ = process.env.SERVER_TIMEZONE || 'Asia/Ho_Chi_Minh';
 
+/**
+ * Trả về YYYY-MM-DD theo múi giờ Asia/Ho_Chi_Minh (VN)
+ */
 function fmtToday() {
-  return new Date().toISOString().slice(0, 10);
+  try {
+    const now = new Date();
+    // convert to VN local time string then parse back to Date to get local midnight in that TZ context
+    const local = new Date(now.toLocaleString('en-US', { timeZone: TZ }));
+    return local.toISOString().slice(0, 10);
+  } catch (e) {
+    // fallback: UTC date
+    return new Date().toISOString().slice(0, 10);
+  }
 }
+
+/**
+ * Parse chuỗi 'YYYY-MM-DD' -> Date object at UTC midnight for stability.
+ * Sử dụng Date.UTC để tránh lệch do server timezone.
+ */
 function parseDateOnlyToDate(str) {
   if (!str) return null;
-  return new Date(`${str}T00:00:00Z`);
+  const parts = String(str).split('-').map(p => parseInt(p, 10));
+  if (parts.length !== 3 || parts.some(isNaN)) return null;
+  // create Date at UTC midnight for that date (consistent for diff)
+  return new Date(Date.UTC(parts[0], parts[1] - 1, parts[2]));
 }
+
+/**
+ * Trả số ngày b giữa a và b : round((b - a) / ONE_DAY_MS)
+ * aStr, bStr: 'YYYY-MM-DD'
+ */
 function daysDiff(aStr, bStr) {
   const a = parseDateOnlyToDate(aStr);
   const b = parseDateOnlyToDate(bStr);
@@ -53,7 +78,6 @@ async function buildItemsForSlip(loanSlipId) {
 
 /* HTML/text builders (tùy chỉnh nếu muốn) */
 function buildHtmlReminder(data) {
-  // data: {fullName, slipId, dueDate, daysLeft, items, pickUpLocation}
   const itemsHtml = (data.items || []).map(it => `<li>${escapeHtml(it.title || `Tài liệu #${it.documentId}`)} (Bản sao #${it.documentCopyId || '—'})</li>`).join('');
   return `
   <!doctype html>
@@ -109,7 +133,6 @@ function escapeHtml(str) {
 
 /* Create notification DB row (use existing Notifications table) */
 async function createNotificationRow({ readerId, type, title, content, link = null, scheduledAt = null }) {
-  // Notifications table columns: notificationID, readerId, type, title, content, priority, link, isRead, readAt, emailAt, deleted, created_at, updated_at
   const rec = await Notification.create({
     readerId,
     type,
@@ -127,7 +150,7 @@ async function createNotificationRow({ readerId, type, title, content, link = nu
 /* Send email and update notification.emailAt (and content/title if needed) */
 async function sendEmailAndMarkNotification(notificationRecord, toEmail, subject, htmlBody, textBody) {
   try {
-    await mailService.sendEmail(toEmail, subject, htmlBody, textBody); // sử dụng sendEmail của bạn
+    await mailService.sendEmail(toEmail, subject, htmlBody, textBody);
     const now = new Date();
     await notificationRecord.update({ emailAt: now });
 
@@ -142,234 +165,276 @@ async function sendEmailAndMarkNotification(notificationRecord, toEmail, subject
           emailAt: now,
           isRead: notificationRecord.isRead
         };
-        // emit via socket (if socket not ready, emitToUser sẽ xử lý / log)
         emitToUser(notificationRecord.readerId, 'notification:email_sent', payload);
       }
     } catch (emitErr) {
-      console.warn('Warning: emit notification email_sent failed', emitErr?.message || emitErr);
+      console.warn('[notificationJob] Warning: emit notification email_sent failed', emitErr?.message || emitErr);
     }
 
     return { ok: true };
   } catch (err) {
-    // nếu gửi lỗi thì vẫn cập nhật content->ghi lỗi (không throw để job tiếp tục)
     const appended = `\n\nERROR: ${String(err?.message || err)}`.slice(0, 2000);
     try {
       await notificationRecord.update({ content: (notificationRecord.content || '') + appended });
     } catch (uErr) {
-      console.error('Failed to update notification content with error', uErr);
+      console.error('[notificationJob] Failed to update notification content with error', uErr);
     }
-    console.error('Error sending mail for notificationID', notificationRecord.notificationID, err?.message || err);
+    console.error('[notificationJob] Error sending mail for notificationID', notificationRecord.notificationID, err?.message || err);
     return { ok: false, error: err };
   }
 }
 
-/* Core job */
+/* Core job (with detailed logging and safer date handling) */
 async function runNotificationJob() {
   const today = fmtToday();
+  console.log('[notificationJob] ===== runNotificationJob START =====', new Date().toISOString(), ' | TZ=', TZ, ' | today=', today);
 
-  // 1) Reminder: BORROWING slips with dueDate in [today, today+3]
   try {
-    const maxDateObj = new Date(`${today}T00:00:00Z`);
-    maxDateObj.setDate(maxDateObj.getDate() + 3);
+    // 1) Reminder: BORROWING slips with dueDate in [today, today+3]
+    const maxDateObj = (() => {
+      // build VN-local today -> add 3 days -> format YYYY-MM-DD
+      const parts = today.split('-').map(p => parseInt(p, 10));
+      const dt = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2]));
+      dt.setUTCDate(dt.getUTCDate() + 3);
+      return dt;
+    })();
     const maxDate = maxDateObj.toISOString().slice(0, 10);
+    console.log('[notificationJob] checking reminders between', today, 'and', maxDate);
 
+    // Use DATE(dueDate) in SQL to be robust vs DATETIME/timezone
     const slips = await LoanSlip.findAll({
       where: {
         status: 'BORROWING',
-        dueDate: { [Op.between]: [today, maxDate] },
-        deleted: 0
+        deleted: 0,
+        // Sequelize where DATE(dueDate) BETWEEN today AND maxDate
+        [Op.and]: [
+          sequelize.where(fn('DATE', col('dueDate')), { [Op.between]: [today, maxDate] })
+        ]
       },
       include: [{ model: Reader }]
     });
 
+    console.log('[notificationJob] reminder slips found =', Array.isArray(slips) ? slips.length : slips);
+    if (Array.isArray(slips) && slips.length > 0) console.log('[notificationJob] reminder slip ids =', slips.map(s => s.loanSlipId));
+
     for (const slip of slips) {
-      const daysLeft = daysDiff(fmtToday(), slip.dueDate);
-      if (isNaN(daysLeft)) continue;
+      try {
+        console.log('[notificationJob] -> processing slip', slip.loanSlipId, 'readerId', slip.readerId, 'dueDate', slip.dueDate);
 
-      // tránh gửi duplicate cùng ngày: kiểm tra Notification.emailAt date = today OR Notification.type='REMINDER_DUE' và created_at today
-      const alreadyToday = await Notification.findOne({
-        where: {
-          readerId: slip.readerId,
-          type: 'REMINDER_DUE',
-          // emailAt not null AND DATE(emailAt) = today
-          emailAt: { [Op.not]: null }
-        },
-        order: [['created_at', 'DESC']],
-        limit: 1
-      });
-
-      // if we have sent today for this reader & slip, skip (we check by loanSlipId in content/title to be safe)
-      if (alreadyToday) {
-        const lastEmailDate = alreadyToday.emailAt ? new Date(alreadyToday.emailAt).toISOString().slice(0, 10) : null;
-        if (lastEmailDate === today && String(alreadyToday.content || '').includes(String(slip.loanSlipId))) {
+        const daysLeft = daysDiff(today, slip.dueDate);
+        if (isNaN(daysLeft)) {
+          console.warn('[notificationJob] invalid daysLeft -> skip slip', slip.loanSlipId);
           continue;
         }
-      }
 
-      // recipient email: try account -> fallback to reader.accountId if available
-      let toEmail = null;
-      try {
-        if (slip.Reader?.accountId) {
-          const acct = await Account.findByPk(slip.Reader.accountId, { attributes: ['email'] });
-          toEmail = acct?.email || null;
-        }
-      } catch (err) {
-        toEmail = null;
-      }
-      // If your Readers table stores email field instead, fallback:
-      toEmail = toEmail || slip.Reader?.email || null;
-
-      const items = await buildItemsForSlip(slip.loanSlipId);
-      const payloadTitle = `[Nhắc trả] Phiếu #${slip.loanSlipId} — còn ${daysLeft} ngày`;
-      const payloadContent = JSON.stringify({ slipId: slip.loanSlipId, dueDate: slip.dueDate, daysLeft, items });
-
-      const notif = await createNotificationRow({
-        readerId: slip.readerId,
-        type: 'REMINDER_DUE',
-        title: payloadTitle,
-        content: `Slip:${slip.loanSlipId}\nDaysLeft:${daysLeft}\nItems:${items.map(i => i.title).join(';')}`
-      });
-
-      // Emit realtime: new notification created (client có thể hiển thị)
-      try {
-        emitToUser(slip.readerId, 'notification:new', {
-          notificationID: notif.notificationID,
-          type: notif.type,
-          title: notif.title,
-          content: notif.content,
-          isRead: notif.isRead,
-          created_at: notif.created_at
+        // improved duplicate check: filter content contains Slip:ID and emailAt not null
+        const alreadyToday = await Notification.findOne({
+          where: {
+            readerId: slip.readerId,
+            type: 'REMINDER_DUE',
+            emailAt: { [Op.not]: null },
+            content: { [Op.like]: `%Slip:${slip.loanSlipId}%` }
+          },
+          order: [['created_at', 'DESC']],
+          limit: 1
         });
-      } catch (emitErr) {
-        console.warn('Warning: emit notification:new failed', emitErr?.message || emitErr);
+        if (alreadyToday) {
+          const lastEmailDate = alreadyToday.emailAt ? new Date(alreadyToday.emailAt).toISOString().slice(0, 10) : null;
+          console.log('[notificationJob] already email record found for slip', slip.loanSlipId, 'lastEmailDate=', lastEmailDate);
+          if (lastEmailDate === today) {
+            console.log('[notificationJob] skipped because already sent today for slip', slip.loanSlipId);
+            continue;
+          }
+        }
+
+        // recipient email: try account -> fallback to reader.email
+        let toEmail = null;
+        try {
+          if (slip.Reader?.accountId) {
+            const acct = await Account.findByPk(slip.Reader.accountId, { attributes: ['email'] });
+            toEmail = acct?.email || null;
+            console.log('[notificationJob] account lookup for accountId=', slip.Reader.accountId, '->', toEmail);
+          }
+        } catch (err) {
+          console.warn('[notificationJob] account lookup error', err?.message || err);
+          toEmail = toEmail || null;
+        }
+        toEmail = toEmail || slip.Reader?.email || null;
+        console.log('[notificationJob] final toEmail =', toEmail);
+
+        const items = await buildItemsForSlip(slip.loanSlipId);
+        const payloadTitle = `[Nhắc trả] Phiếu #${slip.loanSlipId} — còn ${daysLeft} ngày`;
+        const notif = await createNotificationRow({
+          readerId: slip.readerId,
+          type: 'REMINDER_DUE',
+          title: payloadTitle,
+          content: `Slip:${slip.loanSlipId}\nDaysLeft:${daysLeft}\nItems:${items.map(i => i.title).join(';')}`
+        });
+        console.log('[notificationJob] created notification id=', notif.notificationID, 'for slip', slip.loanSlipId);
+
+        // Emit realtime (best effort)
+        try {
+          emitToUser(slip.readerId, 'notification:new', {
+            notificationID: notif.notificationID,
+            type: notif.type,
+            title: notif.title,
+            content: notif.content,
+            isRead: notif.isRead,
+            created_at: notif.created_at
+          });
+        } catch (emitErr) {
+          console.warn('[notificationJob] emit notification:new failed', emitErr?.message || emitErr);
+        }
+
+        if (!toEmail) {
+          await notif.update({ content: (notif.content || '') + '\n\nNO_EMAIL' });
+          console.warn(`[notificationJob] No email for readerId=${slip.readerId} loanSlip=${slip.loanSlipId}`);
+          continue;
+        }
+
+        const html = buildHtmlReminder({
+          fullName: slip.Reader?.fullName || 'Độc giả',
+          slipId: slip.loanSlipId,
+          dueDate: slip.dueDate,
+          daysLeft,
+          items,
+          pickUpLocation: process.env.LIBRARY_ADDRESS || ''
+        });
+        const text = buildTextReminder({ slipId: slip.loanSlipId, dueDate: slip.dueDate, daysLeft, items });
+
+        const sendRes = await sendEmailAndMarkNotification(notif, toEmail, payloadTitle, html, text);
+        console.log('[notificationJob] sendEmail result for notif', notif.notificationID, sendRes);
+      } catch (innerErr) {
+        console.error('[notificationJob] error processing reminder slip', slip.loanSlipId, innerErr?.message || innerErr);
       }
+    } // end for reminders
 
-      if (!toEmail) {
-        // đánh dấu lỗi (không throw)
-        await notif.update({ content: (notif.content || '') + '\n\nNO_EMAIL' });
-        console.warn(`No email for readerId=${slip.readerId} loanSlip=${slip.loanSlipId}`);
-        continue;
-      }
-
-      const html = buildHtmlReminder({
-        fullName: slip.Reader?.fullName || 'Độc giả',
-        slipId: slip.loanSlipId,
-        dueDate: slip.dueDate,
-        daysLeft,
-        items,
-        pickUpLocation: process.env.LIBRARY_ADDRESS || ''
-      });
-      const text = buildTextReminder({ slipId: slip.loanSlipId, dueDate: slip.dueDate, daysLeft, items });
-
-      await sendEmailAndMarkNotification(notif, toEmail, payloadTitle, html, text);
-      console.log(`Reminder email for slip=${slip.loanSlipId} daysLeft=${daysLeft} to=${toEmail}`);
-    }
   } catch (err) {
-    console.error('runNotificationJob REMINDER error', err);
+    console.error('[notificationJob] runNotificationJob REMINDER error', err);
   }
 
   // 2) Overdue notices: BORROWING slips with dueDate < today and overdueDays in [1..30], send every 3 days (1,4,7,...)
   try {
+    console.log('[notificationJob] checking overdue slips (dueDate <', today, ')');
+
     const overdueSlips = await LoanSlip.findAll({
       where: {
         status: 'BORROWING',
-        dueDate: { [Op.lt]: today },
-        deleted: 0
+        deleted: 0,
+        [Op.and]: [
+          sequelize.where(fn('DATE', col('dueDate')), { [Op.lt]: today })
+        ]
       },
       include: [{ model: Reader }]
     });
 
+    console.log('[notificationJob] overdueSlips found =', Array.isArray(overdueSlips) ? overdueSlips.length : overdueSlips);
+    if (Array.isArray(overdueSlips) && overdueSlips.length > 0) console.log('[notificationJob] overdue slip ids =', overdueSlips.map(s => s.loanSlipId));
+
     for (const slip of overdueSlips) {
-      const overdueDays = daysDiff(slip.dueDate, fmtToday());
-      if (isNaN(overdueDays) || overdueDays <= 0 || overdueDays > 30) continue;
-
-      // send on day 1,4,7... -> condition (overdueDays - 1) % 3 === 0
-      if ((overdueDays - 1) % 3 !== 0) continue;
-
-      // check already sent today for this slip/type
-      const alreadyToday = await Notification.findOne({
-        where: {
-          readerId: slip.readerId,
-          type: 'OVERDUE_NOTICE',
-          emailAt: { [Op.not]: null }
-        },
-        order: [['created_at', 'DESC']],
-        limit: 1
-      });
-      if (alreadyToday) {
-        const lastEmailDate = alreadyToday.emailAt ? new Date(alreadyToday.emailAt).toISOString().slice(0, 10) : null;
-        if (lastEmailDate === fmtToday() && String(alreadyToday.content || '').includes(String(slip.loanSlipId))) {
+      try {
+        const overdueDays = daysDiff(slip.dueDate, today);
+        if (isNaN(overdueDays) || overdueDays <= 0 || overdueDays > 30) {
+          // skip non-relevant
           continue;
         }
-      }
 
-      let toEmail = null;
-      try {
-        if (slip.Reader?.accountId) {
-          const acct = await Account.findByPk(slip.Reader.accountId, { attributes: ['email'] });
-          toEmail = acct?.email || null;
-        }
-      } catch (err) {
-        toEmail = null;
-      }
-      toEmail = toEmail || slip.Reader?.email || null;
+        // send on day 1,4,7...
+        if ((overdueDays - 1) % 3 !== 0) continue;
 
-      const items = await buildItemsForSlip(slip.loanSlipId);
-
-      const title = `[QUÁ HẠN] Phiếu #${slip.loanSlipId} — quá hạn ${overdueDays} ngày`;
-      const content = `Slip:${slip.loanSlipId}\nOverdueDays:${overdueDays}\nItems:${items.map(i => i.title).join(';')}`;
-
-      const notif = await createNotificationRow({
-        readerId: slip.readerId,
-        type: 'OVERDUE_NOTICE',
-        title,
-        content
-      });
-
-      // Emit realtime: new overdue notification created
-      try {
-        emitToUser(slip.readerId, 'notification:new', {
-          notificationID: notif.notificationID,
-          type: notif.type,
-          title: notif.title,
-          content: notif.content,
-          isRead: notif.isRead,
-          created_at: notif.created_at
+        const alreadyToday = await Notification.findOne({
+          where: {
+            readerId: slip.readerId,
+            type: 'OVERDUE_NOTICE',
+            emailAt: { [Op.not]: null },
+            content: { [Op.like]: `%Slip:${slip.loanSlipId}%` }
+          },
+          order: [['created_at', 'DESC']],
+          limit: 1
         });
-      } catch (emitErr) {
-        console.warn('Warning: emit notification:new failed', emitErr?.message || emitErr);
+        if (alreadyToday) {
+          const lastEmailDate = alreadyToday.emailAt ? new Date(alreadyToday.emailAt).toISOString().slice(0, 10) : null;
+          console.log('[notificationJob] overdue already email record for slip', slip.loanSlipId, 'lastEmailDate=', lastEmailDate);
+          if (lastEmailDate === today) {
+            console.log('[notificationJob] skipped overdue because already sent today', slip.loanSlipId);
+            continue;
+          }
+        }
+
+        let toEmail = null;
+        try {
+          if (slip.Reader?.accountId) {
+            const acct = await Account.findByPk(slip.Reader.accountId, { attributes: ['email'] });
+            toEmail = acct?.email || null;
+            console.log('[notificationJob] account lookup for overdue accountId=', slip.Reader.accountId, '->', toEmail);
+          }
+        } catch (acctErr) {
+          console.warn('[notificationJob] account lookup error', acctErr?.message || acctErr);
+        }
+        toEmail = toEmail || slip.Reader?.email || null;
+        console.log('[notificationJob] overdue final toEmail =', toEmail);
+
+        const items = await buildItemsForSlip(slip.loanSlipId);
+        const title = `[QUÁ HẠN] Phiếu #${slip.loanSlipId} — quá hạn ${overdueDays} ngày`;
+        const notif = await createNotificationRow({
+          readerId: slip.readerId,
+          type: 'OVERDUE_NOTICE',
+          title,
+          content: `Slip:${slip.loanSlipId}\nOverdueDays:${overdueDays}\nItems:${items.map(i => i.title).join(';')}`
+        });
+        console.log('[notificationJob] created overdue notification id=', notif.notificationID);
+
+        try {
+          emitToUser(slip.readerId, 'notification:new', {
+            notificationID: notif.notificationID,
+            type: notif.type,
+            title: notif.title,
+            content: notif.content,
+            isRead: notif.isRead,
+            created_at: notif.created_at
+          });
+        } catch (emitErr) {
+          console.warn('[notificationJob] emit notification:new failed', emitErr?.message || emitErr);
+        }
+
+        if (!toEmail) {
+          await notif.update({ content: (notif.content || '') + '\n\nNO_EMAIL' });
+          console.warn(`[notificationJob] No email for overdue readerId=${slip.readerId} loanSlip=${slip.loanSlipId}`);
+          continue;
+        }
+
+        const html = buildHtmlOverdue({
+          fullName: slip.Reader?.fullName || 'Độc giả',
+          slipId: slip.loanSlipId,
+          dueDate: slip.dueDate,
+          overdueDays,
+          items
+        });
+        const text = buildTextOverdue({ slipId: slip.loanSlipId, dueDate: slip.dueDate, overdueDays, items });
+
+        const sendRes = await sendEmailAndMarkNotification(notif, toEmail, title, html, text);
+        console.log('[notificationJob] sendEmail result for overdue notif', notif.notificationID, sendRes);
+      } catch (innerErr) {
+        console.error('[notificationJob] error processing overdue slip', slip.loanSlipId, innerErr?.message || innerErr);
       }
+    } // end for overdue
 
-      if (!toEmail) {
-        await notif.update({ content: (notif.content || '') + '\n\nNO_EMAIL' });
-        console.warn(`No email for overdue readerId=${slip.readerId} loanSlip=${slip.loanSlipId}`);
-        continue;
-      }
-
-      const html = buildHtmlOverdue({
-        fullName: slip.Reader?.fullName || 'Độc giả',
-        slipId: slip.loanSlipId,
-        dueDate: slip.dueDate,
-        overdueDays,
-        items
-      });
-      const text = buildTextOverdue({ slipId: slip.loanSlipId, dueDate: slip.dueDate, overdueDays, items });
-
-      await sendEmailAndMarkNotification(notif, toEmail, title, html, text);
-      console.log(`Overdue email for slip=${slip.loanSlipId} overdueDays=${overdueDays} to=${toEmail}`);
-    }
   } catch (err) {
-    console.error('runNotificationJob OVERDUE error', err);
+    console.error('[notificationJob] runNotificationJob OVERDUE error', err);
   }
+
+  console.log('[notificationJob] ===== runNotificationJob END =====', new Date().toISOString());
+  return { ok: true };
 }
 
-/* Schedule job: chạy hàng ngày lúc 02:00 server */
+/* Schedule job: chạy hàng ngày lúc 02:00 server (theo TZ cấu hình) */
 function scheduleDailyJob() {
-  const timezone = process.env.SERVER_TIMEZONE || 'Asia/Ho_Chi_Minh';
+  const timezone = process.env.SERVER_TIMEZONE || TZ;
+  console.log('[notificationJob] scheduleDailyJob registering cron at 02:00 with timezone =', timezone);
   // 0 2 * * * -> 02:00 every day
   cron.schedule('0 2 * * *', () => {
-    console.log(`[notificationJob] start at ${new Date().toISOString()}`);
-    runNotificationJob().catch(e => console.error('notification job fail', e));
+    console.log(`[notificationJob] cron fired at ${new Date().toISOString()} (cron timezone ${timezone})`);
+    runNotificationJob().catch(e => console.error('[notificationJob] notification job fail', e));
   }, { timezone });
 }
 
