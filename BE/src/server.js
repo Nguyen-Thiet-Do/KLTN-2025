@@ -38,6 +38,8 @@ const { scheduleDailyJob } = require('./service/notificationJob.service');
 const app = express();
 const port = process.env.PORT || 8080;
 
+const cartRoutes = require("./route/cartRoutes");
+
 // ============================================================
 // CORS CONFIGURATION
 // ============================================================
@@ -94,6 +96,8 @@ app.use('/api/payos', payosRoutes);
 app.use('/pay', payosRoutes);
 app.use('/api/notifications', notificationRoutes);
 
+
+app.use("/api/cart", cartRoutes);
 
 // ============================================================
 // HEALTH CHECK

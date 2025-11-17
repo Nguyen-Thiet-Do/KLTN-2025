@@ -22,9 +22,16 @@ const Payment = require('./Payment');
 const Violation = require('./Violation');
 const Notification = require('./Notification');
 
+
+const CartItem = require('./CartItem');
+
 // NEW: Card models
 const CardType = require('./CardType');
 const MemberCard = require('./MemberCard');
+
+
+//
+
 
 // Accounts & Roles
 Role.hasMany(Account, { foreignKey: 'roleId' });
@@ -131,6 +138,14 @@ Reader.hasOne(MemberCard, { foreignKey: 'readerId', as: 'memberCard' });
 MemberCard.belongsTo(Reader, { foreignKey: 'readerId', as: 'reader' });
 
 
+// CART ITEMS
+Reader.hasMany(CartItem, { foreignKey: 'readerId', as: 'cartItems' });
+CartItem.belongsTo(Reader, { foreignKey: 'readerId' });
+
+Document.hasMany(CartItem, { foreignKey: 'documentId', as: 'cartDocuments' });
+CartItem.belongsTo(Document, { foreignKey: 'documentId' });
+
+
 module.exports = {
   Account,
   Role,
@@ -156,4 +171,5 @@ module.exports = {
   Notification,
   CardType,
   MemberCard,
+  CartItem,
 };
