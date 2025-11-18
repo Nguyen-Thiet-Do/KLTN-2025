@@ -7,8 +7,6 @@ import { CartProvider } from "./contexts/CartContext";   // <<< THÊM
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
-    <CartProvider>          {/* <<< BỌC TOÀN BỘ APP */}
       <App />
-    </CartProvider>
   </React.StrictMode>
 );
