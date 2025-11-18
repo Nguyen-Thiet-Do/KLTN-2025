@@ -1,3 +1,6 @@
 node_modules
 .env 
 FE/
+
+src/config/fcmKey.json
+src/config/google-services.json

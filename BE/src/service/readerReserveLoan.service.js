@@ -11,7 +11,8 @@ const {
   MemberCard,
   CardType,
   LoanSlip: LoanSlipModel,
-  Account
+  Account,
+  Notification // <-- thêm Notification
 } = require('../model');
 
 const mailService = require('./mailService'); // <-- thêm mailService
@@ -346,6 +347,27 @@ for (const it of detailPreview) {
 
     await t.commit();
 
+    // TẠO BẢN GHI NOTIFICATION trong DB (tóm tắt cho độc giả)
+    let createdNotification = null;
+    try {
+      const notifTitle = `Đặt mượn thành công — Phiếu #${slip.loanSlipId}`;
+      const notifContent = `Phiếu đặt mượn #${slip.loanSlipId} của bạn đã được tạo và chờ thủ thư duyệt. Số lượng: ${detailPreview.length}.`;
+      createdNotification = await Notification.create({
+        readerId: reader.readerId,
+        type: 'reservation',
+        title: notifTitle,
+        content: notifContent,
+        priority: 'normal',
+        link: `/loan/${slip.loanSlipId}`,
+        isRead: false,
+        emailAt: null,
+        deleted: false,
+      });
+    } catch (err) {
+      console.error('❌ Failed to create Notification record:', err.message || err);
+      // Không throw — không làm hỏng luồng chính
+    }
+
     // Gửi email — background
     setImmediate(async () => {
       try {
@@ -384,6 +406,19 @@ for (const it of detailPreview) {
         };
 
         await mailService.sendReservationConfirmationEmail(readerEmail, mailData);
+
+        // Nếu có Notification vừa tạo, cập nhật emailAt = now
+        try {
+          if (createdNotification && createdNotification.notificationID) {
+            await Notification.update(
+              { emailAt: new Date() },
+              { where: { notificationID: createdNotification.notificationID } }
+            );
+          }
+        } catch (updErr) {
+          console.error('❌ Failed to update Notification.emailAt after sending email:', updErr.message || updErr);
+        }
+
       } catch (err) {
         console.error('❌ Failed to send reservation email:', err.message || err);
       }
@@ -412,5 +447,4 @@ for (const it of detailPreview) {
   }
 }
 
-
-module.exports = { reserveLoanForReaderService };
+module.exports = { reserveLoanForReaderService, getReaderBorrowSnapshot };

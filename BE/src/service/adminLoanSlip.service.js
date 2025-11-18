@@ -1736,8 +1736,6 @@ async function cancelReservationService({ loanSlipId, reason, librarianId }) {
       return { message: 'Đã hủy phiếu đặt trước thành công', slipId: txResult.slipId };
     });
 }
-
-
 module.exports = {
   getAllLoanSlipsService,
   createLoanSlipService,
