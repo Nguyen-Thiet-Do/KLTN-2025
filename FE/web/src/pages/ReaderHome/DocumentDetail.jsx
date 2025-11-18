@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import axios from "axios";
 import api from "../../services/api";
+import { useCart } from "../../contexts/CartContext";
 
 import { useParams, useNavigate } from "react-router-dom";
 import {
@@ -34,6 +35,7 @@ const isAbort = (e) =>
   e?.message?.includes?.("canceled") ||
   e?.message?.includes?.("aborted");
 
+
 const fmtVND = (v) => {
   const n = Number(v);
   if (Number.isNaN(n)) return "—";
@@ -65,7 +67,7 @@ export default function DocumentDetail() {
   const [loadingSimilar, setLoadingSimilar] = useState(false);
 
   const [userId, setUserId] = useState(sessionStorage.getItem("userId"));
-
+const { loadCart } = useCart();
   const [snack, setSnack] = useState({
     open: false,
     message: "",
@@ -185,7 +187,7 @@ export default function DocumentDetail() {
     await api.post("/cart/add", {
       documentId: doc.documentId 
      });
-
+loadCart(); 
       setSnack({
         open: true,
         message: "Đã thêm vào giỏ sách!",

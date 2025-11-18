@@ -11,6 +11,7 @@ import {
 } from "@mui/material";
 import api from "../../services/api";
 import ReaderHeader from "../../components/layouts/ReaderHeader";
+import { statusLabel } from "../../components/common/statusMap";
 
 const statusColor = {
   PENDING: "warning",
@@ -72,10 +73,13 @@ export default function LoanHistoryPage() {
                 <Typography variant="h6" fontWeight={700}>
                   Phiếu mượn #{loan.loanSlipId}
                 </Typography>
-                <Chip
-                  label={loan.status}
-                  color={statusColor[loan.status] || "default"}
-                />
+     <Chip 
+  label={statusLabel[loan.status] || loan.status}
+  size="small"
+  color={statusColor[loan.status] || "default"} 
+/>
+
+
               </Stack>
 
               <Divider sx={{ my: 2 }} />
@@ -94,12 +98,10 @@ export default function LoanHistoryPage() {
                 Danh sách tài liệu:
               </Typography>
 
-         <Box sx={{ ml: 2 }}>
+       <Box sx={{ ml: 2 }}>
   {loan.details?.map((d, idx) => {
-    const doc = d.DocumentCopy?.Document;
-    const img = doc?.coverPhoto
-      ? `${import.meta.env.VITE_BE_URL}${doc.coverPhoto}`
-      : "/no-image.png"; // fallback nội bộ
+    const doc = d.bookInfo; // ⭐ dùng bookInfo
+    const img = doc?.coverPhoto || "/no-image.png";
 
     return (
       <Stack
@@ -126,7 +128,7 @@ export default function LoanHistoryPage() {
         </Typography>
 
         <Chip
-          label={d.status}
+          label={statusLabel[d.status] || d.status}
           size="small"
           color={statusColor[d.status] || "default"}
         />

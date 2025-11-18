@@ -1,6 +1,7 @@
 import { useMemo, useState, useEffect } from "react";
 import { Link as RouterLink, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../../contexts/AuthContext";
+import { useCart } from "../../contexts/CartContext";
 import {
   AppBar,
   Toolbar,
@@ -40,7 +41,7 @@ export default function ReaderHeader() {
   const [searchValue, setSearchValue] = useState("");
 
   const maxContentWidth = 1280;
-
+const { count } = useCart();
   const tabs = useMemo(
     () => [
       { path: "/", label: "Trang chủ", icon: "🏠" },
@@ -217,13 +218,14 @@ export default function ReaderHeader() {
           </Tooltip>
 
           {/* CART ICON ADDED */}
-          <Tooltip title="Giỏ sách">
-            <IconButton size="small" onClick={() => navigate("/cart")}>
-              <Badge badgeContent={0} color="primary">
-                <ShoppingCartOutlined />
-              </Badge>
-            </IconButton>
-          </Tooltip>
+        <Tooltip title="Giỏ sách">
+  <IconButton size="small" onClick={() => navigate("/cart")}>
+    <Badge badgeContent={count} color="primary">
+      <ShoppingCartOutlined />
+    </Badge>
+  </IconButton>
+</Tooltip>
+
           {/* END CART ICON */}
 
           <Tooltip title="Đã lưu">

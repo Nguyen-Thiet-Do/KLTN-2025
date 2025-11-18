@@ -17,14 +17,15 @@ import {
 } from "@mui/material";
 import { Delete, ShoppingCartCheckout } from "@mui/icons-material";
 import { useNavigate } from "react-router-dom";
-import axios from "axios";
 import api from "../../services/api";
 
+import { useCart } from "../../contexts/CartContext";
 import ReaderHeader from "../../components/layouts/ReaderHeader";
 
 export default function CartPage() {
   const navigate = useNavigate();
   const token = sessionStorage.getItem("accessToken");
+
   const [cart, setCart] = useState([]);
   const [snack, setSnack] = useState({
     open: false,
@@ -32,72 +33,70 @@ export default function CartPage() {
     severity: "info",
   });
 
-const loadCart = async () => {
-  try {
-    const res = await api.get("/cart");
-    setCart(Array.isArray(res.data) ? res.data : []);
-  } catch (err) {
-    console.log("Cart load error", err);
-    setCart([]);
-  }
-};
+  // LẤY HÀM ĐỒNG BỘ CART TỪ CONTEXT
+  const { loadCart: syncCartCount } = useCart();
 
-
-
+  // LOAD GIỎ TRONG TRANG
+  const loadCart = async () => {
+    try {
+      const res = await api.get("/cart");
+      setCart(Array.isArray(res.data) ? res.data : []);
+    } catch (err) {
+      setCart([]);
+    }
+  };
 
   useEffect(() => {
     if (token) loadCart();
   }, [token]);
 
-  // ⭐ REMOVE 1 ITEM
- const removeItem = async (documentId) => {
-  try {
-    await api.delete(`/cart/${documentId}`);
+  // REMOVE ITEM
+  const removeItem = async (documentId) => {
+    try {
+      await api.delete(`/cart/${documentId}`);
+      loadCart();          // cập nhật danh sách
+      syncCartCount();     // cập nhật số trên icon
+    } catch (err) {}
+  };
+
+  // CLEAR ALL
+  const clearCart = async () => {
+    await api.delete("/cart");
     loadCart();
-  } catch (err) {}
-};
+    syncCartCount();
+  };
 
+  // BORROW BOOKS
+  const borrowBooks = async () => {
+    if (cart.length === 0) {
+      setSnack({ open: true, message: "Giỏ sách trống", severity: "warning" });
+      return;
+    }
 
-  // ⭐ CLEAR ALL
-const clearCart = async () => {
-  await api.delete("/cart");
-  loadCart();
-};
+    try {
+      await api.post("/loans/reader/loans/reserve", {
+        items: cart.map(i => ({ documentId: i.documentId })),
+        note: ""
+      });
 
+      setSnack({
+        open: true,
+        message: "Gửi yêu cầu thành công!",
+        severity: "success",
+      });
 
-  // ⭐ BORROW BOOKS
-const borrowBooks = async () => {
-  if (cart.length === 0) {
-    setSnack({ open: true, message: "Giỏ sách trống", severity: "warning" });
-    return;
-  }
+      await clearCart();
+      syncCartCount();
 
-  try {
-    await api.post("/loans/reader/loans/reserve", {
-      items: cart.map(i => ({ documentId: i.documentId })),
-      note: ""
-    });
-
-    setSnack({
-      open: true,
-      message: "Gửi yêu cầu thành công!",
-      severity: "success",
-    });
-
-    await clearCart();
-
-    // ⚡ CHUYỂN NGAY TỚI LỊCH SỬ
-    navigate("/reader/loans/my");
-
-  } catch (err) {
-    setSnack({
-      open: true,
-      message: err.message || "Lỗi",
-      severity: "error",
-    });
-  }
-};
-
+      navigate("/reader/loans/my");
+    } catch (err) {
+      setSnack({
+        open: true,
+        message: err.message || "Lỗi",
+        severity: "error",
+      });
+    }
+  };
 
   if (!token) {
     return (
@@ -131,7 +130,9 @@ const borrowBooks = async () => {
                   <ListItem
                     key={item.documentId}
                     button
-                    onClick={() => navigate(`/reader/documents/${item.documentId}`)}
+                    onClick={() =>
+                      navigate(`/reader/documents/${item.documentId}`)
+                    }
                     sx={{ "&:hover": { backgroundColor: "rgba(0,0,0,0.04)" } }}
                     secondaryAction={
                       <Tooltip title="Xóa khỏi giỏ">
