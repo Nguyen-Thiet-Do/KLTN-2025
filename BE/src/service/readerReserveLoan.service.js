@@ -326,21 +326,23 @@ async function reserveLoanForReaderService(user, payload) {
       },
       { transaction: t }
     );
+for (const it of detailPreview) {
+  await LoanDetail.create(
+    {
+      loanSlipId: slip.loanSlipId,
+      documentCopyId: null,
+      returnDate: null,
+      status: "PENDING",
+      fineAmount: 0,
+      renewalCount: 0,
 
-    for (const it of detailPreview) {
-      await LoanDetail.create(
-        {
-          loanSlipId: slip.loanSlipId,
-          documentCopyId: null,
-          returnDate: null,
-          status: 'PENDING',
-          fineAmount: 0,
-          renewalCount: 0,
-          note: `REQUEST_DOCUMENT_ID=${it.documentId}`,
-        },
-        { transaction: t }
-      );
-    }
+      // SỬA Ở ĐÂY
+      note: `REQUEST_DOCUMENT_ID=${it.documentId}`,
+    },
+    { transaction: t }
+  );
+}
+
 
     await t.commit();
 
