@@ -13,6 +13,7 @@ const {
   Payment,
   CardType,
   MemberCard, // <- thêm model MemberCard
+  Notification
 } = require('../model');
 
 const MAX_ITEMS_PER_SLIP = 3;
@@ -221,9 +222,86 @@ async function getAllLoanSlipsService(query) {
 }
 
 /**
+ * Tạo notification một cách an toàn.
+ * Nếu 'transaction' được truyền, nó sẽ thử tạo trong transaction nhưng sẽ không throw nếu lỗi.
+ * Trả về object notification nếu tạo thành công, hoặc null nếu thất bại.
+ *
+ * data: { readerId, type, title, content, priority, link, extra }
+ */
+async function createNotificationSafe(data = {}, transaction = null) {
+  if (!Notification) {
+    console.warn('Notification model not available - skipping creating notification.');
+    return null;
+  }
+
+  const payload = {
+    readerId: data.readerId || null,
+    type: data.type || 'INFO',
+    title: data.title || '',
+    content: data.content || '',
+    priority: data.priority || 'NORMAL',
+    link: data.link || null,
+    isRead: data.isRead ? 1 : 0,
+    // thêm các trường khác nếu DB của bạn có (emailAt, meta, etc.)
+  };
+
+  try {
+    if (transaction) {
+      // cố gắng tạo trong cùng transaction, nhưng bắt lỗi và trả null nếu fail
+      const notif = await Notification.create(payload, { transaction });
+      return notif;
+    } else {
+      const notif = await Notification.create(payload);
+      return notif;
+    }
+  } catch (err) {
+    // Bắt mọi lỗi, log để debug, nhưng không throw -> không rollback chính transaction
+    console.warn('⚠️ createNotificationSafe failed:', err?.message || err);
+    return null;
+  }
+}
+
+/**
+ * Gửi email thông báo mượn và cập nhật notification.emailAt nếu cần.
+ * Không throw nếu gửi email lỗi — chỉ log.
+ *
+ * params:
+ *  - to: email recipient
+ *  - mailData: dữ liệu cho mailService.sendLoanIssuedEmail
+ *  - notificationId: nếu có, cập nhật emailAt cho notification tương ứng
+ */
+async function safeSendLoanEmail(to, mailData = {}, notificationId = null) {
+  if (!to) {
+    console.warn('safeSendLoanEmail: no recipient provided, skipping email.');
+    return { ok: false, reason: 'no-recipient' };
+  }
+
+  try {
+    await mailService.sendLoanIssuedEmail(to, mailData);
+    // nếu có notificationId, cập nhật trường emailAt (bắt lỗi cũng không throw)
+    if (notificationId && Notification) {
+      try {
+        // Tùy tên khoá chính trong model của bạn (notificationID hoặc id)
+        const pk = Notification.primaryKeyAttribute || 'notificationID';
+        const where = {};
+        where[pk] = notificationId;
+        await Notification.update({ emailAt: new Date() }, { where });
+      } catch (updErr) {
+        console.warn('⚠️ safeSendLoanEmail: cannot update notification.emailAt', updErr?.message || updErr);
+      }
+    }
+    return { ok: true };
+  } catch (err) {
+    console.error('❌ safeSendLoanEmail: send email failed:', err?.message || err);
+    return { ok: false, reason: err?.message || 'send-failed' };
+  }
+}
+
+/**
  * Tạo phiếu mượn -> TRỰC TIẾP BORROWING (mượn luôn)
  * (Không còn deposit khi mượn)
  */
+
 async function createLoanSlipService(body) {
   const {
     readerId,
@@ -257,8 +335,13 @@ async function createLoanSlipService(body) {
     e.status = 400; throw e;
   }
 
+  // Kết quả tạm sau transaction
+  let txResult = null;
+  let createdNotification = null;
+
   // Transaction: tạo slip + loanDetail + update DocumentCopy -> BORROWED
-  const txResult = await sequelize.transaction(async (t) => {
+  txResult = await sequelize.transaction(async (t) => {
+    // load reader & librarian
     const [reader, librarian] = await Promise.all([
       Reader.findByPk(readerId, { transaction: t }),
       Librarian.findByPk(librarianId, { transaction: t }),
@@ -266,37 +349,32 @@ async function createLoanSlipService(body) {
     if (!reader) { const e = new Error('Không tìm thấy độc giả'); e.status = 404; throw e; }
     if (!librarian) { const e = new Error('Không tìm thấy thủ thư'); e.status = 404; throw e; }
 
-    // LẤY THẺ (MemberCard) CỦA ĐỘC GIẢ -> RỒI LẤY CardType
+    // memberCard
     const memberCard = await MemberCard.findOne({
       where: { readerId, deleted: false, status: 'ACTIVE' },
       order: [['issueDate', 'DESC']],
       transaction: t,
       lock: t.LOCK.UPDATE
     });
-
     if (!memberCard) {
       const e = new Error('Độc giả chưa có thẻ hội viên hợp lệ (MemberCard).');
       e.status = 403; throw e;
     }
 
-    // Kiểm tra hạn thẻ nếu tồn tại expiryDate
     if (memberCard.expiryDate) {
       const expiry = parseDateOnly(memberCard.expiryDate);
       if (!expiry) {
         const e = new Error('Ngày hết hạn trên thẻ không hợp lệ');
         e.status = 403; throw e;
       }
-      const today = fmtToday();
-      if (daysDiff(today, memberCard.expiryDate) < 0) {
+      if (daysDiff(fmtToday(), memberCard.expiryDate) < 0) {
         const e = new Error('Thẻ hội viên đã hết hạn, không được mượn.');
         e.status = 403; throw e;
       }
     }
 
     const cardTypeId = memberCard.cardTypeId || null;
-    const cardType = cardTypeId
-      ? await CardType.findByPk(cardTypeId, { transaction: t })
-      : null;
+    const cardType = cardTypeId ? await CardType.findByPk(cardTypeId, { transaction: t }) : null;
 
     if (!cardType || Number(cardType.canBorrowHome) !== 1) {
       const e = new Error('Loại thẻ độc giả hiện tại không cho phép mượn về (thẻ không hợp lệ hoặc không có quyền mượn)');
@@ -311,18 +389,13 @@ async function createLoanSlipService(body) {
       e.status = 403; throw e;
     }
 
-    // --- Kiểm tra quota & điều kiện độc giả (chi tiết) ---
+    // snapshot reader borrow
     const snap = await getReaderBorrowSnapshot(readerId, t);
     const remaining = maxBorrowLimit - snap.activeCount;
 
     const blockingReasons = [];
-    if (snap.overdueCount > 0) {
-      blockingReasons.push(`Có ${snap.overdueCount} quyển trễ hạn chưa trả`);
-    }
-    if (snap.unresolvedViolationCount > 0) {
-      blockingReasons.push(`Có ${snap.unresolvedViolationCount} vi phạm/chứng từ phạt chưa giải quyết`);
-    }
-
+    if (snap.overdueCount > 0) blockingReasons.push(`Có ${snap.overdueCount} quyển trễ hạn chưa trả`);
+    if (snap.unresolvedViolationCount > 0) blockingReasons.push(`Có ${snap.unresolvedViolationCount} vi phạm/chứng từ phạt chưa giải quyết`);
     if (blockingReasons.length) {
       const e = new Error('Độc giả chưa đủ điều kiện mượn');
       e.status = 409;
@@ -334,12 +407,7 @@ async function createLoanSlipService(body) {
           borrowingCount: snap.borrowingCount,
           overdueCount: snap.overdueCount,
           unresolvedViolationCount: snap.unresolvedViolationCount,
-          quota: {
-            max: maxBorrowLimit,
-            using: snap.activeCount,
-            remaining: Math.max(0, remaining),
-            requested: items.length
-          }
+          quota: { max: maxBorrowLimit, using: snap.activeCount, remaining: Math.max(0, remaining), requested: items.length }
         },
         reasons: blockingReasons
       };
@@ -351,25 +419,13 @@ async function createLoanSlipService(body) {
       e.status = 409;
       e.details = {
         message: 'Vượt quá hạn mức mượn',
-        breakdown: {
-          pendingApprovalCount: snap.pendingApprovalCount,
-          waitingForPickupCount: snap.waitingForPickupCount,
-          borrowingCount: snap.borrowingCount,
-          overdueCount: snap.overdueCount,
-          unresolvedViolationCount: snap.unresolvedViolationCount,
-          quota: {
-            max: maxBorrowLimit,
-            using: snap.activeCount,
-            remaining: Math.max(0, remaining),
-            requested: items.length
-          }
-        },
+        breakdown: { pendingApprovalCount: snap.pendingApprovalCount, waitingForPickupCount: snap.waitingForPickupCount, borrowingCount: snap.borrowingCount, overdueCount: snap.overdueCount, unresolvedViolationCount: snap.unresolvedViolationCount, quota: { max: maxBorrowLimit, using: snap.activeCount, remaining: Math.max(0, remaining), requested: items.length } },
         hint: `Bạn chỉ có thể mượn thêm tối đa ${Math.max(0, remaining)} tài liệu.`
       };
       throw e;
     }
 
-    // Lấy copies & kiểm tra AVAILABLE
+    // load copies
     const copyIds = requestedCopyIds;
     const copies = await DocumentCopy.findAll({
       where: { documentCopyId: copyIds },
@@ -391,7 +447,6 @@ async function createLoanSlipService(body) {
       }
     }
 
-    // Chặn mượn 2 bản sao cùng 1 đầu sách
     const docIds = copies.map(c => Number(c.documentId));
     const uniqueDocIds = new Set(docIds);
     if (uniqueDocIds.size !== copies.length) {
@@ -402,15 +457,9 @@ async function createLoanSlipService(body) {
     // dueDate mặc định từ cardType nếu không truyền
     let finalDueDate = dueDate || addDaysDateOnly(loanDateStr, borrowDuration);
     const dueD = parseDateOnly(finalDueDate);
-    if (!dueD) {
-      const e = new Error('Định dạng dueDate không hợp lệ (YYYY-MM-DD)');
-      e.status = 400; throw e;
-    }
+    if (!dueD) { const e = new Error('Định dạng dueDate không hợp lệ (YYYY-MM-DD)'); e.status = 400; throw e; }
     const dd = daysDiff(loanDateStr, finalDueDate);
-    if (!(dd > 0)) {
-      const e = new Error('Hạn trả phải sau ngày mượn');
-      e.status = 400; throw e;
-    }
+    if (!(dd > 0)) { const e = new Error('Hạn trả phải sau ngày mượn'); e.status = 400; throw e; }
     if (dd > borrowDuration) {
       const e = new Error(`Hạn trả không được quá ${borrowDuration} ngày theo loại thẻ (${cardType.typeName})`);
       e.status = 400; throw e;
@@ -449,80 +498,122 @@ async function createLoanSlipService(body) {
       );
     }
 
-    // Lấy email từ account (nếu reader.accountId tồn tại)
-    let readerEmail = null;
-    try {
-      if (reader.accountId) {
-        const Account = require('../model').Account;
-        const account = await Account.findByPk(reader.accountId, {
-          attributes: ['email'],
-          transaction: t,
-          lock: t.LOCK.UPDATE
-        });
-        readerEmail = account?.email || null;
-      }
-    } catch (err) {
-      readerEmail = null;
-    }
+    // --- TẠO notification cho độc giả (inside same TX) nhưng KHÔNG THROW nếu lỗi ---
+    // Build notification content (bạn có thể mở rộng lấy title thực tế nếu muốn)
+    const notifData = {
+      readerId,
+      type: 'LOAN_ISSUED',
+      title: `Phiếu mượn #${slip.loanSlipId} — Đã mượn`,
+      content: `Phiếu mượn #${slip.loanSlipId} đã được tạo. Số lượng: ${items.length}. Hạn trả: ${finalDueDate}.`,
+      priority: 'NORMAL',
+      link: `/loan/${slip.loanSlipId}`,
+      isRead: 0
+    };
 
+    // Thử tạo notification trong transaction (nếu thất bại sẽ return null)
+    createdNotification = await createNotificationSafe(notifData, t);
+
+    // Trả về kết quả transaction (notificationId có thể null)
     return {
       loanSlip: slip,
       items,
       payment: null,
       message: 'Phiếu mượn được tạo và kích hoạt (BORROWING).',
-      readerEmail
+      readerEmail: (reader.accountId ? (await Account.findByPk(reader.accountId, { attributes: ['email'], transaction: t }))?.email : null) || null,
+      notificationId: createdNotification ? (createdNotification.notificationID || createdNotification.id || null) : null
     };
   }); // end transaction
 
-  // Gửi mail thông báo (nếu có email)
+  // Sau transaction: đảm bảo txResult có giá trị
+  const result = txResult;
+
+  // Nếu notification không được tạo bên trong transaction (createdNotification null),
+  // thử tạo lại ngoài transaction (không throw khi lỗi)
+  if (!result.notificationId) {
+    try {
+      const retryNotif = await createNotificationSafe({
+        readerId,
+        type: 'LOAN_ISSUED',
+        title: `Phiếu mượn #${result.loanSlip.loanSlipId} — Đã mượn`,
+        content: `Phiếu mượn #${result.loanSlip.loanSlipId} đã được tạo. Số lượng: ${items.length}. Hạn trả: ${result.loanSlip.dueDate}.`,
+        priority: 'NORMAL',
+        link: `/loan/${result.loanSlip.loanSlipId}`,
+        isRead: 0
+      }, null);
+      if (retryNotif) {
+        result.notificationId = retryNotif.notificationID || retryNotif.id || null;
+      }
+    } catch (errRetry) {
+      // không bao giờ throw ra ngoài - chỉ log
+      console.warn('⚠️ createLoanSlipService: retry create notification failed', errRetry?.message || errRetry);
+    }
+  }
+
+  // Gửi mail thông báo (nếu có email) — dùng safeSendLoanEmail để không throw
   try {
-    const finalEmail = txResult.readerEmail || process.env.ADMIN_NOTIFICATION_EMAIL || null;
+    const finalEmail = result.readerEmail || process.env.ADMIN_NOTIFICATION_EMAIL || null;
     if (finalEmail) {
       // Lấy tên reader để gửi (nếu cần)
-      const reader = await Reader.findByPk(readerId);
-      const readerName = reader?.fullName || 'Độc giả';
+      let readerName = 'Độc giả';
+      try {
+        const r = await Reader.findByPk(readerId, { attributes: ['fullName'] });
+        readerName = r?.fullName || readerName;
+      } catch (e) {
+        // ignore
+      }
 
-      // Lấy danh sách loan details + thông tin Document để build itemsForMail (an toàn)
-      const loanDetails = await LoanDetail.findAll({
-        where: { loanSlipId: txResult.loanSlip.loanSlipId },
-        include: [
-          {
-            model: DocumentCopy,
-            attributes: ['documentCopyId'],
-            include: [{ model: Document, attributes: ['documentId', 'title'] }]
-          }
-        ]
-      });
+      // Lấy danh sách loan details + thông tin Document để build itemsForMail (nên làm ngoài transaction)
+      let itemsForMail = [];
+      try {
+        const loanDetails = await LoanDetail.findAll({
+          where: { loanSlipId: result.loanSlip.loanSlipId },
+          include: [
+            {
+              model: DocumentCopy,
+              attributes: ['documentCopyId'],
+              include: [{ model: Document, attributes: ['documentId', 'title'] }]
+            }
+          ]
+        });
 
-      const itemsForMail = loanDetails.map(d => ({
-        title: d.DocumentCopy?.Document?.title || null,
-        documentId: d.DocumentCopy?.Document?.documentId || null,
-        documentCopyId: d.documentCopyId || d.DocumentCopy?.documentCopyId || null
-      }));
+        itemsForMail = loanDetails.map(d => ({
+          title: d.DocumentCopy?.Document?.title || null,
+          documentId: d.DocumentCopy?.Document?.documentId || null,
+          documentCopyId: d.documentCopyId || d.DocumentCopy?.documentCopyId || null
+        }));
+      } catch (errLd) {
+        console.warn('⚠️ createLoanSlipService: cannot build itemsForMail', errLd?.message || errLd);
+        // nếu không lấy được loan details, vẫn gửi email với ít thông tin
+        itemsForMail = items.map(it => ({ title: null, documentId: null, documentCopyId: it.documentCopyId }));
+      }
 
-      await mailService.sendLoanIssuedEmail(finalEmail, {
+      // gọi safeSendLoanEmail (sẽ bắt lỗi nội bộ)
+      await safeSendLoanEmail(finalEmail, {
         fullName: readerName,
-        slipId: txResult.loanSlip.loanSlipId,
+        slipId: result.loanSlip.loanSlipId,
         items: itemsForMail,
         loanDate: loanDateStr,
-        dueDate: txResult.loanSlip.dueDate,
+        dueDate: result.loanSlip.dueDate,
         pickUpLocation: process.env.LIBRARY_ADDRESS,
         supportEmail: process.env.SUPPORT_EMAIL,
         supportPhone: process.env.SUPPORT_PHONE,
         libraryName: process.env.LIBRARY_NAME
-      });
-      console.log('✅ Loan issued email sent to', finalEmail);
+      }, result.notificationId);
+      console.log('✅ createLoanSlipService: attempted to send loan email to', finalEmail);
     } else {
-      console.warn('⚠️ No email available to notify about newly created loan slip', txResult.loanSlip.loanSlipId);
+      console.warn('⚠️ createLoanSlipService: no email available to notify', result.loanSlip.loanSlipId);
     }
   } catch (err) {
-    console.error('❌ Failed to send loan issued email for slip', txResult.loanSlip.loanSlipId, err?.message || err);
+    // safeSendLoanEmail đã bắt lỗi, nhưng giữ thêm catch phòng trường hợp bất thường
+    console.error('❌ createLoanSlipService: unexpected error when sending email', err?.message || err);
   }
 
+  // Kết quả trả về cho caller
   return {
-    loanSlip: txResult.loanSlip,
-    message: txResult.message,
-    readerEmail: txResult.readerEmail || null
+    loanSlip: result.loanSlip,
+    message: result.message,
+    readerEmail: result.readerEmail || null,
+    notificationId: result.notificationId || null
   };
 }
 
@@ -552,8 +643,16 @@ async function approveReservationService(payload) {
     return m ? Number(m[1]) : null;
   };
 
-  // Thực hiện cập nhật trong transaction — chỉ DB thay đổi ở đây
-  const txResult = await sequelize.transaction(async (t) => {
+  // prepare maps
+  const assignMap = new Map(assignments.map(a => [Number(a.loanDetailId), Number(a.documentCopyId)]));
+  const condMap = new Map(conditions.map(c => [Number(c.loanDetailId), sanitizeBorrowCondition(c.conditionBorrow)]));
+
+  // result from transaction
+  let txResult = null;
+  let createdNotification = null;
+
+  // Transaction: all DB mutations here
+  txResult = await sequelize.transaction(async (t) => {
     const slip = await LoanSlip.findByPk(Number(loanSlipId), { transaction: t, lock: t.LOCK.UPDATE });
     if (!slip) { const e = new Error('Không tìm thấy phiếu'); e.status = 404; throw e; }
 
@@ -615,9 +714,7 @@ async function approveReservationService(payload) {
     }
     const borrowDuration = Number(cardType.borrowDuration) || 0;
 
-    const assignMap = new Map(assignments.map(a => [Number(a.loanDetailId), Number(a.documentCopyId)]));
-    const condMap = new Map(conditions.map(c => [Number(c.loanDetailId), sanitizeBorrowCondition(c.conditionBorrow)]));
-
+    // Group pendingDetails by requested documentId parsed from note
     const groups = new Map(); // documentId -> LoanDetail[]
     for (const d of pendingDetails) {
       const docId = parseRequestedDocId(d.note);
@@ -629,11 +726,11 @@ async function approveReservationService(payload) {
       groups.get(docId).push(d);
     }
 
-    // Chọn bản sao cho từng loanDetail (ưu tiên assignments nếu có)
+    // Choose copies for each group: respect assignments; fill remaining from AVAILABLE copies
     const chosenCopyIds = new Map(); // loanDetailId -> documentCopyId
 
     for (const [documentId, details] of groups.entries()) {
-      // preset (admin chỉ định cụ thể)
+      // preset from assignments
       const preset = details
         .filter(d => assignMap.has(d.loanDetailId))
         .map(d => ({ loanDetailId: d.loanDetailId, documentCopyId: assignMap.get(d.loanDetailId) }));
@@ -693,7 +790,7 @@ async function approveReservationService(payload) {
       : [];
     const chosenCopyMap = new Map(chosenCopies.map(c => [Number(c.documentCopyId), c]));
 
-    // Cập nhật pendingDetails -> WAITING_FOR_PICKUP và ON_HOLD cho copy
+    // Update pendingDetails -> WAITING_FOR_PICKUP and set DocumentCopy -> ON_HOLD
     for (const d of pendingDetails) {
       const copyId = chosenCopyIds.get(d.loanDetailId);
       const cp = chosenCopyMap.get(Number(copyId));
@@ -726,11 +823,11 @@ async function approveReservationService(payload) {
       status: 'WAITING_FOR_PICKUP',
     }, { transaction: t });
 
-    // Lấy email từ account (nếu reader.accountId tồn tại) ngay trong transaction
+    // Lấy email từ account (nếu reader.accountId tồn tại) ở trong transaction
     let readerEmail = null;
     try {
       if (reader.accountId) {
-        const Account = require('../model').Account; // lấy model Account từ index models
+        const Account = require('../model').Account;
         const account = await Account.findByPk(reader.accountId, {
           attributes: ['email'],
           transaction: t,
@@ -739,28 +836,59 @@ async function approveReservationService(payload) {
         readerEmail = account?.email || null;
       }
     } catch (err) {
-      // không phá transaction chỉ vì không fetch được email; ta trả null và xử lý bên ngoài
       readerEmail = null;
     }
 
-    // Trả về dữ liệu cần thiết để dùng ở bên ngoài transaction (không gọi mail ở đây)
+    // TẠO notification (inside TX) nhưng không throw nếu fail
+    const notifData = {
+      readerId: slip.readerId,
+      type: 'RESERVATION_APPROVED',
+      title: `Phiếu #${slip.loanSlipId} — Đã được duyệt, vui lòng đến nhận`,
+      content: `Phiếu #${slip.loanSlipId} đã được duyệt. Vui lòng đến lấy trong vòng 3 ngày. Hạn nhận: ${addDaysDateOnly(fmtToday(), 3)}.`,
+      priority: 'NORMAL',
+      link: `/loan/${slip.loanSlipId}`,
+      isRead: 0
+    };
+
+    createdNotification = await createNotificationSafe(notifData, t);
+
+    // Trả về dữ liệu cần thiết để xử lý bên ngoài transaction
     return {
       loanSlipId: slip.loanSlipId,
       readerId: slip.readerId,
-      readerEmail,              // <-- trả về email nếu có
+      readerEmail,
       dueDate: newDueDate,
       assignedCopyMap: Array.from(chosenCopyIds.entries()).map(([loanDetailId, documentCopyId]) => ({ loanDetailId, documentCopyId })),
+      notificationId: createdNotification ? (createdNotification.notificationID || createdNotification.id || null) : null
     };
   }); // end transaction
 
-  // --- SAU KHI TRANSACTION HOÀN TẤT: chuẩn bị và gửi email thông báo ---
+  // Nếu notification không được tạo trong tx, thử tạo lại ngoài tx (không throw)
+  if (!txResult.notificationId) {
+    try {
+      const retryNotif = await createNotificationSafe({
+        readerId: txResult.readerId,
+        type: 'RESERVATION_APPROVED',
+        title: `Phiếu #${txResult.loanSlipId} — Đã được duyệt, vui lòng đến nhận`,
+        content: `Phiếu #${txResult.loanSlipId} đã được duyệt. Vui lòng đến lấy trong vòng 3 ngày. Hạn nhận: ${addDaysDateOnly(fmtToday(), 3)}.`,
+        priority: 'NORMAL',
+        link: `/loan/${txResult.loanSlipId}`,
+        isRead: 0
+      }, null);
+      if (retryNotif) {
+        txResult.notificationId = retryNotif.notificationID || retryNotif.id || null;
+      }
+    } catch (errRetry) {
+      console.warn('⚠️ approveReservationService: retry create notification failed', errRetry?.message || errRetry);
+    }
+  }
+
+  // Sau transaction: gửi email (an toàn)
   try {
-    const readerEmail = txResult.readerEmail; // email lấy từ account (nếu có)
-    // Nếu không có email ở account, optional: fallback sang một email khác (ví dụ slip.contactEmail) hoặc admin
+    const readerEmail = txResult.readerEmail;
     const finalEmail = readerEmail || process.env.ADMIN_NOTIFICATION_EMAIL || null;
 
     if (finalEmail) {
-      // Lấy thông tin các LoanDetail vừa gán để hiển thị title + copyId
       const loanDetails = await LoanDetail.findAll({
         where: { loanSlipId: txResult.loanSlipId },
         include: [
@@ -779,12 +907,20 @@ async function approveReservationService(payload) {
         documentCopyId: d.documentCopyId || d.DocumentCopy?.documentCopyId || null
       }));
 
-      // pickupDeadline = hôm nay + 3 ngày
       const pickupDeadline = addDaysDateOnly(fmtToday(), 3);
 
+      // Lấy tên reader nếu có
+      let readerName = 'Độc giả';
+      try {
+        const rr = await Reader.findByPk(txResult.readerId, { attributes: ['fullName'] });
+        readerName = rr?.fullName || readerName;
+      } catch (e) {
+        // ignore
+      }
+
       console.log(`📤 Sending reservation approval email for slip=${txResult.loanSlipId} to=${finalEmail} (readerEmail=${readerEmail})`);
-      await mailService.sendReservationApprovedEmail(finalEmail, {
-        fullName: (await Reader.findByPk(txResult.readerId))?.fullName || 'Độc giả',
+      await safeSendReservationEmail(finalEmail, {
+        fullName: readerName,
         slipId: txResult.loanSlipId,
         items,
         pickupDeadline,
@@ -792,8 +928,9 @@ async function approveReservationService(payload) {
         supportEmail: process.env.SUPPORT_EMAIL,
         supportPhone: process.env.SUPPORT_PHONE,
         libraryName: process.env.LIBRARY_NAME
-      });
-      console.log('✅ Reservation approval email sent to', finalEmail);
+      }, txResult.notificationId);
+
+      console.log('✅ Reservation approval email attempted for', finalEmail);
       if (!readerEmail) {
         console.warn(`⚠️ Email sent to fallback (${finalEmail}) because reader.account.email is missing for readerId=${txResult.readerId}`);
       }
@@ -809,6 +946,7 @@ async function approveReservationService(payload) {
     message: 'Duyệt phiếu thành công. Phiếu đã chuyển sang WAITING_FOR_PICKUP (chờ độc giả đến lấy).',
     loanSlipId: txResult.loanSlipId,
     slipStatus: 'WAITING_FOR_PICKUP',
+    notificationId: txResult.notificationId || null
   };
 }
 
@@ -1463,115 +1601,340 @@ async function pickupLoanSlipService(payload) {
 // XÓA 1 LOAN DETAIL
 // ==========================
 async function removeLoanDetailService({ slipId, loanDetailId, reason, librarianId }) {
-  return await sequelize.transaction(async (t) => {
+  // ensure models
+  const Notification = require('../model').Notification || require('../model').Notifications || null;
+  const Account = require('../model').Account || null;
+
+  // store result info from transaction
+  let txResult = null;
+  let createdNotification = null;
+
+  // transaction for DB changes
+  txResult = await sequelize.transaction(async (t) => {
     const slip = await LoanSlip.findByPk(slipId, {
       include: [
         { model: Reader, as: "reader", include: [{ model: Account }] },
         { model: LoanDetail, as: "loanDetails", include: [{ model: DocumentCopy, include: [{ model: Document }] }] }
       ],
-      transaction: t
+      transaction: t,
+      lock: t.LOCK.UPDATE
     });
 
-    if (!slip) throw new Error("Không tìm thấy phiếu");
+    if (!slip) {
+      const e = new Error("Không tìm thấy phiếu");
+      e.status = 404; throw e;
+    }
 
-    const target = slip.loanDetails.find(d => d.id == loanDetailId);
-    if (!target) throw new Error("Không tìm thấy tài liệu trong phiếu");
+    // Tìm target bằng loanDetailId (lưu ý: tuỳ tên PK của bạn có thể là loanDetailId hoặc id)
+    const target = slip.loanDetails.find(d => String(d.loanDetailId || d.id) === String(loanDetailId));
+    if (!target) {
+      const e = new Error("Không tìm thấy tài liệu trong phiếu");
+      e.status = 404; throw e;
+    }
 
-    // Cập nhật lý do
+    // Cập nhật lý do (note) trước khi xóa
     target.note = reason || null;
     await target.save({ transaction: t });
+
+    // Lưu thông tin item để dùng cho email/notification sau khi xóa
+    const removedItem = {
+      title: target.DocumentCopy?.Document?.title || target.documentCopy?.document?.title || null,
+      documentId: target.DocumentCopy?.Document?.documentId || target.documentCopy?.documentId || null,
+      documentCopyId: target.documentCopyId || target.documentCopy?.documentCopyId || null,
+      loanDetailId: target.loanDetailId || target.id || null
+    };
 
     // Xóa chi tiết
     await target.destroy({ transaction: t });
 
-    // Lấy email người đọc
-    const readerEmail = slip.reader.account.email;
-    const fullName = slip.reader.fullName;
+    // Lấy email người đọc (nếu có)
+    const readerEmail = slip.reader?.Account?.email || slip.reader?.account?.email || null;
+    const fullName = slip.reader?.fullName || slip.reader?.full_name || 'Độc giả';
 
-    // Lấy tên thủ thư
-    const librarian = await Account.findByPk(librarianId);
-    const librarianName = librarian?.fullName || "Thủ thư";
+    // Lấy tên thủ thư (ngoài transaction nếu cần hôm nay, nhưng truy vấn nhỏ ok)
+    let librarianName = 'Thủ thư';
+    try {
+      if (Account && librarianId) {
+        const libAcc = await Account.findByPk(librarianId, { transaction: t });
+        librarianName = libAcc?.fullName || libAcc?.full_name || librarianName;
+      }
+    } catch (e) {
+      // ignore, không phá TX
+    }
 
-    // Nếu còn 0 mục → xoá phiếu & gửi email hủy phiếu
+    // Kiểm số lượng còn lại
     const remain = await LoanDetail.count({ where: { loanSlipId: slipId }, transaction: t });
 
+    // Nếu còn 0 mục → xóa phiếu & tạo notification (inside tx, nhưng không throw nếu notification fail)
     if (remain === 0) {
       await slip.destroy({ transaction: t });
 
-      await mailService.sendLoanSlipCancelledEmail(readerEmail, {
-        fullName,
-        slipId,
-        items: [
-          {
-            title: target.documentCopy.document.title,
-            documentId: target.documentCopy.documentId,
-            documentCopyId: target.documentCopyId
-          }
-        ],
-        reason,
-        librarianName
-      });
+      // Tạo notification (không throw nếu fail)
+      const notifData = {
+        readerId: slip.readerId,
+        type: 'LOAN_SLIP_CANCELLED',
+        title: `Phiếu mượn #${slipId} đã bị hủy`,
+        content: `Phiếu #${slipId} đã bị hủy bởi ${librarianName}. Lý do: ${reason || '—'}.`,
+        priority: 'HIGH',
+        link: `/loan/${slipId}`,
+        isRead: 0
+      };
 
+      // Nếu bạn đã có helper createNotificationSafe, gọi helper, nếu không thì tạo trực tiếp nhưng bắt lỗi
+      try {
+        if (typeof createNotificationSafe === 'function') {
+          createdNotification = await createNotificationSafe(notifData, t);
+        } else if (Notification) {
+          createdNotification = await Notification.create(notifData, { transaction: t });
+        }
+      } catch (errNotif) {
+        // không throw, chỉ log (không được rollback vì đây là non-critical)
+        console.warn('⚠️ removeLoanDetailService: failed to create notification inside tx', errNotif?.message || errNotif);
+        createdNotification = null;
+      }
+
+      // Trả về thông tin để xử lý mail ngoài transaction
       return {
         deletedSlip: true,
-        message: "Đã xóa mục cuối → phiếu đã bị xoá"
+        readerEmail,
+        fullName,
+        librarianName,
+        removedItem,
+        notificationId: createdNotification ? (createdNotification.notificationID || createdNotification.id || null) : null
       };
     }
 
-    // Nếu vẫn còn mục khác → gửi mail xoá từng tài liệu
-    await mailService.sendLoanDetailRemovedEmail(readerEmail, {
-      fullName,
-      slipId,
-      loanDetailId,
-      title: target.documentCopy.document.title,
-      documentId: target.documentCopy.documentId,
-      documentCopyId: target.documentCopyId,
-      reason,
-      librarianName
-    });
+    // Nếu vẫn còn mục khác → tạo notification "loan detail removed" (inside tx, non-critical)
+    const notifData = {
+      readerId: slip.readerId,
+      type: 'LOAN_DETAIL_REMOVED',
+      title: `Một mục trong phiếu #${slipId} đã bị hủy`,
+      content: `Một mục (${removedItem.title || ('ID:' + removedItem.documentId)}) trong phiếu #${slipId} đã bị hủy bởi ${librarianName}. Lý do: ${reason || '—'}.`,
+      priority: 'NORMAL',
+      link: `/loan/${slipId}`,
+      isRead: 0
+    };
+
+    try {
+      if (typeof createNotificationSafe === 'function') {
+        createdNotification = await createNotificationSafe(notifData, t);
+      } else if (Notification) {
+        createdNotification = await Notification.create(notifData, { transaction: t });
+      }
+    } catch (errNotif) {
+      console.warn('⚠️ removeLoanDetailService: failed to create notification inside tx', errNotif?.message || errNotif);
+      createdNotification = null;
+    }
 
     return {
       deletedSlip: false,
-      message: "Đã xoá 1 tài liệu khỏi phiếu"
+      readerEmail,
+      fullName,
+      librarianName,
+      removedItem,
+      notificationId: createdNotification ? (createdNotification.notificationID || createdNotification.id || null) : null
     };
-  });
+  }); // end transaction
+
+  // ---- Sau transaction: nếu notification chưa được tạo trong tx, thử tạo lại ngoài tx (không throw) ----
+  try {
+    if (!txResult.notificationId) {
+      const Notification = require('../model').Notification || require('../model').Notifications || null;
+      const notifDataRetry = {
+        readerId: txResult.readerId || null,
+        type: txResult.deletedSlip ? 'LOAN_SLIP_CANCELLED' : 'LOAN_DETAIL_REMOVED',
+        title: txResult.deletedSlip ? `Phiếu mượn #${slipId} đã bị hủy` : `Một mục trong phiếu #${slipId} đã bị hủy`,
+        content: txResult.deletedSlip
+          ? `Phiếu #${slipId} đã bị hủy. Lý do: ${reason || '—'}.`
+          : `Một mục (${txResult.removedItem.title || ('ID:' + txResult.removedItem.documentId)}) trong phiếu #${slipId} đã bị hủy. Lý do: ${reason || '—'}.`,
+        priority: txResult.deletedSlip ? 'HIGH' : 'NORMAL',
+        link: `/loan/${slipId}`,
+        isRead: 0
+      };
+
+      if (typeof createNotificationSafe === 'function') {
+        const retryNotif = await createNotificationSafe(notifDataRetry, null);
+        if (retryNotif) txResult.notificationId = retryNotif.notificationID || retryNotif.id || null;
+      } else if (Notification) {
+        try {
+          const retryNotif = await Notification.create(notifDataRetry);
+          if (retryNotif) txResult.notificationId = retryNotif.notificationID || retryNotif.id || null;
+        } catch (err) {
+          console.warn('⚠️ removeLoanDetailService: retry create notification failed', err?.message || err);
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('⚠️ removeLoanDetailService: unexpected error while retrying notification', err?.message || err);
+  }
+
+  // ---- Sau transaction: gửi email tương ứng (không throw nếu lỗi) ----
+  try {
+    const finalEmail = txResult.readerEmail || process.env.ADMIN_NOTIFICATION_EMAIL || null;
+    if (finalEmail) {
+      if (txResult.deletedSlip) {
+        // Gửi mail hủy toàn bộ phiếu
+        try {
+          await mailService.sendLoanSlipCancelledEmail(finalEmail, {
+            fullName: txResult.fullName,
+            slipId,
+            items: [
+              {
+                title: txResult.removedItem.title,
+                documentId: txResult.removedItem.documentId,
+                documentCopyId: txResult.removedItem.documentCopyId
+              }
+            ],
+            reason,
+            librarianName: txResult.librarianName
+          });
+          // cập nhật emailAt nếu có notificationId
+          if (txResult.notificationId && Notification) {
+            try {
+              const pk = Notification.primaryKeyAttribute || 'notificationID';
+              const where = {}; where[pk] = txResult.notificationId;
+              await Notification.update({ emailAt: new Date() }, { where });
+            } catch (updErr) {
+              console.warn('⚠️ removeLoanDetailService: cannot update notification.emailAt', updErr?.message || updErr);
+            }
+          }
+        } catch (mailErr) {
+          console.error('❌ removeLoanDetailService: failed to send loan slip cancelled email', mailErr?.message || mailErr);
+        }
+        return {
+          deletedSlip: true,
+          message: "Đã xóa mục cuối → phiếu đã bị xoá",
+          slipId,
+          notificationId: txResult.notificationId || null
+        };
+      } else {
+        // Gửi mail xoá 1 mục khỏi phiếu
+        try {
+          await mailService.sendLoanDetailRemovedEmail(finalEmail, {
+            fullName: txResult.fullName,
+            slipId,
+            loanDetailId: txResult.removedItem.loanDetailId,
+            title: txResult.removedItem.title,
+            documentId: txResult.removedItem.documentId,
+            documentCopyId: txResult.removedItem.documentCopyId,
+            reason,
+            librarianName: txResult.librarianName
+          });
+          // cập nhật emailAt nếu có notificationId
+          if (txResult.notificationId && Notification) {
+            try {
+              const pk = Notification.primaryKeyAttribute || 'notificationID';
+              const where = {}; where[pk] = txResult.notificationId;
+              await Notification.update({ emailAt: new Date() }, { where });
+            } catch (updErr) {
+              console.warn('⚠️ removeLoanDetailService: cannot update notification.emailAt', updErr?.message || updErr);
+            }
+          }
+        } catch (mailErr) {
+          console.error('❌ removeLoanDetailService: failed to send loan detail removed email', mailErr?.message || mailErr);
+        }
+
+        return {
+          deletedSlip: false,
+          message: "Đã xoá 1 tài liệu khỏi phiếu",
+          slipId,
+          notificationId: txResult.notificationId || null
+        };
+      }
+    } else {
+      console.warn('⚠️ removeLoanDetailService: no email available to notify reader for slip', slipId);
+      return {
+        deletedSlip: txResult.deletedSlip,
+        message: txResult.deletedSlip ? "Đã xóa mục cuối → phiếu đã bị xoá" : "Đã xoá 1 tài liệu khỏi phiếu",
+        slipId,
+        notificationId: txResult.notificationId || null
+      };
+    }
+  } catch (err) {
+    // Bắt mọi lỗi bất ngờ, không làm rollback
+    console.error('❌ removeLoanDetailService: unexpected error after transaction', err?.message || err);
+    return {
+      deletedSlip: txResult.deletedSlip,
+      message: txResult.deletedSlip ? "Đã xóa mục cuối → phiếu đã bị xoá" : "Đã xoá 1 tài liệu khỏi phiếu",
+      slipId,
+      notificationId: txResult.notificationId || null
+    };
+  }
 }
+
 
 // ==========================
 // XÓA TOÀN BỘ PHIẾU
 // ==========================
 async function cancelLoanSlipService({ slipId, reason, librarianId }) {
-  return await sequelize.transaction(async (t) => {
+  // ensure models
+  const Notification = require('../model').Notification || require('../model').Notifications || null;
+  const Account = require('../model').Account || null;
+
+  let txResult = null;
+  let createdNotification = null;
+
+  // Transaction: tất cả thay đổi DB chính
+  txResult = await sequelize.transaction(async (t) => {
     const slip = await LoanSlip.findByPk(slipId, {
       include: [
         { model: Reader, as: "reader", include: [{ model: Account }] },
         { model: LoanDetail, as: "loanDetails", include: [{ model: DocumentCopy, include: [{ model: Document }] }] }
       ],
-      transaction: t
+      transaction: t,
+      lock: t.LOCK.UPDATE
     });
 
-    if (!slip) throw new Error("Không tìm thấy phiếu");
+    if (!slip) {
+      const e = new Error("Không tìm thấy phiếu");
+      e.status = 404; throw e;
+    }
 
-    const readerEmail = slip.reader.account.email;
-    const fullName = slip.reader.fullName;
+    // Lấy email & tên độc giả an toàn
+    const readerEmail = slip.reader?.Account?.email || slip.reader?.account?.email || null;
+    const fullName = slip.reader?.fullName || slip.reader?.full_name || 'Độc giả';
 
-    // Lấy tên thủ thư
-    const librarian = await Account.findByPk(librarianId);
-    const librarianName = librarian?.fullName || "Thủ thư";
+    // Lấy tên thủ thư (thực hiện trong tx nhỏ vẫn ok)
+    let librarianName = 'Thủ thư';
+    try {
+      if (Account && librarianId) {
+        const libAcc = await Account.findByPk(librarianId, { transaction: t, lock: t.LOCK.UPDATE });
+        librarianName = libAcc?.fullName || libAcc?.full_name || librarianName;
+      }
+    } catch (e) {
+      // ignore - không phá transaction
+    }
 
     // lưu lý do vào phiếu
     slip.note = reason || null;
     await slip.save({ transaction: t });
 
-    // trả bản sao về available
-    for (const d of slip.loanDetails) {
-      await d.documentCopy.update({ status: "AVAILABLE" }, { transaction: t });
+    // trả bản sao về AVAILABLE (nếu bản sao tồn tại)
+    for (const d of slip.loanDetails || []) {
+      try {
+        if (d.DocumentCopy || d.documentCopy) {
+          const docCopyInstance = d.DocumentCopy || d.documentCopy;
+          // nếu model instance có method update
+          if (typeof docCopyInstance.update === 'function') {
+            await docCopyInstance.update({ status: "AVAILABLE" }, { transaction: t });
+          } else {
+            // fallback: update qua DocumentCopy model
+            await DocumentCopy.update({ status: "AVAILABLE" }, { where: { documentCopyId: docCopyInstance.documentCopyId || docCopyInstance.documentCopyId }, transaction: t });
+          }
+        } else if (d.documentCopyId) {
+          await DocumentCopy.update({ status: "AVAILABLE" }, { where: { documentCopyId: d.documentCopyId }, transaction: t });
+        }
+      } catch (err) {
+        // Bắt lỗi từng bản sao để tránh fail toàn bộ tx vì lỗi nhỏ, nhưng log để debug.
+        console.warn('⚠️ cancelLoanSlipService: cannot set DocumentCopy AVAILABLE for loanDetail', d.loanDetailId || d.id, err?.message || err);
+      }
     }
 
-    const itemsForEmail = slip.loanDetails.map(d => ({
-      title: d.documentCopy.document.title,
-      documentId: d.documentCopy.documentId,
-      documentCopyId: d.documentCopyId
+    // Build itemsForEmail trước khi xóa
+    const itemsForEmail = (slip.loanDetails || []).map(d => ({
+      title: d.DocumentCopy?.Document?.title || d.documentCopy?.document?.title || null,
+      documentId: d.DocumentCopy?.Document?.documentId || d.documentCopy?.documentId || null,
+      documentCopyId: d.documentCopyId || d.DocumentCopy?.documentCopyId || null
     }));
 
     // xóa chi tiết
@@ -1580,18 +1943,108 @@ async function cancelLoanSlipService({ slipId, reason, librarianId }) {
     // xóa phiếu
     await slip.destroy({ transaction: t });
 
-    // gửi email hủy phiếu
-    await mailService.sendLoanSlipCancelledEmail(readerEmail, {
-      fullName,
-      slipId,
-      items: itemsForEmail,
-      reason,
-      librarianName
-    });
+    // Tạo notification inside transaction (non-critical)
+    const notifData = {
+      readerId: slip.readerId,
+      type: 'LOAN_SLIP_CANCELLED',
+      title: `Phiếu mượn #${slipId} đã bị hủy`,
+      content: `Phiếu #${slipId} đã bị hủy bởi ${librarianName}. Lý do: ${reason || '—'}.`,
+      priority: 'HIGH',
+      link: `/loan/${slipId}`,
+      isRead: 0
+    };
 
-    return { message: "Đã hủy phiếu thành công" };
-  });
+    try {
+      if (typeof createNotificationSafe === 'function') {
+        createdNotification = await createNotificationSafe(notifData, t);
+      } else if (Notification) {
+        createdNotification = await Notification.create(notifData, { transaction: t });
+      }
+    } catch (errNotif) {
+      console.warn('⚠️ cancelLoanSlipService: failed to create notification inside tx', errNotif?.message || errNotif);
+      createdNotification = null;
+    }
+
+    return {
+      readerEmail,
+      fullName,
+      librarianName,
+      itemsForEmail,
+      notificationId: createdNotification ? (createdNotification.notificationID || createdNotification.id || null) : null
+    };
+  }); // end transaction
+
+  // Nếu notification chưa được tạo trong tx, retry ngoài tx (non-critical)
+  try {
+    if (!txResult.notificationId) {
+      const notifDataRetry = {
+        readerId: txResult.readerId || null,
+        type: 'LOAN_SLIP_CANCELLED',
+        title: `Phiếu mượn #${slipId} đã bị hủy`,
+        content: `Phiếu #${slipId} đã bị hủy. Lý do: ${reason || '—'}.`,
+        priority: 'HIGH',
+        link: `/loan/${slipId}`,
+        isRead: 0
+      };
+
+      if (typeof createNotificationSafe === 'function') {
+        const retryNotif = await createNotificationSafe(notifDataRetry, null);
+        if (retryNotif) txResult.notificationId = retryNotif.notificationID || retryNotif.id || null;
+      } else if (Notification) {
+        try {
+          const retryNotif = await Notification.create(notifDataRetry);
+          if (retryNotif) txResult.notificationId = retryNotif.notificationID || retryNotif.id || null;
+        } catch (err) {
+          console.warn('⚠️ cancelLoanSlipService: retry create notification failed', err?.message || err);
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('⚠️ cancelLoanSlipService: unexpected error while retrying notification', err?.message || err);
+  }
+
+  // Gửi email hủy phiếu (sau transaction) — lỗi mail không rollback
+  try {
+    const finalEmail = txResult.readerEmail || process.env.ADMIN_NOTIFICATION_EMAIL || null;
+    if (finalEmail) {
+      try {
+        await mailService.sendLoanSlipCancelledEmail(finalEmail, {
+          fullName: txResult.fullName,
+          slipId,
+          items: txResult.itemsForEmail,
+          reason,
+          librarianName: txResult.librarianName
+        });
+
+        // nếu có notificationId, cố cập nhật emailAt (non-critical)
+        if (txResult.notificationId && Notification) {
+          try {
+            const pk = Notification.primaryKeyAttribute || 'notificationID';
+            const where = {}; where[pk] = txResult.notificationId;
+            await Notification.update({ emailAt: new Date() }, { where });
+          } catch (updErr) {
+            console.warn('⚠️ cancelLoanSlipService: cannot update notification.emailAt', updErr?.message || updErr);
+          }
+        }
+
+        console.log('✅ cancelLoanSlipService: loan slip cancelled email sent to', finalEmail);
+      } catch (mailErr) {
+        console.error('❌ cancelLoanSlipService: failed to send loan slip cancelled email', mailErr?.message || mailErr);
+      }
+    } else {
+      console.warn('⚠️ cancelLoanSlipService: no email available to notify reader for slip', slipId);
+    }
+  } catch (err) {
+    console.error('❌ cancelLoanSlipService: unexpected error after transaction', err?.message || err);
+  }
+
+  return {
+    message: "Đã hủy phiếu thành công",
+    slipId,
+    notificationId: txResult.notificationId || null
+  };
 }
+
 /**
  * HỦY PHIẾU ĐẶT TRƯỚC (PENDING)
  * - Chỉ áp dụng cho phiếu ở trạng thái PENDING (chưa gán documentCopy)
@@ -1608,11 +2061,19 @@ async function cancelReservationService({ loanSlipId, reason, librarianId }) {
     e.status = 400; throw e;
   }
 
-  return await sequelize.transaction(async (t) => {
-    // load slip + reader + loanDetails (loanDetails ở reservation thường có documentId thông qua note)
+  // Models/helpers (fallback nếu không export được)
+  const Models = require('../model');
+  const Account = Models.Account || null;
+  const Notification = Models.Notification || Models.Notifications || null;
+  const hasCreateNotificationSafe = typeof createNotificationSafe === 'function';
+  const hasSafeSendReservationEmail = typeof safeSendReservationEmail === 'function';
+
+  // 1) Transaction: xóa data chính (ghi note, xóa loanDetails, xóa slip), tạo notification (non-critical)
+  const txResult = await sequelize.transaction(async (t) => {
+    // load slip + reader + loanDetails
     const slip = await LoanSlip.findByPk(Number(loanSlipId), {
       include: [
-        { model: Reader, as: 'reader', include: [{ model: require('../model').Account }] },
+        { model: Reader, as: 'reader', include: [{ model: Models.Account }] },
         { model: LoanDetail, as: 'loanDetails' } // LoanDetail.note có thể chứa REQUEST_DOCUMENT_ID=...
       ],
       transaction: t,
@@ -1634,25 +2095,25 @@ async function cancelReservationService({ loanSlipId, reason, librarianId }) {
     slip.note = reason || null;
     await slip.save({ transaction: t });
 
-    // lấy danh sách loanDetails trước khi xóa để build email items
+    // lấy loanDetails trước khi xóa để build email items
     const loanDetails = slip.loanDetails || [];
 
-    // cố gắng parse REQUEST_DOCUMENT_ID từ note (nếu có)
+    // helper parse REQUEST_DOCUMENT_ID
     const parseRequestedDocId = (note) => {
       const m = String(note || '').match(/REQUEST_DOCUMENT_ID=(\d+)/);
       return m ? Number(m[1]) : null;
     };
 
+    // collect requestedDocIds -> fetch titles
     const requestedDocIds = [...new Set(
       loanDetails
         .map(d => parseRequestedDocId(d.note))
         .filter(Boolean)
     )];
 
-    // fetch tên document (nếu có ids) để hiển thị trong mail
     let docMap = new Map();
     if (requestedDocIds.length) {
-      const docs = await require('../model').Document.findAll({
+      const docs = await Models.Document.findAll({
         where: { documentId: requestedDocIds },
         attributes: ['documentId', 'title'],
         transaction: t
@@ -1660,7 +2121,6 @@ async function cancelReservationService({ loanSlipId, reason, librarianId }) {
       docMap = new Map(docs.map(d => [d.documentId, d.title]));
     }
 
-    // build itemsForEmail from loanDetails (cùng định dạng mailService mong đợi)
     const itemsForEmail = loanDetails.map(d => {
       const reqDocId = parseRequestedDocId(d.note);
       return {
@@ -1670,7 +2130,7 @@ async function cancelReservationService({ loanSlipId, reason, librarianId }) {
       };
     });
 
-    // xóa LoanDetail (reservation chưa có copy nên documentCopyId thường null)
+    // xóa LoanDetail (reservation chưa có copy)
     await LoanDetail.destroy({
       where: { loanSlipId: slip.loanSlipId },
       transaction: t
@@ -1683,8 +2143,9 @@ async function cancelReservationService({ loanSlipId, reason, librarianId }) {
     let readerEmail = null;
     try {
       const reader = slip.reader;
-      if (reader && reader.Account && reader.Account.email) {
-        readerEmail = reader.Account.email;
+      if (reader) {
+        if (reader.Account && reader.Account.email) readerEmail = reader.Account.email;
+        else if (reader.account && reader.account.email) readerEmail = reader.account.email;
       }
     } catch (err) {
       readerEmail = null;
@@ -1693,8 +2154,7 @@ async function cancelReservationService({ loanSlipId, reason, librarianId }) {
     // lấy tên thủ thư (nếu librarianId được truyền)
     let librarianName = null;
     try {
-      if (librarianId) {
-        const Account = require('../model').Account;
+      if (librarianId && Account) {
         const lib = await Account.findByPk(librarianId, { attributes: ['fullName'], transaction: t });
         librarianName = lib?.fullName || null;
       }
@@ -1702,21 +2162,88 @@ async function cancelReservationService({ loanSlipId, reason, librarianId }) {
       librarianName = null;
     }
 
-    // trả về dữ liệu để dùng ở ngoài transaction (không gọi mail trong transaction)
+    // TẠO notification inside transaction (non-critical; không throw nếu fail)
+    let createdNotification = null;
+    const notifData = {
+      readerId: slip.readerId,
+      type: 'RESERVATION_CANCELLED',
+      title: `Phiếu đặt trước #${slip.loanSlipId} đã bị hủy`,
+      content: `Phiếu đặt trước #${slip.loanSlipId} đã bị hủy${librarianName ? ` bởi ${librarianName}` : ''}. Lý do: ${reason || '—'}.`,
+      priority: 'NORMAL',
+      link: `/loan/${slip.loanSlipId}`,
+      isRead: 0
+    };
+
+    try {
+      if (hasCreateNotificationSafe) {
+        createdNotification = await createNotificationSafe(notifData, t);
+      } else if (Notification) {
+        createdNotification = await Notification.create(notifData, { transaction: t });
+      }
+    } catch (notifErr) {
+      // không throw, chỉ log
+      console.warn('⚠️ cancelReservationService: failed to create notification inside tx', notifErr?.message || notifErr);
+      createdNotification = null;
+    }
+
     return {
       slipId: slip.loanSlipId,
       readerEmail,
       fullName: slip.reader?.fullName || null,
       itemsForEmail,
       reason,
-      librarianName
+      librarianName,
+      notificationId: createdNotification ? (createdNotification.notificationID || createdNotification.id || null) : null,
+      readerId: slip.readerId
     };
-  }) // end transaction
-    .then(async (txResult) => {
-      // gửi email ngoài transaction (không rollback DB nếu mail fail)
-      try {
-        const finalEmail = txResult.readerEmail || process.env.ADMIN_NOTIFICATION_EMAIL || null;
-        if (finalEmail) {
+  }); // end transaction
+
+  // 2) Nếu notification chưa được tạo trong tx, thử tạo lại ngoài tx (non-critical)
+  try {
+    if (!txResult.notificationId) {
+      const retryNotifData = {
+        readerId: txResult.readerId || null,
+        type: 'RESERVATION_CANCELLED',
+        title: `Phiếu đặt trước #${txResult.slipId} đã bị hủy`,
+        content: `Phiếu đặt trước #${txResult.slipId} đã bị hủy. Lý do: ${txResult.reason || '—'}.`,
+        priority: 'NORMAL',
+        link: `/loan/${txResult.slipId}`,
+        isRead: 0
+      };
+
+      if (hasCreateNotificationSafe) {
+        const retryNotif = await createNotificationSafe(retryNotifData, null);
+        if (retryNotif) txResult.notificationId = retryNotif.notificationID || retryNotif.id || null;
+      } else if (Notification) {
+        try {
+          const retryNotif = await Notification.create(retryNotifData);
+          if (retryNotif) txResult.notificationId = retryNotif.notificationID || retryNotif.id || null;
+        } catch (err) {
+          console.warn('⚠️ cancelReservationService: retry create notification failed', err?.message || err);
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('⚠️ cancelReservationService: unexpected error while retrying notification', err?.message || err);
+  }
+
+  // 3) Gửi email ngoài transaction (non-critical). Nếu có safe helper, dùng nó (cập nhật emailAt); nếu không, fallback
+  try {
+    const finalEmail = txResult.readerEmail || process.env.ADMIN_NOTIFICATION_EMAIL || null;
+    if (finalEmail) {
+      if (hasSafeSendReservationEmail) {
+        // safe helper sẽ không throw
+        await safeSendReservationEmail(finalEmail, {
+          fullName: txResult.fullName || 'Độc giả',
+          slipId: txResult.slipId,
+          items: txResult.itemsForEmail,
+          reason: txResult.reason,
+          librarianName: txResult.librarianName
+        }, txResult.notificationId);
+        console.log('✅ Reservation cancelled email attempted (via safeSendReservationEmail) to', finalEmail);
+      } else {
+        // fallback: call mailService directly but catch errors
+        try {
           await mailService.sendReservationCancelledEmail(finalEmail, {
             fullName: txResult.fullName || 'Độc giả',
             slipId: txResult.slipId,
@@ -1725,17 +2252,31 @@ async function cancelReservationService({ loanSlipId, reason, librarianId }) {
             librarianName: txResult.librarianName
           });
           console.log('✅ Reservation cancelled email sent to', finalEmail);
-        } else {
-          console.warn('⚠️ Không có email để gửi thông báo hủy reservation for slipId=', txResult.slipId);
-        }
-      } catch (mailErr) {
-        console.error('❌ Failed to send reservation cancelled email for slip', txResult.slipId, mailErr?.message || mailErr);
-        // không throw — mail thất bại không rollback DB
-      }
 
-      return { message: 'Đã hủy phiếu đặt trước thành công', slipId: txResult.slipId };
-    });
+          // update emailAt if notification exists
+          if (txResult.notificationId && Notification) {
+            try {
+              const pk = Notification.primaryKeyAttribute || 'notificationID';
+              const where = {}; where[pk] = txResult.notificationId;
+              await Notification.update({ emailAt: new Date() }, { where });
+            } catch (updErr) {
+              console.warn('⚠️ cancelReservationService: cannot update notification.emailAt', updErr?.message || updErr);
+            }
+          }
+        } catch (mailErr) {
+          console.error('❌ cancelReservationService: failed to send reservation cancelled email', mailErr?.message || mailErr);
+        }
+      }
+    } else {
+      console.warn('⚠️ cancelReservationService: no email to notify for slipId=', txResult.slipId);
+    }
+  } catch (err) {
+    console.error('❌ cancelReservationService: unexpected error after transaction', err?.message || err);
+  }
+
+  return { message: 'Đã hủy phiếu đặt trước thành công', slipId: txResult.slipId, notificationId: txResult.notificationId || null };
 }
+
 module.exports = {
   getAllLoanSlipsService,
   createLoanSlipService,

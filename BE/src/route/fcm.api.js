@@ -2,10 +2,16 @@
 const express = require("express");
 const router = express.Router();
 
-const { requireAuth, requireRole } = require('../middleware/auth');
+const { requireAuth } = require('../middleware/auth');
 const fcmController = require("../controller/fcm.controller");
 
+// register token (call after login or when token changes)
 router.post("/fcm/register", requireAuth, fcmController.registerFcmToken);
-router.post("/fcm/test", requireAuth, fcmController.sendTestNotification); // api test gửi notification
+
+// unregister token (call on logout)
+router.post("/fcm/unregister", requireAuth, fcmController.unregisterFcmToken);
+
+// test send (only if caller is latest owner of token)
+router.post("/fcm/test", requireAuth, fcmController.sendTestNotification);
 
 module.exports = router;

@@ -39,7 +39,7 @@ const Account = sequelize.define(
       field: "roleId",
     },
 
-    // ✅ Thêm cột deleted để hỗ trợ xóa mềm
+    // 🔥 Soft delete flag
     deleted: {
       type: DataTypes.BOOLEAN,
       allowNull: false,
@@ -59,22 +59,37 @@ const Account = sequelize.define(
       defaultValue: DataTypes.NOW,
       field: "updated_at",
     },
+
     refresh_token: {
       type: DataTypes.STRING(255),
       allowNull: true,
       field: "refresh_token",
+    },
+
+    // 🔥 Thêm cột lưu FCM token
+    fcmToken: {
+      type: DataTypes.STRING(500),
+      allowNull: true,
+      field: "fcmToken",
+    },
+
+    // 🔥 Thêm cột lastLoginAt để quyết định ai dùng thiết bị gần nhất
+    lastLoginAt: {
+      type: DataTypes.DATE,
+      allowNull: true,
+      field: "lastLoginAt",
     },
   },
   {
     tableName: "accounts",
     timestamps: false,
 
-    // Ẩn mật khẩu mặc định
+    // Ẩn mật khẩu + refresh token khi trả về API
     defaultScope: {
       attributes: { exclude: ["passwordHash", "refresh_token"] },
     },
 
-    // ✅ Scope để Passport có thể truy cập mật khẩu đầy đủ
+    // Scope chứa đầy đủ dữ liệu để phục vụ xác thực
     scopes: {
       withSecrets: {
         attributes: { exclude: [] },
