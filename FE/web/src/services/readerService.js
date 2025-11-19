@@ -51,10 +51,42 @@ export const resetReaderPassword = async (id, newPassword, token) => {
 export const restoreReader = async (id, token) => {
   const res = await api.put(
     `/reader/${id}/restore`,
-    {}, 
+    {},
     {
       headers: { Authorization: `Bearer ${token}` },
     }
   );
+  return res.data;
+};
+// // ✅ Lấy thông tin độc giả hiện tại (Reader tự xem)
+// export const getCurrentReader = async (token) => {
+//   const res = await api.get("/profile/me", {  // Đảm bảo đường dẫn là '/api/profile/me'
+//     headers: { Authorization: `Bearer ${token}` },
+//   });
+//   return res.data;
+// };
+
+
+// ✅ Cập nhật thông tin PROFILE của chính mình (chỉ Reader fields)
+export const updateCurrentReaderProfile = async (data, token) => {
+  const res = await api.put("/profile/me", data, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return res.data;
+};
+
+// ✅ Cập nhật thông tin ACCOUNT của chính mình (email, phoneNumber, password)
+export const updateCurrentAccount = async (data, token) => {
+  const res = await api.put("/profile/account", data, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return res.data;
+};
+
+// ✅ Cập nhật TOÀN BỘ thông tin (Account + Reader) - DÙNG API NÀY
+export const updateCurrentReader = async (data, token) => {
+  const res = await api.put("/profile/full", data, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
   return res.data;
 };

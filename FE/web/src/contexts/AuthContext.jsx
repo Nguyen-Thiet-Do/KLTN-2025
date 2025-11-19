@@ -66,12 +66,12 @@ export const AuthProvider = ({ children }) => {
       }
       
       // Merge account + profile để hiển thị đầy đủ thông tin
-     const userData = {
-  accountId: account.accountId,
-  roleId: account.roleId,
-  email: account.email,
-  ...profile   // chứa readerId, fullName,...
-};
+      const userData = {
+        accountId: account.accountId,
+        roleId: account.roleId,
+        email: account.email,
+        ...profile   // chứa readerId, fullName,...
+      };
 
       // Update state
       setUser(userData);
@@ -108,7 +108,6 @@ export const AuthProvider = ({ children }) => {
     
     // Update profile nếu dữ liệu là từ profile
     const profileKeys = ['avatar', 'phone', 'address', 'department', 'position'];
-    const profileData = {};
     const accountData = {};
     
     Object.keys(updatedData).forEach(key => {
@@ -130,6 +129,54 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
+  // ✅ THÊM HÀM MỚI: updateUserContext (tương tự updateUserProfile nhưng đơn giản hơn)
+  const updateUserContext = (updatedData) => {
+    // Merge dữ liệu mới vào user hiện tại
+    const newUserData = { 
+      ...user, 
+      ...updatedData 
+    };
+    
+    // Cập nhật state
+    setUser(newUserData);
+    
+    // Cập nhật sessionStorage
+    // Phân loại dữ liệu thuộc profile hay account
+    const profileKeys = [
+      'readerId', 'fullName', 'gender', 'dateOfBirth', 
+      'phoneNumber', 'cccd', 'address', 'avatar'
+    ];
+    
+    const profileData = {};
+    const accountData = {};
+    
+    Object.keys(updatedData).forEach(key => {
+      if (profileKeys.includes(key)) {
+        profileData[key] = updatedData[key];
+      } else {
+        accountData[key] = updatedData[key];
+      }
+    });
+    
+    // Cập nhật profile trong sessionStorage
+    if (Object.keys(profileData).length > 0) {
+      const existingProfile = JSON.parse(sessionStorage.getItem('profile') || '{}');
+      sessionStorage.setItem('profile', JSON.stringify({ 
+        ...existingProfile, 
+        ...profileData 
+      }));
+    }
+    
+    // Cập nhật account trong sessionStorage
+    if (Object.keys(accountData).length > 0) {
+      const existingAccount = JSON.parse(sessionStorage.getItem('account') || '{}');
+      sessionStorage.setItem('account', JSON.stringify({ 
+        ...existingAccount, 
+        ...accountData 
+      }));
+    }
+  };
+
   const value = {
     user,
     loading,
@@ -138,6 +185,7 @@ export const AuthProvider = ({ children }) => {
     logout,
     isAuthenticated: !!user,
     updateUserProfile,
+    updateUserContext, // ✅ THÊM VÀO ĐÂY
   };
 
   return (

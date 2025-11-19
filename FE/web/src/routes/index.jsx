@@ -17,6 +17,9 @@ import CartPage from "../pages/cart";
 
 import LoanHistoryPage from "../pages/reader/LoanHistoryPage";
 
+import ProfilePage from "../pages/reader/ProfilePage";
+
+import Settings from "../pages/reader/Settings";
 
 export const router = createBrowserRouter([
   {
@@ -35,6 +38,9 @@ export const router = createBrowserRouter([
       // ▼ Chi tiết tài liệu
       { path: "reader/documents/:id", element: <DocumentDetail /> },
       { path: "/reader/ebook/:id", element: <EbookReader /> },
+
+        { path: "profile", element: <ProfilePage /> }, 
+         { path: "settings", element: <Settings /> },
     ],
   },
 
