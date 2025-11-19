@@ -1,10 +1,10 @@
-// src/services/reader.service.js
+// src/service/profileService.js
 const { Reader, Account, MemberCard, CardType, LoanSlip } = require("../model");
 const { Op } = require("sequelize");
+const bcrypt = require("bcrypt");
 
 /**
  * LẤY THÔNG TIN ĐỘC GIẢ THEO ACCOUNT ID (bao gồm cả Account)
- * Bổ sung: memberCard, loanCounts (pending / waitingPickup / borrowing / activeTotal), returnedCount
  */
 const getReaderByAccountId = async (accountId) => {
   try {
@@ -15,7 +15,6 @@ const getReaderByAccountId = async (accountId) => {
           model: Account,
           required: true,
         },
-        // include memberCard cùng cardType (nếu có)
         {
           model: MemberCard,
           as: "memberCard",
@@ -34,11 +33,8 @@ const getReaderByAccountId = async (accountId) => {
 
     if (!reader) return null;
 
-    // Chuyển về object thuần
     const r = reader.get({ plain: true });
 
-    // --- Tính thống kê phiếu mượn ---
-    // Các trạng thái dùng mặc định — nếu DB của bạn dùng tên khác hãy sửa ở đây
     const BORROWING_STATUSES = ["BORROWING", "BORROWED", "OVERDUE"];
 
     const [
@@ -82,9 +78,7 @@ const getReaderByAccountId = async (accountId) => {
 
     const activeTotal = Number(pendingCount) + Number(waitingPickupCount) + Number(borrowingCount);
 
-    // --- Build response (giữ các trường cũ, thêm mới) ---
     return {
-      // ------- Reader fields -------
       readerId: r.readerId,
       accountId: r.accountId,
       roleId: r.roleId,
@@ -99,7 +93,6 @@ const getReaderByAccountId = async (accountId) => {
       created_at: r.created_at,
       updated_at: r.updated_at,
 
-      // ------- Flattened Account fields (tiện cho FE) -------
       email: r.Account?.email ?? null,
       phoneNumber: r.Account?.phoneNumber ?? null,
       status: r.Account?.status ?? null,
@@ -107,13 +100,9 @@ const getReaderByAccountId = async (accountId) => {
       created_at_account: r.Account?.created_at ?? null,
       updated_at_account: r.Account?.updated_at ?? null,
 
-      // ------- Nested Account object (nếu cần dùng nhóm) -------
       account: r.Account ?? null,
+      memberCard: r.memberCard ?? null,
 
-      // ------- Member card (nếu có) -------
-      memberCard: r.memberCard ?? null, // đã include cardType nếu có
-
-      // ------- Loan counts -------
       loanCounts: {
         pending: Number(pendingCount) || 0,
         waitingPickup: Number(waitingPickupCount) || 0,
@@ -121,7 +110,6 @@ const getReaderByAccountId = async (accountId) => {
         activeTotal: Number(activeTotal) || 0,
       },
 
-      // ------- Returned count -------
       returnedCount: Number(returnedCount) || 0,
     };
   } catch (error) {
@@ -131,8 +119,7 @@ const getReaderByAccountId = async (accountId) => {
 };
 
 /**
- * CẬP NHẬT THÔNG TIN ĐỘC GIẢ THEO ACCOUNT ID
- * - Chỉ sửa bảng Readers (được phép chỉnh)
+ * CẬP NHẬT THÔNG TIN ĐỘC GIẢ (chỉ bảng Readers)
  */
 const updateReaderByAccountId = async (accountId, data) => {
   const ALLOWED_FIELDS = ["fullName", "gender", "dateOfBirth", "address", "cccd", "note"];
@@ -164,7 +151,88 @@ const updateReaderByAccountId = async (accountId, data) => {
   }
 };
 
+/**
+ * ✅ CẬP NHẬT THÔNG TIN ACCOUNT (email, phoneNumber, password)
+ */
+const updateAccountByAccountId = async (accountId, data) => {
+  const ALLOWED_FIELDS = ["email", "phoneNumber", "password"];
+
+  try {
+    const account = await Account.findOne({
+      where: { accountId, deleted: false },
+    });
+
+    if (!account) {
+      throw new Error("Tài khoản không tồn tại");
+    }
+
+    const patch = {};
+
+    for (const key of ALLOWED_FIELDS) {
+      if (Object.prototype.hasOwnProperty.call(data, key) && data[key] !== undefined) {
+        // Hash password nếu có
+        if (key === "password" && data[key]) {
+          const saltRounds = 10;
+          patch[key] = await bcrypt.hash(data[key], saltRounds);
+        } else {
+          patch[key] = data[key];
+        }
+      }
+    }
+
+    if (Object.keys(patch).length === 0) {
+      return account;
+    }
+
+    await account.update(patch);
+
+    return account;
+  } catch (error) {
+    console.error("❌ Lỗi updateAccountByAccountId:", error);
+    throw error;
+  }
+};
+
+/**
+ * ✅ CẬP NHẬT TOÀN BỘ (Account + Reader) cùng lúc
+ */
+const updateFullProfileByAccountId = async (accountId, data) => {
+  try {
+    const accountFields = ["email", "phoneNumber", "password"];
+    const readerFields = ["fullName", "gender", "dateOfBirth", "address", "cccd", "note"];
+
+    const accountData = {};
+    const readerData = {};
+
+    Object.keys(data).forEach(key => {
+      if (accountFields.includes(key) && data[key] !== undefined) {
+        accountData[key] = data[key];
+      } else if (readerFields.includes(key) && data[key] !== undefined) {
+        readerData[key] = data[key];
+      }
+    });
+
+    // Cập nhật Account (nếu có)
+    if (Object.keys(accountData).length > 0) {
+      await updateAccountByAccountId(accountId, accountData);
+    }
+
+    // Cập nhật Reader (nếu có)
+    if (Object.keys(readerData).length > 0) {
+      await updateReaderByAccountId(accountId, readerData);
+    }
+
+    // Trả về thông tin đầy đủ
+    return await getReaderByAccountId(accountId);
+  } catch (error) {
+    console.error("❌ Lỗi updateFullProfileByAccountId:", error);
+    throw error;
+  }
+};
+
 module.exports = {
   getReaderByAccountId,
   updateReaderByAccountId,
+  updateAccountByAccountId, // ✅ THÊM
+  updateFullProfileByAccountId, // ✅ THÊM
 };

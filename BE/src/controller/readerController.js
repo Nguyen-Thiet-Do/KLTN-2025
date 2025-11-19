@@ -132,6 +132,7 @@ const getReaderById = async (req, res) => {
   }
 };
 
+
 module.exports = {
   getAllReaders,
   getReaderByAccountId,
@@ -141,4 +142,5 @@ module.exports = {
   restoreReader,
   getReaderById,
   resetReaderPassword,
+ 
 };

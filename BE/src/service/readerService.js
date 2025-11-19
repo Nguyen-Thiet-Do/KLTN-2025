@@ -241,6 +241,8 @@ const getReaderById = async (readerId) => {
   };
 };
 
+
+
 module.exports = {
   getAllReaders,
   getReaderByAccountId,
@@ -250,4 +252,5 @@ module.exports = {
   restoreReader,
   getReaderById,
   resetReaderPassword,
+ 
 };
