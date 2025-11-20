@@ -297,6 +297,111 @@ async function safeSendLoanEmail(to, mailData = {}, notificationId = null) {
   }
 }
 
+
+// -----------------------
+// FCM helper (paste vào cùng file)
+// -----------------------
+/**
+ * NOTE:
+ * - This helper lazy-requires fcm.service so you don't need to change top-level imports.
+ * - All data values will be stringified because FCM requires string values in the data payload.
+ */
+
+function stringifyDataValuesForFcm(data = {}) {
+  const out = {};
+  for (const k of Object.keys(data || {})) {
+    try {
+      out[k] = typeof data[k] === 'string' ? data[k] : JSON.stringify(data[k]);
+    } catch (e) {
+      out[k] = String(data[k]);
+    }
+  }
+  return out;
+}
+
+function buildFcmPayload({ title, body, data = {} } = {}) {
+  const payload = {};
+  if (title || body) payload.notification = { title: title || '', body: body || '' };
+  const dataStr = stringifyDataValuesForFcm(data);
+  if (Object.keys(dataStr).length) payload.data = dataStr;
+  return payload;
+}
+
+/**
+ * Send FCM to a list of accountIds.
+ * Uses fcm.service.sendToAccounts which already implements "group by token and only latest owner" logic.
+ * Returns the fcmService response object or an error object in the same shape: { success, results? | error? }.
+ */
+async function sendFcmToAccountIds(accountIds = [], payload = {}) {
+  if (!Array.isArray(accountIds) || accountIds.length === 0) {
+    return { success: false, error: new Error('No accountIds provided') };
+  }
+
+  // lazy require to avoid top-level change
+  let fcmService;
+  try {
+    fcmService = require('./fcm.service');
+  } catch (e) {
+    console.error('[FCM Helper] cannot require fcm.service:', e?.message || e);
+    return { success: false, error: e };
+  }
+
+  try {
+    const resp = await fcmService.sendToAccounts(accountIds, payload);
+    return resp || { success: false, error: new Error('No response from fcmService') };
+  } catch (err) {
+    console.error('[FCM Helper] sendFcmToAccountIds error:', err?.message || err);
+    return { success: false, error: err };
+  }
+}
+
+/**
+ * Send FCM to a readerId.
+ * - Attempt to read reader.accountId first.
+ * - If not present, try to find Account by readerId (fallback).
+ * - If no accountId found, returns { success: false, message: 'NO_ACCOUNT_FOR_READER' }.
+ *
+ * Returns whatever sendFcmToAccountIds returns.
+ */
+async function sendFcmToReader(readerId, payload = {}) {
+  if (!readerId) return { success: false, error: new Error('Missing readerId') };
+
+  try {
+    // Reader model is available in this file's scope
+    const reader = await Reader.findByPk(readerId, { attributes: ['readerId', 'accountId'] });
+
+    let accountId = reader?.accountId || null;
+
+    // fallback: try find Account by readerId if your schema supports account.readerId relation
+    if (!accountId) {
+      try {
+        const { Account } = require('../model');
+        const acct = await Account.findOne({ where: { readerId }, attributes: ['accountId'] });
+        accountId = acct?.accountId || null;
+      } catch (e) {
+        // ignore fallback errors
+        console.warn('[FCM Helper] fallback Account lookup failed:', e?.message || e);
+      }
+    }
+
+    if (!accountId) {
+      console.warn(`[FCM Helper] No accountId found for readerId=${readerId} — skipping FCM`);
+      return { success: false, message: 'NO_ACCOUNT_FOR_READER' };
+    }
+
+    // ensure payload.data values are strings (caller may pass already-built payload)
+    if (payload && payload.data) {
+      payload.data = stringifyDataValuesForFcm(payload.data);
+    }
+
+    const resp = await sendFcmToAccountIds([accountId], payload);
+    return resp;
+  } catch (err) {
+    console.error('[FCM Helper] sendFcmToReader error:', err?.message || err);
+    return { success: false, error: err };
+  }
+}
+
 /**
  * Tạo phiếu mượn -> TRỰC TIẾP BORROWING (mượn luôn)
  * (Không còn deposit khi mượn)
@@ -608,6 +713,36 @@ async function createLoanSlipService(body) {
     console.error('❌ createLoanSlipService: unexpected error when sending email', err?.message || err);
   }
 
+  // -----------------------------
+  // SEND FCM (mới thêm) — giữ nguyên flow cũ, chỉ thêm phần này
+  // -----------------------------
+  try {
+    // build payload (sử dụng helper trong cùng file)
+    const payload = buildFcmPayload({
+      title: `Phiếu mượn #${result.loanSlip.loanSlipId} đã được tạo`,
+      body: `Số lượng ${items.length}. Hạn trả: ${result.loanSlip.dueDate}.`,
+      data: {
+        type: 'LOAN_ISSUED',
+        slipId: String(result.loanSlip.loanSlipId),
+        dueDate: String(result.loanSlip.dueDate),
+        itemsCount: String(items.length),
+        notificationId: result.notificationId ? String(result.notificationId) : '',
+        link: `/loan/${result.loanSlip.loanSlipId}`
+      }
+    });
+
+    // send to reader by readerId (helper sẽ tìm accountId và gọi fcm.service)
+    const fcmResp = await sendFcmToReader(readerId, payload);
+
+    if (fcmResp && fcmResp.success) {
+      console.log('✅ createLoanSlipService: FCM sent to reader', { readerId, respSummary: Array.isArray(fcmResp.results) ? fcmResp.results.length : true });
+    } else {
+      console.warn('⚠️ createLoanSlipService: FCM send failed or no tokens', { readerId, fcmResp });
+    }
+  } catch (fcmErr) {
+    console.error('❌ createLoanSlipService: unexpected error when sending FCM', fcmErr?.message || fcmErr);
+  }
+
   // Kết quả trả về cho caller
   return {
     loanSlip: result.loanSlip,
@@ -616,6 +751,7 @@ async function createLoanSlipService(body) {
     notificationId: result.notificationId || null
   };
 }
+
 
 
 
@@ -942,6 +1078,37 @@ async function approveReservationService(payload) {
     // Không throw — email thất bại không rollback transaction
   }
 
+  // -----------------------------
+  // SEND FCM (mới thêm)
+  // -----------------------------
+  try {
+    // Build payload
+    const pickupDeadline = addDaysDateOnly(fmtToday(), 3);
+    const payload = buildFcmPayload({
+      title: `Phiếu #${txResult.loanSlipId} — Đã được duyệt, vui lòng đến nhận`,
+      body: `Vui lòng đến lấy trong vòng 3 ngày. Hạn nhận: ${pickupDeadline}.`,
+      data: {
+        type: 'RESERVATION_APPROVED',
+        slipId: String(txResult.loanSlipId),
+        pickupDeadline,
+        itemsCount: String((txResult.assignedCopyMap || []).length),
+        notificationId: txResult.notificationId ? String(txResult.notificationId) : '',
+        link: `/loan/${txResult.loanSlipId}`
+      }
+    });
+
+    // send using helper (will find accountId from reader)
+    const fcmResp = await sendFcmToReader(txResult.readerId, payload);
+
+    if (fcmResp && fcmResp.success) {
+      console.log('✅ approveReservationService: FCM sent to reader', { readerId: txResult.readerId });
+    } else {
+      console.warn('⚠️ approveReservationService: FCM send failed or no tokens', { readerId: txResult.readerId, fcmResp });
+    }
+  } catch (fcmErr) {
+    console.error('❌ approveReservationService: unexpected error when sending FCM', fcmErr?.message || fcmErr);
+  }
+
   return {
     message: 'Duyệt phiếu thành công. Phiếu đã chuyển sang WAITING_FOR_PICKUP (chờ độc giả đến lấy).',
     loanSlipId: txResult.loanSlipId,
@@ -949,6 +1116,7 @@ async function approveReservationService(payload) {
     notificationId: txResult.notificationId || null
   };
 }
+
 
 
 
@@ -1588,6 +1756,39 @@ async function pickupLoanSlipService(payload) {
     // Không throw — email thất bại không rollback cập nhật DB
   }
 
+  // -----------------------------
+  // SEND FCM (mới thêm)
+  // -----------------------------
+  try {
+    const itemsCount = (txResult.processedDetails || []).length;
+    const title = `Xác nhận mượn #${txResult.loanSlip.loanSlipId}`;
+    const body = `Bạn đã nhận ${itemsCount} tài liệu. Hạn trả: ${txResult.dueDate}.`;
+
+    const payload = buildFcmPayload({
+      title,
+      body,
+      data: {
+        type: 'PICKUP_CONFIRMED',
+        slipId: String(txResult.loanSlip.loanSlipId),
+        loanDate: String(txResult.loanDate),
+        dueDate: String(txResult.dueDate),
+        itemsCount: String(itemsCount),
+        notificationId: txResult.notificationId ? String(txResult.notificationId) : '',
+        link: `/loan/${txResult.loanSlip.loanSlipId}`
+      }
+    });
+
+    const fcmResp = await sendFcmToReader(txResult.loanSlip.readerId, payload);
+
+    if (fcmResp && fcmResp.success) {
+      console.log('✅ pickupLoanSlipService: FCM sent to reader', { readerId: txResult.loanSlip.readerId });
+    } else {
+      console.warn('⚠️ pickupLoanSlipService: FCM send failed or no tokens', { readerId: txResult.loanSlip.readerId, fcmResp });
+    }
+  } catch (fcmErr) {
+    console.error('❌ pickupLoanSlipService: unexpected error when sending FCM', fcmErr?.message || fcmErr);
+  }
+
   return {
     message: 'Xác nhận độc giả đã đến lấy: các item chuyển sang BORROWED',
     loanSlip: txResult.loanSlip,
@@ -1596,6 +1797,7 @@ async function pickupLoanSlipService(payload) {
     dueDate: txResult.dueDate
   };
 }
+
 
 // ==========================
 // XÓA 1 LOAN DETAIL
@@ -1693,9 +1895,10 @@ async function removeLoanDetailService({ slipId, loanDetailId, reason, librarian
         createdNotification = null;
       }
 
-      // Trả về thông tin để xử lý mail ngoài transaction
+      // Trả về thông tin để xử lý mail/FCM ngoài transaction
       return {
         deletedSlip: true,
+        readerId: slip.readerId, // thêm để dùng gửi FCM
         readerEmail,
         fullName,
         librarianName,
@@ -1728,6 +1931,7 @@ async function removeLoanDetailService({ slipId, loanDetailId, reason, librarian
 
     return {
       deletedSlip: false,
+      readerId: slip.readerId, // thêm để dùng gửi FCM
       readerEmail,
       fullName,
       librarianName,
@@ -1801,12 +2005,7 @@ async function removeLoanDetailService({ slipId, loanDetailId, reason, librarian
         } catch (mailErr) {
           console.error('❌ removeLoanDetailService: failed to send loan slip cancelled email', mailErr?.message || mailErr);
         }
-        return {
-          deletedSlip: true,
-          message: "Đã xóa mục cuối → phiếu đã bị xoá",
-          slipId,
-          notificationId: txResult.notificationId || null
-        };
+
       } else {
         // Gửi mail xoá 1 mục khỏi phiếu
         try {
@@ -1833,7 +2032,71 @@ async function removeLoanDetailService({ slipId, loanDetailId, reason, librarian
         } catch (mailErr) {
           console.error('❌ removeLoanDetailService: failed to send loan detail removed email', mailErr?.message || mailErr);
         }
+      }
+    } else {
+      console.warn('⚠️ removeLoanDetailService: no email available to notify reader for slip', slipId);
+    }
+  } catch (err) {
+    // Bắt mọi lỗi bất ngờ, không làm rollback
+    console.error('❌ removeLoanDetailService: unexpected error after transaction', err?.message || err);
+  }
 
+  // -----------------------------
+  // SEND FCM (mới thêm)
+  // -----------------------------
+  try {
+    // ensure we have readerId for sending FCM
+    const targetReaderId = txResult.readerId || null;
+    if (targetReaderId) {
+      const isDeletedSlip = !!txResult.deletedSlip;
+      const itemsCount = 1; // removed one item (we only remove one detail at a time)
+      const title = isDeletedSlip
+        ? `Phiếu mượn #${slipId} đã bị hủy`
+        : `Một mục trong phiếu #${slipId} đã bị hủy`;
+      const body = isDeletedSlip
+        ? `Phiếu #${slipId} đã bị hủy bởi ${txResult.librarianName}. Lý do: ${reason || '—'}.`
+        : `Một mục (${txResult.removedItem.title || ('ID:' + txResult.removedItem.documentId)}) trong phiếu #${slipId} đã bị hủy. Lý do: ${reason || '—'}.`;
+
+      const payload = buildFcmPayload({
+        title,
+        body,
+        data: {
+          type: isDeletedSlip ? 'LOAN_SLIP_CANCELLED' : 'LOAN_DETAIL_REMOVED',
+          slipId: String(slipId),
+          removedDocumentId: txResult.removedItem.documentId ? String(txResult.removedItem.documentId) : '',
+          removedDocumentCopyId: txResult.removedItem.documentCopyId ? String(txResult.removedItem.documentCopyId) : '',
+          itemsCount: String(itemsCount),
+          notificationId: txResult.notificationId ? String(txResult.notificationId) : '',
+          link: `/loan/${slipId}`
+        }
+      });
+
+      const fcmResp = await sendFcmToReader(targetReaderId, payload);
+
+      if (fcmResp && fcmResp.success) {
+        console.log('✅ removeLoanDetailService: FCM sent to reader', { readerId: targetReaderId, slipId, fcmResp });
+      } else {
+        console.warn('⚠️ removeLoanDetailService: FCM send failed or no tokens', { readerId: targetReaderId, slipId, fcmResp });
+      }
+    } else {
+      console.warn('⚠️ removeLoanDetailService: no readerId available — skipping FCM for slip', slipId);
+    }
+  } catch (fcmErr) {
+    console.error('❌ removeLoanDetailService: unexpected error when sending FCM', fcmErr?.message || fcmErr);
+  }
+
+  // ---- Cuối cùng: trả về kết quả cho caller (giữ logic cũ) ----
+  try {
+    const finalEmail = txResult.readerEmail || process.env.ADMIN_NOTIFICATION_EMAIL || null;
+    if (finalEmail) {
+      if (txResult.deletedSlip) {
+        return {
+          deletedSlip: true,
+          message: "Đã xóa mục cuối → phiếu đã bị xoá",
+          slipId,
+          notificationId: txResult.notificationId || null
+        };
+      } else {
         return {
           deletedSlip: false,
           message: "Đã xoá 1 tài liệu khỏi phiếu",
@@ -1842,7 +2105,6 @@ async function removeLoanDetailService({ slipId, loanDetailId, reason, librarian
         };
       }
     } else {
-      console.warn('⚠️ removeLoanDetailService: no email available to notify reader for slip', slipId);
       return {
         deletedSlip: txResult.deletedSlip,
         message: txResult.deletedSlip ? "Đã xóa mục cuối → phiếu đã bị xoá" : "Đã xoá 1 tài liệu khỏi phiếu",
@@ -1851,8 +2113,7 @@ async function removeLoanDetailService({ slipId, loanDetailId, reason, librarian
       };
     }
   } catch (err) {
-    // Bắt mọi lỗi bất ngờ, không làm rollback
-    console.error('❌ removeLoanDetailService: unexpected error after transaction', err?.message || err);
+    console.error('❌ removeLoanDetailService: unexpected error in final return', err?.message || err);
     return {
       deletedSlip: txResult.deletedSlip,
       message: txResult.deletedSlip ? "Đã xóa mục cuối → phiếu đã bị xoá" : "Đã xoá 1 tài liệu khỏi phiếu",
@@ -1861,6 +2122,7 @@ async function removeLoanDetailService({ slipId, loanDetailId, reason, librarian
     };
   }
 }
+
 
 
 // ==========================
@@ -1893,6 +2155,7 @@ async function cancelLoanSlipService({ slipId, reason, librarianId }) {
     // Lấy email & tên độc giả an toàn
     const readerEmail = slip.reader?.Account?.email || slip.reader?.account?.email || null;
     const fullName = slip.reader?.fullName || slip.reader?.full_name || 'Độc giả';
+    const readerId = slip.readerId || (slip.reader && (slip.reader.readerId || slip.reader.id)) || null;
 
     // Lấy tên thủ thư (thực hiện trong tx nhỏ vẫn ok)
     let librarianName = 'Thủ thư';
@@ -1966,6 +2229,7 @@ async function cancelLoanSlipService({ slipId, reason, librarianId }) {
     }
 
     return {
+      readerId, // thêm để dùng gửi FCM
       readerEmail,
       fullName,
       librarianName,
@@ -2038,12 +2302,48 @@ async function cancelLoanSlipService({ slipId, reason, librarianId }) {
     console.error('❌ cancelLoanSlipService: unexpected error after transaction', err?.message || err);
   }
 
+  // -----------------------------
+  // SEND FCM (mới thêm)
+  // -----------------------------
+  try {
+    const targetReaderId = txResult.readerId || null;
+    if (targetReaderId) {
+      const title = `Phiếu mượn #${slipId} đã bị hủy`;
+      const body = `Phiếu #${slipId} đã bị hủy bởi ${txResult.librarianName}. Lý do: ${reason || '—'}.`;
+
+      const payload = buildFcmPayload({
+        title,
+        body,
+        data: {
+          type: 'LOAN_SLIP_CANCELLED',
+          slipId: String(slipId),
+          itemsCount: String((txResult.itemsForEmail || []).length),
+          notificationId: txResult.notificationId ? String(txResult.notificationId) : '',
+          link: `/loan/${slipId}`
+        }
+      });
+
+      const fcmResp = await sendFcmToReader(targetReaderId, payload);
+
+      if (fcmResp && fcmResp.success) {
+        console.log('✅ cancelLoanSlipService: FCM sent to reader', { readerId: targetReaderId, slipId, fcmResp });
+      } else {
+        console.warn('⚠️ cancelLoanSlipService: FCM send failed or no tokens', { readerId: targetReaderId, slipId, fcmResp });
+      }
+    } else {
+      console.warn('⚠️ cancelLoanSlipService: no readerId available — skipping FCM for slip', slipId);
+    }
+  } catch (fcmErr) {
+    console.error('❌ cancelLoanSlipService: unexpected error when sending FCM', fcmErr?.message || fcmErr);
+  }
+
   return {
     message: "Đã hủy phiếu thành công",
     slipId,
     notificationId: txResult.notificationId || null
   };
 }
+
 
 /**
  * HỦY PHIẾU ĐẶT TRƯỚC (PENDING)
@@ -2274,8 +2574,44 @@ async function cancelReservationService({ loanSlipId, reason, librarianId }) {
     console.error('❌ cancelReservationService: unexpected error after transaction', err?.message || err);
   }
 
+  // -----------------------------
+  // SEND FCM (mới thêm)
+  // -----------------------------
+  try {
+    const targetReaderId = txResult.readerId || null;
+    if (targetReaderId) {
+      const title = `Phiếu đặt trước #${txResult.slipId} đã bị hủy`;
+      const body = `Phiếu đặt trước #${txResult.slipId} đã bị hủy${txResult.librarianName ? ` bởi ${txResult.librarianName}` : ''}. Lý do: ${txResult.reason || '—'}.`;
+
+      const payload = buildFcmPayload({
+        title,
+        body,
+        data: {
+          type: 'RESERVATION_CANCELLED',
+          slipId: String(txResult.slipId),
+          itemsCount: String((txResult.itemsForEmail || []).length),
+          notificationId: txResult.notificationId ? String(txResult.notificationId) : '',
+          link: `/loan/${txResult.slipId}`
+        }
+      });
+
+      const fcmResp = await sendFcmToReader(targetReaderId, payload);
+
+      if (fcmResp && fcmResp.success) {
+        console.log('✅ cancelReservationService: FCM sent to reader', { readerId: targetReaderId, slipId: txResult.slipId });
+      } else {
+        console.warn('⚠️ cancelReservationService: FCM send failed or no tokens', { readerId: targetReaderId, slipId: txResult.slipId, fcmResp });
+      }
+    } else {
+      console.warn('⚠️ cancelReservationService: no readerId available — skipping FCM for slip', txResult.slipId);
+    }
+  } catch (fcmErr) {
+    console.error('❌ cancelReservationService: unexpected error when sending FCM', fcmErr?.message || fcmErr);
+  }
+
   return { message: 'Đã hủy phiếu đặt trước thành công', slipId: txResult.slipId, notificationId: txResult.notificationId || null };
 }
+
 
 module.exports = {
   getAllLoanSlipsService,

@@ -1,4 +1,3 @@
-// src/controller/fcm.controller.js
 const { Account } = require("../model");
 const fcmService = require("../service/fcm.service");
 const { Op } = require("sequelize");
@@ -24,6 +23,21 @@ async function registerFcmToken(req, res) {
         account.fcmToken = fcmToken;
         account.lastLoginAt = new Date();
         await account.save();
+
+        // --- Xóa token này khỏi các account khác (nếu có) để DB sạch hơn ---
+        try {
+            await Account.update(
+                { fcmToken: null },
+                {
+                    where: {
+                        fcmToken,
+                        accountId: { [Op.ne]: accountId }
+                    }
+                }
+            );
+        } catch (e) {
+            console.error("[FCM] Error clearing duplicate tokens for other accounts:", e?.message || e);
+        }
 
         return res.json({ success: true, message: "Token saved" });
     } catch (err) {

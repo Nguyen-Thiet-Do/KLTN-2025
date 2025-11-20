@@ -1,4 +1,3 @@
-// src/service/fcm.service.js
 const { messaging } = require("../config/firebase");
 const { Account } = require("../model");
 const { Op } = require("sequelize");
@@ -44,13 +43,19 @@ async function sendMulticast(tokens, payload) {
                 }
             }
         });
+
         if (toRemove.length) {
             try {
-                await Account.update({ fcmToken: null }, { where: { fcmToken: toRemove } });
+                console.log(`[FCM] Clearing ${toRemove.length} invalid token(s) from DB`);
+                await Account.update(
+                    { fcmToken: null },
+                    { where: { fcmToken: { [Op.in]: toRemove } } }
+                );
             } catch (e) {
                 console.error("[FCM] Error clearing invalid tokens in DB:", e?.message || e);
             }
         }
+
         return { success: true, resp };
     } catch (err) {
         console.error("[FCM] sendMulticast error:", err?.message || err);
@@ -118,6 +123,8 @@ async function sendToAccounts(accountIds = [], payload) {
         }
 
         if (!tokens.length) return { success: false, message: "No tokens to send" };
+
+        console.log(`[FCM] Sending notifications to ${tokens.length} unique token(s)`);
 
         // send in chunks of 500
         const chunk = (arr, size) => {
