@@ -255,6 +255,36 @@ routeApi.get('/', (req, res) => {
           },
           {
             method: 'POST',
+            path: '/api/fcm/register',
+            description: 'Đăng ký / cập nhật FCM token cho tài khoản hiện tại',
+            detailedDescription: 'Gọi khi user đăng nhập hoặc khi Firebase trả về token mới (onNewToken). Endpoint lưu token vào trường Account.fcmToken, cập nhật lastLoginAt cho account hiện tại để đánh dấu là chủ sở hữu mới nhất của token. Nếu token trùng với token đã lưu ở account khác, server sẽ xóa token đó khỏi các account khác để tránh gửi nhầm thông báo.',
+            auth: true,
+            body: {
+              fcmToken: 'string (required) - Firebase Cloud Messaging token của thiết bị'
+            },
+            response: {
+              success: {
+                success: true,
+                message: 'Token saved'
+              },
+              error: {
+                'MISSING_FCM_TOKEN': 'Thiếu fcmToken trong body',
+                'ACCOUNT_NOT_FOUND': 'Không tìm thấy account (user không hợp lệ)',
+                'SERVER_ERROR': 'Lỗi server khi lưu token'
+              }
+            },
+            example: {
+              request: {
+                fcmToken: 'fAhK2Nz8XyZ123ABC...'
+              },
+              response: {
+                success: true,
+                message: 'Token saved'
+              }
+            }
+          },
+          {
+            method: 'POST',
             path: '/api/auth/refresh-token',
             description: 'Làm mới access token khi hết hạn',
             detailedDescription: 'Endpoint này cho phép làm mới access token mà không cần đăng nhập lại. Gửi refresh token còn hiệu lực (7 ngày) để nhận access token và refresh token mới. Hệ thống sẽ vô hiệu hóa refresh token cũ và lưu refresh token mới vào database.',

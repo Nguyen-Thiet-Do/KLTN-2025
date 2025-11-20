@@ -31,6 +31,7 @@ const statisticRoutes = require('./route/statisticRoutes');
 const payosRoutes = require('./route/payos.routes');
 const notificationRoutes = require('./route/notificationRoutes');
 const debugJobRoutes = require("./route/debugJob.routes");
+const fcmRoutes = require('./route/fcm.api');
 
 
 const nodemailer = require('nodemailer');
@@ -97,7 +98,7 @@ app.use('/api/payos', payosRoutes);
 app.use('/pay', payosRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use("/api/debug", debugJobRoutes);
-
+app.use('/api/fcm', fcmRoutes);
 
 app.use("/api/cart", cartRoutes);
 

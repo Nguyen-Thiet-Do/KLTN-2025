@@ -6,12 +6,12 @@ const { requireAuth } = require('../middleware/auth');
 const fcmController = require("../controller/fcm.controller");
 
 // register token (call after login or when token changes)
-router.post("/fcm/register", requireAuth, fcmController.registerFcmToken);
+router.post("/register", requireAuth, fcmController.registerFcmToken);
 
 // unregister token (call on logout)
-router.post("/fcm/unregister", requireAuth, fcmController.unregisterFcmToken);
+router.post("/unregister", requireAuth, fcmController.unregisterFcmToken);
 
 // test send (only if caller is latest owner of token)
-router.post("/fcm/test", requireAuth, fcmController.sendTestNotification);
+router.post("/test", requireAuth, fcmController.sendTestNotification);
 
 module.exports = router;
