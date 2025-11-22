@@ -13,7 +13,8 @@ const {
   Payment,
   CardType,
   MemberCard, // <- thêm model MemberCard
-  Notification
+  Notification,
+  Account,
 } = require('../model');
 
 const MAX_ITEMS_PER_SLIP = 3;
@@ -1601,114 +1602,111 @@ async function pickupLoanSlipService(payload) {
   } = payload || {};
 
   if (!loanSlipId || !librarianId) {
-    const e = new Error('Thiếu loanSlipId hoặc librarianId');
-    e.status = 400; throw e;
+    const e = new Error('Thiếu loanSlipId hoặc librarianId'); e.status = 400; throw e;
   }
 
-  // validate pickupDate/dueDate format
   const pd = parseDateOnly(pickupDate);
   if (!pd) { const e = new Error('pickupDate không hợp lệ (YYYY-MM-DD)'); e.status = 400; throw e; }
 
-  let finalDueDate = dueDate;
-  if (!finalDueDate) {
-    finalDueDate = addDaysDateOnly(pickupDate, 30); // default +30 ngày nếu FE không gửi
-  }
+  const finalDueDate = dueDate || addDaysDateOnly(pickupDate, 30);
   const dd = parseDateOnly(finalDueDate);
   if (!dd) { const e = new Error('dueDate không hợp lệ (YYYY-MM-DD)'); e.status = 400; throw e; }
 
-  // đảm bảo dueDate > pickupDate
   if (!(daysDiff(pickupDate, finalDueDate) > 0)) {
-    const e = new Error('Hạn trả (dueDate) phải sau ngày nhận (pickupDate)');
-    e.status = 400; throw e;
+    const e = new Error('Hạn trả (dueDate) phải sau ngày nhận (pickupDate)'); e.status = 400; throw e;
   }
 
-  // Transactional update
   const txResult = await sequelize.transaction(async (t) => {
-    const slip = await LoanSlip.findByPk(Number(loanSlipId), { transaction: t, lock: t.LOCK.UPDATE });
+    const slip = await LoanSlip.findByPk(Number(loanSlipId), {
+      transaction: t,
+      lock: t.LOCK.UPDATE,
+      include: [
+        { model: Reader, include: [{ model: Account }] },
+        { model: LoanDetail, as: 'details', include: [{ model: DocumentCopy, include: [{ model: Document }] }] }
+      ]
+    });
+
     if (!slip) { const e = new Error('Không tìm thấy phiếu'); e.status = 404; throw e; }
 
-    if (String(slip.status || '').toUpperCase() !== 'WAITING_FOR_PICKUP') {
-      const e = new Error('Chỉ có thể pickup khi phiếu ở trạng thái WAITING_FOR_PICKUP');
-      e.status = 409; throw e;
+    if (String((slip.status || '').toUpperCase()) !== 'WAITING_FOR_PICKUP') {
+      const e = new Error('Chỉ có thể pickup khi phiếu ở trạng thái WAITING_FOR_PICKUP'); e.status = 409; throw e;
     }
 
-    // Lấy loanDetails đang chờ lấy (có documentCopyId) — nếu items được truyền thì filter theo items
+    // Build where for loan details to pickup
     const whereDetails = { loanSlipId: slip.loanSlipId, status: 'WAITING_FOR_PICKUP' };
-    if (Array.isArray(items) && items.length) {
-      whereDetails.loanDetailId = items.map(Number);
-    }
+    if (Array.isArray(items) && items.length) whereDetails.loanDetailId = items.map(Number);
 
     const waitingDetails = await LoanDetail.findAll({
       where: whereDetails,
-      include: [{ model: DocumentCopy, attributes: ['documentCopyId', 'status', 'conditionNote', 'conditionGrade'], include: [{ model: Document, attributes: ['documentId', 'title', 'coverPrice'] }] }],
+      include: [{ model: DocumentCopy, include: [{ model: Document }] }],
       transaction: t,
       lock: t.LOCK.UPDATE
     });
 
     if (!waitingDetails.length) {
-      const e = new Error('Không có item nào ở trạng thái WAITING_FOR_PICKUP để pickup');
-      e.status = 400; throw e;
+      const e = new Error('Không có item nào ở trạng thái WAITING_FOR_PICKUP để pickup'); e.status = 400; throw e;
     }
 
-    // kiểm tra tất cả các dòng phải có documentCopyId và bản sao đang ON_HOLD
+    // Validate copies
     for (const d of waitingDetails) {
       if (!d.documentCopyId) {
         const e = new Error(`LoanDetail #${d.loanDetailId} chưa được gán bản sao`); e.status = 409; throw e;
       }
       const cp = d.DocumentCopy;
-      if (!cp) {
-        const e = new Error(`Không tìm thấy DocumentCopy #${d.documentCopyId}`); e.status = 404; throw e;
-      }
-      if (String(cp.status || '').toUpperCase() !== 'ON_HOLD') {
+      if (!cp) { const e = new Error(`Không tìm thấy DocumentCopy #${d.documentCopyId}`); e.status = 404; throw e; }
+      if (String((cp.status || '').toUpperCase()) !== 'ON_HOLD') {
         const e = new Error(`Bản sao #${cp.documentCopyId} không ở trạng thái ON_HOLD (hiện tại: ${cp.status})`); e.status = 409; throw e;
       }
     }
 
-    // cập nhật slip: loanDate (ngày mượn) nếu không preserveLoanDate
-    const updateSlipData = {
-      librarianId: Number(librarianId),
-      dueDate: finalDueDate,
-      status: 'BORROWING'
-    };
+    // Update slip
+    const updateSlipData = { librarianId: Number(librarianId), dueDate: finalDueDate, status: 'BORROWING' };
     if (!preserveLoanDate) updateSlipData.loanDate = pickupDate;
     await slip.update(updateSlipData, { transaction: t });
 
-    // cập nhật từng detail -> BORROWED và DocumentCopy -> BORROWED
+    // Process each detail: set BORROWED, update DocumentCopy
     const processedDetails = [];
     for (const d of waitingDetails) {
       const cp = d.DocumentCopy;
       const borrowCond = sanitizeBorrowCondition(cp?.conditionNote ?? cp?.conditionGrade ?? null);
 
-      await d.update({
-        status: 'BORROWED',
-        conditionBorrow: borrowCond,
-        // giữ note/returnDate...
-      }, { transaction: t });
-
-      await DocumentCopy.update(
-        { status: 'BORROWED' },
-        { where: { documentCopyId: d.documentCopyId }, transaction: t }
-      );
+      await d.update({ status: 'BORROWED', conditionBorrow: borrowCond }, { transaction: t });
+      await DocumentCopy.update({ status: 'BORROWED' }, { where: { documentCopyId: d.documentCopyId }, transaction: t });
 
       processedDetails.push({
         loanDetailId: d.loanDetailId,
         documentCopyId: d.documentCopyId,
-        documentId: d.DocumentCopy?.Document?.documentId || null,
-        title: d.DocumentCopy?.Document?.title || null
+        documentId: cp?.Document?.documentId || null,
+        title: cp?.Document?.title || null
       });
     }
 
-    // Lấy email reader (nếu có) để gửi mail sau transaction
+    // Reader email if available
     let readerEmail = null;
     try {
-      const reader = await Reader.findByPk(slip.readerId, { transaction: t, lock: t.LOCK.UPDATE });
+      const reader = slip.Reader || (await Reader.findByPk(slip.readerId, { transaction: t }));
       if (reader?.accountId) {
-        const Account = require('../model').Account;
-        const account = await Account.findByPk(reader.accountId, { attributes: ['email'], transaction: t, lock: t.LOCK.UPDATE });
+        const account = await Account.findByPk(reader.accountId, { attributes: ['email'], transaction: t });
         readerEmail = account?.email || null;
       }
     } catch (err) {
       readerEmail = null;
+    }
+
+    // Create notification (non-critical)
+    let createdNotification = null;
+    try {
+      createdNotification = await createNotificationSafe({
+        readerId: slip.readerId,
+        type: 'PICKUP_CONFIRMED',
+        title: `Phiếu #${slip.loanSlipId} — Đã nhận`,
+        content: `Bạn đã nhận ${processedDetails.length} tài liệu. Hạn trả: ${finalDueDate}.`,
+        priority: 'NORMAL',
+        link: `/loan/${slip.loanSlipId}`,
+        isRead: 0
+      }, t);
+    } catch (nerr) {
+      createdNotification = null;
     }
 
     return {
@@ -1716,57 +1714,36 @@ async function pickupLoanSlipService(payload) {
       processedDetails,
       readerEmail,
       loanDate: (!preserveLoanDate ? pickupDate : slip.loanDate),
-      dueDate: finalDueDate
+      dueDate: finalDueDate,
+      notificationId: createdNotification ? (createdNotification.notificationID || createdNotification.id || null) : null
     };
-  }); // end transaction
+  }); // end tx
 
-  // Gửi email xác nhận sau khi transaction hoàn tất (không rollback DB nếu email thất bại)
+  // send email (non-critical)
   try {
     const finalEmail = txResult.readerEmail || process.env.ADMIN_NOTIFICATION_EMAIL || null;
     if (finalEmail) {
-      // Lấy tên reader để gửi
       const reader = await Reader.findByPk(txResult.loanSlip.readerId);
       const readerName = reader?.fullName || 'Độc giả';
-
-      // Tạo items array cho mail template
-      const itemsForMail = txResult.processedDetails.map(d => ({
-        title: d.title,
-        documentId: d.documentId,
-        documentCopyId: d.documentCopyId
-      }));
-
       await mailService.sendLoanIssuedEmail(finalEmail, {
         fullName: readerName,
         slipId: txResult.loanSlip.loanSlipId,
-        items: itemsForMail,
+        items: txResult.processedDetails,
         loanDate: txResult.loanDate,
         dueDate: txResult.dueDate,
-        pickUpLocation: process.env.LIBRARY_ADDRESS,
-        supportEmail: process.env.SUPPORT_EMAIL,
-        supportPhone: process.env.SUPPORT_PHONE,
         libraryName: process.env.LIBRARY_NAME
       });
-
-      console.log('✅ Pickup confirmation email sent to', finalEmail);
-    } else {
-      console.warn('⚠️ No email to notify for pickup (loanSlipId=', txResult.loanSlip.loanSlipId, ')');
     }
   } catch (err) {
-    console.error('❌ Failed to send pickup confirmation email for slip', txResult.loanSlip.loanSlipId, err?.message || err);
-    // Không throw — email thất bại không rollback cập nhật DB
+    console.error('pickupLoanSlipService: send email failed', err?.message || err);
   }
 
-  // -----------------------------
-  // SEND FCM (mới thêm)
-  // -----------------------------
+  // FCM (non-critical)
   try {
     const itemsCount = (txResult.processedDetails || []).length;
-    const title = `Xác nhận mượn #${txResult.loanSlip.loanSlipId}`;
-    const body = `Bạn đã nhận ${itemsCount} tài liệu. Hạn trả: ${txResult.dueDate}.`;
-
     const payload = buildFcmPayload({
-      title,
-      body,
+      title: `Xác nhận mượn #${txResult.loanSlip.loanSlipId}`,
+      body: `Bạn đã nhận ${itemsCount} tài liệu. Hạn trả: ${txResult.dueDate}.`,
       data: {
         type: 'PICKUP_CONFIRMED',
         slipId: String(txResult.loanSlip.loanSlipId),
@@ -1777,16 +1754,9 @@ async function pickupLoanSlipService(payload) {
         link: `/loan/${txResult.loanSlip.loanSlipId}`
       }
     });
-
-    const fcmResp = await sendFcmToReader(txResult.loanSlip.readerId, payload);
-
-    if (fcmResp && fcmResp.success) {
-      console.log('✅ pickupLoanSlipService: FCM sent to reader', { readerId: txResult.loanSlip.readerId });
-    } else {
-      console.warn('⚠️ pickupLoanSlipService: FCM send failed or no tokens', { readerId: txResult.loanSlip.readerId, fcmResp });
-    }
+    await sendFcmToReader(txResult.loanSlip.readerId, payload);
   } catch (fcmErr) {
-    console.error('❌ pickupLoanSlipService: unexpected error when sending FCM', fcmErr?.message || fcmErr);
+    console.error('pickupLoanSlipService: send FCM failed', fcmErr?.message || fcmErr);
   }
 
   return {
@@ -1799,329 +1769,131 @@ async function pickupLoanSlipService(payload) {
 }
 
 
+
 // ==========================
 // XÓA 1 LOAN DETAIL
 // ==========================
 async function removeLoanDetailService({ slipId, loanDetailId, reason, librarianId }) {
-  // ensure models
-  const Notification = require('../model').Notification || require('../model').Notifications || null;
-  const Account = require('../model').Account || null;
+  if (!slipId || !loanDetailId) {
+    const e = new Error('Thiếu slipId hoặc loanDetailId'); e.status = 400; throw e;
+  }
 
-  // store result info from transaction
-  let txResult = null;
-  let createdNotification = null;
-
-  // transaction for DB changes
-  txResult = await sequelize.transaction(async (t) => {
+  const txResult = await sequelize.transaction(async (t) => {
     const slip = await LoanSlip.findByPk(slipId, {
       include: [
-        { model: Reader, as: "reader", include: [{ model: Account }] },
-        { model: LoanDetail, as: "loanDetails", include: [{ model: DocumentCopy, include: [{ model: Document }] }] }
+        { model: Reader, include: [{ model: Account }] },
+        { model: LoanDetail, as: 'details', include: [{ model: DocumentCopy, include: [{ model: Document }] }] }
       ],
       transaction: t,
       lock: t.LOCK.UPDATE
     });
 
-    if (!slip) {
-      const e = new Error("Không tìm thấy phiếu");
-      e.status = 404; throw e;
-    }
+    if (!slip) { const e = new Error('Không tìm thấy phiếu'); e.status = 404; throw e; }
 
-    // Tìm target bằng loanDetailId (lưu ý: tuỳ tên PK của bạn có thể là loanDetailId hoặc id)
-    const target = slip.loanDetails.find(d => String(d.loanDetailId || d.id) === String(loanDetailId));
-    if (!target) {
-      const e = new Error("Không tìm thấy tài liệu trong phiếu");
-      e.status = 404; throw e;
-    }
+    const target = (slip.details || []).find(d => String(d.loanDetailId || d.id) === String(loanDetailId));
+    if (!target) { const e = new Error('Không tìm thấy tài liệu trong phiếu'); e.status = 404; throw e; }
 
-    // Cập nhật lý do (note) trước khi xóa
+    // lưu lý do
     target.note = reason || null;
     await target.save({ transaction: t });
 
-    // Lưu thông tin item để dùng cho email/notification sau khi xóa
     const removedItem = {
-      title: target.DocumentCopy?.Document?.title || target.documentCopy?.document?.title || null,
-      documentId: target.DocumentCopy?.Document?.documentId || target.documentCopy?.documentId || null,
-      documentCopyId: target.documentCopyId || target.documentCopy?.documentCopyId || null,
+      title: target.DocumentCopy?.Document?.title || null,
+      documentId: target.DocumentCopy?.Document?.documentId || null,
+      documentCopyId: target.documentCopyId || null,
       loanDetailId: target.loanDetailId || target.id || null
     };
 
-    // Xóa chi tiết
+    // trả bản sao về AVAILABLE nếu cần
+    try {
+      if (target.documentCopyId) {
+        await DocumentCopy.update({ status: 'AVAILABLE' }, { where: { documentCopyId: target.documentCopyId }, transaction: t });
+      }
+    } catch (err) {
+      console.warn('removeLoanDetailService: cannot set DocumentCopy AVAILABLE', err?.message || err);
+    }
+
+    // xoá chi tiết
     await target.destroy({ transaction: t });
 
-    // Lấy email người đọc (nếu có)
-    const readerEmail = slip.reader?.Account?.email || slip.reader?.account?.email || null;
-    const fullName = slip.reader?.fullName || slip.reader?.full_name || 'Độc giả';
-
-    // Lấy tên thủ thư (ngoài transaction nếu cần hôm nay, nhưng truy vấn nhỏ ok)
-    let librarianName = 'Thủ thư';
-    try {
-      if (Account && librarianId) {
-        const libAcc = await Account.findByPk(librarianId, { transaction: t });
-        librarianName = libAcc?.fullName || libAcc?.full_name || librarianName;
-      }
-    } catch (e) {
-      // ignore, không phá TX
-    }
-
-    // Kiểm số lượng còn lại
+    // đếm còn lại
     const remain = await LoanDetail.count({ where: { loanSlipId: slipId }, transaction: t });
 
-    // Nếu còn 0 mục → xóa phiếu & tạo notification (inside tx, nhưng không throw nếu notification fail)
-    if (remain === 0) {
-      await slip.destroy({ transaction: t });
-
-      // Tạo notification (không throw nếu fail)
-      const notifData = {
+    // tạo notification không làm lỗi transaction
+    let createdNotification = null;
+    try {
+      createdNotification = await createNotificationSafe({
         readerId: slip.readerId,
-        type: 'LOAN_SLIP_CANCELLED',
-        title: `Phiếu mượn #${slipId} đã bị hủy`,
-        content: `Phiếu #${slipId} đã bị hủy bởi ${librarianName}. Lý do: ${reason || '—'}.`,
-        priority: 'HIGH',
+        type: 'LOAN_DETAIL_REMOVED',
+        title: `Một tài liệu đã bị xoá khỏi phiếu #${slipId}`,
+        content: `Tài liệu "${removedItem.title || ''}" đã bị xoá. Lý do: ${reason || '—'}.`,
+        priority: 'NORMAL',
         link: `/loan/${slipId}`,
         isRead: 0
-      };
-
-      // Nếu bạn đã có helper createNotificationSafe, gọi helper, nếu không thì tạo trực tiếp nhưng bắt lỗi
-      try {
-        if (typeof createNotificationSafe === 'function') {
-          createdNotification = await createNotificationSafe(notifData, t);
-        } else if (Notification) {
-          createdNotification = await Notification.create(notifData, { transaction: t });
-        }
-      } catch (errNotif) {
-        // không throw, chỉ log (không được rollback vì đây là non-critical)
-        console.warn('⚠️ removeLoanDetailService: failed to create notification inside tx', errNotif?.message || errNotif);
-        createdNotification = null;
-      }
-
-      // Trả về thông tin để xử lý mail/FCM ngoài transaction
-      return {
-        deletedSlip: true,
-        readerId: slip.readerId, // thêm để dùng gửi FCM
-        readerEmail,
-        fullName,
-        librarianName,
-        removedItem,
-        notificationId: createdNotification ? (createdNotification.notificationID || createdNotification.id || null) : null
-      };
-    }
-
-    // Nếu vẫn còn mục khác → tạo notification "loan detail removed" (inside tx, non-critical)
-    const notifData = {
-      readerId: slip.readerId,
-      type: 'LOAN_DETAIL_REMOVED',
-      title: `Một mục trong phiếu #${slipId} đã bị hủy`,
-      content: `Một mục (${removedItem.title || ('ID:' + removedItem.documentId)}) trong phiếu #${slipId} đã bị hủy bởi ${librarianName}. Lý do: ${reason || '—'}.`,
-      priority: 'NORMAL',
-      link: `/loan/${slipId}`,
-      isRead: 0
-    };
-
-    try {
-      if (typeof createNotificationSafe === 'function') {
-        createdNotification = await createNotificationSafe(notifData, t);
-      } else if (Notification) {
-        createdNotification = await Notification.create(notifData, { transaction: t });
-      }
-    } catch (errNotif) {
-      console.warn('⚠️ removeLoanDetailService: failed to create notification inside tx', errNotif?.message || errNotif);
+      }, t);
+    } catch (nerr) {
       createdNotification = null;
     }
 
     return {
-      deletedSlip: false,
-      readerId: slip.readerId, // thêm để dùng gửi FCM
-      readerEmail,
-      fullName,
-      librarianName,
+      deletedSlip: remain === 0,
+      readerId: slip.readerId,
+      readerEmail: slip.Reader?.Account?.email || slip.reader?.Account?.email || null,
+      fullName: slip.Reader?.fullName || slip.reader?.fullName || 'Độc giả',
       removedItem,
+      librarianId,
       notificationId: createdNotification ? (createdNotification.notificationID || createdNotification.id || null) : null
     };
-  }); // end transaction
+  }); // end tx
 
-  // ---- Sau transaction: nếu notification chưa được tạo trong tx, thử tạo lại ngoài tx (không throw) ----
-  try {
-    if (!txResult.notificationId) {
-      const Notification = require('../model').Notification || require('../model').Notifications || null;
-      const notifDataRetry = {
-        readerId: txResult.readerId || null,
-        type: txResult.deletedSlip ? 'LOAN_SLIP_CANCELLED' : 'LOAN_DETAIL_REMOVED',
-        title: txResult.deletedSlip ? `Phiếu mượn #${slipId} đã bị hủy` : `Một mục trong phiếu #${slipId} đã bị hủy`,
-        content: txResult.deletedSlip
-          ? `Phiếu #${slipId} đã bị hủy. Lý do: ${reason || '—'}.`
-          : `Một mục (${txResult.removedItem.title || ('ID:' + txResult.removedItem.documentId)}) trong phiếu #${slipId} đã bị hủy. Lý do: ${reason || '—'}.`,
-        priority: txResult.deletedSlip ? 'HIGH' : 'NORMAL',
-        link: `/loan/${slipId}`,
-        isRead: 0
-      };
-
-      if (typeof createNotificationSafe === 'function') {
-        const retryNotif = await createNotificationSafe(notifDataRetry, null);
-        if (retryNotif) txResult.notificationId = retryNotif.notificationID || retryNotif.id || null;
-      } else if (Notification) {
-        try {
-          const retryNotif = await Notification.create(notifDataRetry);
-          if (retryNotif) txResult.notificationId = retryNotif.notificationID || retryNotif.id || null;
-        } catch (err) {
-          console.warn('⚠️ removeLoanDetailService: retry create notification failed', err?.message || err);
-        }
-      }
-    }
-  } catch (err) {
-    console.warn('⚠️ removeLoanDetailService: unexpected error while retrying notification', err?.message || err);
-  }
-
-  // ---- Sau transaction: gửi email tương ứng (không throw nếu lỗi) ----
+  // gửi email (non-critical)
   try {
     const finalEmail = txResult.readerEmail || process.env.ADMIN_NOTIFICATION_EMAIL || null;
     if (finalEmail) {
-      if (txResult.deletedSlip) {
-        // Gửi mail hủy toàn bộ phiếu
-        try {
-          await mailService.sendLoanSlipCancelledEmail(finalEmail, {
-            fullName: txResult.fullName,
-            slipId,
-            items: [
-              {
-                title: txResult.removedItem.title,
-                documentId: txResult.removedItem.documentId,
-                documentCopyId: txResult.removedItem.documentCopyId
-              }
-            ],
-            reason,
-            librarianName: txResult.librarianName
-          });
-          // cập nhật emailAt nếu có notificationId
-          if (txResult.notificationId && Notification) {
-            try {
-              const pk = Notification.primaryKeyAttribute || 'notificationID';
-              const where = {}; where[pk] = txResult.notificationId;
-              await Notification.update({ emailAt: new Date() }, { where });
-            } catch (updErr) {
-              console.warn('⚠️ removeLoanDetailService: cannot update notification.emailAt', updErr?.message || updErr);
-            }
-          }
-        } catch (mailErr) {
-          console.error('❌ removeLoanDetailService: failed to send loan slip cancelled email', mailErr?.message || mailErr);
-        }
-
-      } else {
-        // Gửi mail xoá 1 mục khỏi phiếu
-        try {
-          await mailService.sendLoanDetailRemovedEmail(finalEmail, {
-            fullName: txResult.fullName,
-            slipId,
-            loanDetailId: txResult.removedItem.loanDetailId,
-            title: txResult.removedItem.title,
-            documentId: txResult.removedItem.documentId,
-            documentCopyId: txResult.removedItem.documentCopyId,
-            reason,
-            librarianName: txResult.librarianName
-          });
-          // cập nhật emailAt nếu có notificationId
-          if (txResult.notificationId && Notification) {
-            try {
-              const pk = Notification.primaryKeyAttribute || 'notificationID';
-              const where = {}; where[pk] = txResult.notificationId;
-              await Notification.update({ emailAt: new Date() }, { where });
-            } catch (updErr) {
-              console.warn('⚠️ removeLoanDetailService: cannot update notification.emailAt', updErr?.message || updErr);
-            }
-          }
-        } catch (mailErr) {
-          console.error('❌ removeLoanDetailService: failed to send loan detail removed email', mailErr?.message || mailErr);
-        }
-      }
-    } else {
-      console.warn('⚠️ removeLoanDetailService: no email available to notify reader for slip', slipId);
-    }
-  } catch (err) {
-    // Bắt mọi lỗi bất ngờ, không làm rollback
-    console.error('❌ removeLoanDetailService: unexpected error after transaction', err?.message || err);
-  }
-
-  // -----------------------------
-  // SEND FCM (mới thêm)
-  // -----------------------------
-  try {
-    // ensure we have readerId for sending FCM
-    const targetReaderId = txResult.readerId || null;
-    if (targetReaderId) {
-      const isDeletedSlip = !!txResult.deletedSlip;
-      const itemsCount = 1; // removed one item (we only remove one detail at a time)
-      const title = isDeletedSlip
-        ? `Phiếu mượn #${slipId} đã bị hủy`
-        : `Một mục trong phiếu #${slipId} đã bị hủy`;
-      const body = isDeletedSlip
-        ? `Phiếu #${slipId} đã bị hủy bởi ${txResult.librarianName}. Lý do: ${reason || '—'}.`
-        : `Một mục (${txResult.removedItem.title || ('ID:' + txResult.removedItem.documentId)}) trong phiếu #${slipId} đã bị hủy. Lý do: ${reason || '—'}.`;
-
-      const payload = buildFcmPayload({
-        title,
-        body,
-        data: {
-          type: isDeletedSlip ? 'LOAN_SLIP_CANCELLED' : 'LOAN_DETAIL_REMOVED',
-          slipId: String(slipId),
-          removedDocumentId: txResult.removedItem.documentId ? String(txResult.removedItem.documentId) : '',
-          removedDocumentCopyId: txResult.removedItem.documentCopyId ? String(txResult.removedItem.documentCopyId) : '',
-          itemsCount: String(itemsCount),
-          notificationId: txResult.notificationId ? String(txResult.notificationId) : '',
-          link: `/loan/${slipId}`
-        }
+      await mailService.sendLoanDetailRemovedEmail(finalEmail, {
+        fullName: txResult.fullName,
+        slipId,
+        removedItem: txResult.removedItem,
+        reason,
+        librarianId
       });
 
-      const fcmResp = await sendFcmToReader(targetReaderId, payload);
-
-      if (fcmResp && fcmResp.success) {
-        console.log('✅ removeLoanDetailService: FCM sent to reader', { readerId: targetReaderId, slipId, fcmResp });
-      } else {
-        console.warn('⚠️ removeLoanDetailService: FCM send failed or no tokens', { readerId: targetReaderId, slipId, fcmResp });
+      if (txResult.notificationId && Notification) {
+        const pk = Notification.primaryKeyAttribute || 'notificationID';
+        const where = {}; where[pk] = txResult.notificationId;
+        try { await Notification.update({ emailAt: new Date() }, { where }); } catch (err) { /* ignore */ }
       }
-    } else {
-      console.warn('⚠️ removeLoanDetailService: no readerId available — skipping FCM for slip', slipId);
     }
-  } catch (fcmErr) {
-    console.error('❌ removeLoanDetailService: unexpected error when sending FCM', fcmErr?.message || fcmErr);
+  } catch (mailErr) {
+    console.error('removeLoanDetailService: send email failed', mailErr?.message || mailErr);
   }
 
-  // ---- Cuối cùng: trả về kết quả cho caller (giữ logic cũ) ----
+  // FCM
   try {
-    const finalEmail = txResult.readerEmail || process.env.ADMIN_NOTIFICATION_EMAIL || null;
-    if (finalEmail) {
-      if (txResult.deletedSlip) {
-        return {
-          deletedSlip: true,
-          message: "Đã xóa mục cuối → phiếu đã bị xoá",
-          slipId,
-          notificationId: txResult.notificationId || null
-        };
-      } else {
-        return {
-          deletedSlip: false,
-          message: "Đã xoá 1 tài liệu khỏi phiếu",
-          slipId,
-          notificationId: txResult.notificationId || null
-        };
+    const payload = buildFcmPayload({
+      title: `Một tài liệu bị xoá khỏi phiếu #${slipId}`,
+      body: `Tài liệu "${txResult.removedItem.title || ''}" đã bị xoá. Lý do: ${reason || '—'}.`,
+      data: {
+        type: 'LOAN_DETAIL_REMOVED',
+        slipId: String(slipId),
+        loanDetailId: String(txResult.removedItem.loanDetailId || ''),
+        notificationId: txResult.notificationId ? String(txResult.notificationId) : '',
+        link: `/loan/${slipId}`
       }
-    } else {
-      return {
-        deletedSlip: txResult.deletedSlip,
-        message: txResult.deletedSlip ? "Đã xóa mục cuối → phiếu đã bị xoá" : "Đã xoá 1 tài liệu khỏi phiếu",
-        slipId,
-        notificationId: txResult.notificationId || null
-      };
-    }
-  } catch (err) {
-    console.error('❌ removeLoanDetailService: unexpected error in final return', err?.message || err);
-    return {
-      deletedSlip: txResult.deletedSlip,
-      message: txResult.deletedSlip ? "Đã xóa mục cuối → phiếu đã bị xoá" : "Đã xoá 1 tài liệu khỏi phiếu",
-      slipId,
-      notificationId: txResult.notificationId || null
-    };
+    });
+    await sendFcmToReader(txResult.readerId, payload);
+  } catch (fcmErr) {
+    console.error('removeLoanDetailService: send FCM failed', fcmErr?.message || fcmErr);
   }
+
+  return {
+    deletedSlip: txResult.deletedSlip,
+    message: txResult.deletedSlip ? "Đã xóa mục cuối → phiếu đã bị xoá" : "Đã xoá 1 tài liệu khỏi phiếu",
+    slipId,
+    notificationId: txResult.notificationId || null
+  };
 }
+
 
 
 
@@ -2129,191 +1901,127 @@ async function removeLoanDetailService({ slipId, loanDetailId, reason, librarian
 // XÓA TOÀN BỘ PHIẾU
 // ==========================
 async function cancelLoanSlipService({ slipId, reason, librarianId }) {
-  // ensure models
-  const Notification = require('../model').Notification || require('../model').Notifications || null;
-  const Account = require('../model').Account || null;
+  if (!slipId) { const e = new Error('Thiếu slipId'); e.status = 400; throw e; }
 
-  let txResult = null;
-  let createdNotification = null;
-
-  // Transaction: tất cả thay đổi DB chính
-  txResult = await sequelize.transaction(async (t) => {
+  const txResult = await sequelize.transaction(async (t) => {
     const slip = await LoanSlip.findByPk(slipId, {
       include: [
-        { model: Reader, as: "reader", include: [{ model: Account }] },
-        { model: LoanDetail, as: "loanDetails", include: [{ model: DocumentCopy, include: [{ model: Document }] }] }
+        { model: Reader, include: [{ model: Account }] },
+        { model: LoanDetail, as: 'details', include: [{ model: DocumentCopy, include: [{ model: Document }] }] }
       ],
       transaction: t,
       lock: t.LOCK.UPDATE
     });
 
-    if (!slip) {
-      const e = new Error("Không tìm thấy phiếu");
-      e.status = 404; throw e;
-    }
+    if (!slip) { const e = new Error('Không tìm thấy phiếu'); e.status = 404; throw e; }
 
-    // Lấy email & tên độc giả an toàn
-    const readerEmail = slip.reader?.Account?.email || slip.reader?.account?.email || null;
-    const fullName = slip.reader?.fullName || slip.reader?.full_name || 'Độc giả';
-    const readerId = slip.readerId || (slip.reader && (slip.reader.readerId || slip.reader.id)) || null;
-
-    // Lấy tên thủ thư (thực hiện trong tx nhỏ vẫn ok)
+    const readerEmail = slip.Reader?.Account?.email || slip.reader?.Account?.email || null;
+    const fullName = slip.Reader?.fullName || slip.reader?.fullName || 'Độc giả';
     let librarianName = 'Thủ thư';
     try {
-      if (Account && librarianId) {
-        const libAcc = await Account.findByPk(librarianId, { transaction: t, lock: t.LOCK.UPDATE });
+      if (librarianId) {
+        const libAcc = await Account.findByPk(librarianId, { transaction: t });
         librarianName = libAcc?.fullName || libAcc?.full_name || librarianName;
       }
-    } catch (e) {
-      // ignore - không phá transaction
-    }
+    } catch (err) { /* ignore */ }
 
-    // lưu lý do vào phiếu
+    // cập nhật note
     slip.note = reason || null;
     await slip.save({ transaction: t });
 
-    // trả bản sao về AVAILABLE (nếu bản sao tồn tại)
-    for (const d of slip.loanDetails || []) {
+    // trả các document copy về AVAILABLE nếu cần
+    for (const d of slip.details || []) {
       try {
-        if (d.DocumentCopy || d.documentCopy) {
-          const docCopyInstance = d.DocumentCopy || d.documentCopy;
-          // nếu model instance có method update
-          if (typeof docCopyInstance.update === 'function') {
-            await docCopyInstance.update({ status: "AVAILABLE" }, { transaction: t });
-          } else {
-            // fallback: update qua DocumentCopy model
-            await DocumentCopy.update({ status: "AVAILABLE" }, { where: { documentCopyId: docCopyInstance.documentCopyId || docCopyInstance.documentCopyId }, transaction: t });
-          }
-        } else if (d.documentCopyId) {
-          await DocumentCopy.update({ status: "AVAILABLE" }, { where: { documentCopyId: d.documentCopyId }, transaction: t });
+        if (d.documentCopyId) {
+          await DocumentCopy.update({ status: 'AVAILABLE' }, { where: { documentCopyId: d.documentCopyId }, transaction: t });
         }
       } catch (err) {
-        // Bắt lỗi từng bản sao để tránh fail toàn bộ tx vì lỗi nhỏ, nhưng log để debug.
-        console.warn('⚠️ cancelLoanSlipService: cannot set DocumentCopy AVAILABLE for loanDetail', d.loanDetailId || d.id, err?.message || err);
+        console.warn('cancelLoanSlipService: cannot set DocumentCopy AVAILABLE', err?.message || err);
       }
     }
 
-    // Build itemsForEmail trước khi xóa
-    const itemsForEmail = (slip.loanDetails || []).map(d => ({
-      title: d.DocumentCopy?.Document?.title || d.documentCopy?.document?.title || null,
-      documentId: d.DocumentCopy?.Document?.documentId || d.documentCopy?.documentId || null,
+    const itemsForEmail = (slip.details || []).map(d => ({
+      title: d.DocumentCopy?.Document?.title || null,
+      documentId: d.DocumentCopy?.Document?.documentId || null,
       documentCopyId: d.documentCopyId || d.DocumentCopy?.documentCopyId || null
     }));
 
-    // xóa chi tiết
+    // xóa loan details rồi xóa slip
     await LoanDetail.destroy({ where: { loanSlipId: slipId }, transaction: t });
-
-    // xóa phiếu
     await slip.destroy({ transaction: t });
 
-    // Tạo notification inside transaction (non-critical)
-    const notifData = {
-      readerId: slip.readerId,
-      type: 'LOAN_SLIP_CANCELLED',
-      title: `Phiếu mượn #${slipId} đã bị hủy`,
-      content: `Phiếu #${slipId} đã bị hủy bởi ${librarianName}. Lý do: ${reason || '—'}.`,
-      priority: 'HIGH',
-      link: `/loan/${slipId}`,
-      isRead: 0
-    };
-
+    // tạo notification (không throw)
+    let createdNotification = null;
     try {
-      if (typeof createNotificationSafe === 'function') {
-        createdNotification = await createNotificationSafe(notifData, t);
-      } else if (Notification) {
-        createdNotification = await Notification.create(notifData, { transaction: t });
-      }
-    } catch (errNotif) {
-      console.warn('⚠️ cancelLoanSlipService: failed to create notification inside tx', errNotif?.message || errNotif);
+      createdNotification = await createNotificationSafe({
+        readerId: slip.readerId,
+        type: 'LOAN_SLIP_CANCELLED',
+        title: `Phiếu mượn #${slipId} đã bị hủy`,
+        content: `Phiếu #${slipId} đã bị hủy bởi ${librarianName}. Lý do: ${reason || '—'}.`,
+        priority: 'HIGH',
+        link: `/loan/${slipId}`,
+        isRead: 0
+      }, t);
+    } catch (nerr) {
       createdNotification = null;
     }
 
     return {
-      readerId, // thêm để dùng gửi FCM
+      readerId: slip.readerId,
       readerEmail,
       fullName,
       librarianName,
       itemsForEmail,
       notificationId: createdNotification ? (createdNotification.notificationID || createdNotification.id || null) : null
     };
-  }); // end transaction
+  }); // end tx
 
-  // Nếu notification chưa được tạo trong tx, retry ngoài tx (non-critical)
+  // retry notification ngoài tx nếu cần
   try {
     if (!txResult.notificationId) {
-      const notifDataRetry = {
-        readerId: txResult.readerId || null,
+      const retry = await createNotificationSafe({
+        readerId: txResult.readerId,
         type: 'LOAN_SLIP_CANCELLED',
         title: `Phiếu mượn #${slipId} đã bị hủy`,
         content: `Phiếu #${slipId} đã bị hủy. Lý do: ${reason || '—'}.`,
         priority: 'HIGH',
         link: `/loan/${slipId}`,
         isRead: 0
-      };
-
-      if (typeof createNotificationSafe === 'function') {
-        const retryNotif = await createNotificationSafe(notifDataRetry, null);
-        if (retryNotif) txResult.notificationId = retryNotif.notificationID || retryNotif.id || null;
-      } else if (Notification) {
-        try {
-          const retryNotif = await Notification.create(notifDataRetry);
-          if (retryNotif) txResult.notificationId = retryNotif.notificationID || retryNotif.id || null;
-        } catch (err) {
-          console.warn('⚠️ cancelLoanSlipService: retry create notification failed', err?.message || err);
-        }
-      }
+      }, null);
+      if (retry) txResult.notificationId = retry.notificationID || retry.id || null;
     }
   } catch (err) {
-    console.warn('⚠️ cancelLoanSlipService: unexpected error while retrying notification', err?.message || err);
+    console.warn('cancelLoanSlipService: retry create notification failed', err?.message || err);
   }
 
-  // Gửi email hủy phiếu (sau transaction) — lỗi mail không rollback
+  // gửi email (non-critical)
   try {
     const finalEmail = txResult.readerEmail || process.env.ADMIN_NOTIFICATION_EMAIL || null;
     if (finalEmail) {
-      try {
-        await mailService.sendLoanSlipCancelledEmail(finalEmail, {
-          fullName: txResult.fullName,
-          slipId,
-          items: txResult.itemsForEmail,
-          reason,
-          librarianName: txResult.librarianName
-        });
+      await mailService.sendLoanSlipCancelledEmail(finalEmail, {
+        fullName: txResult.fullName,
+        slipId,
+        items: txResult.itemsForEmail,
+        reason,
+        librarianName: txResult.librarianName
+      });
 
-        // nếu có notificationId, cố cập nhật emailAt (non-critical)
-        if (txResult.notificationId && Notification) {
-          try {
-            const pk = Notification.primaryKeyAttribute || 'notificationID';
-            const where = {}; where[pk] = txResult.notificationId;
-            await Notification.update({ emailAt: new Date() }, { where });
-          } catch (updErr) {
-            console.warn('⚠️ cancelLoanSlipService: cannot update notification.emailAt', updErr?.message || updErr);
-          }
-        }
-
-        console.log('✅ cancelLoanSlipService: loan slip cancelled email sent to', finalEmail);
-      } catch (mailErr) {
-        console.error('❌ cancelLoanSlipService: failed to send loan slip cancelled email', mailErr?.message || mailErr);
+      if (txResult.notificationId && Notification) {
+        const pk = Notification.primaryKeyAttribute || 'notificationID';
+        const where = {}; where[pk] = txResult.notificationId;
+        try { await Notification.update({ emailAt: new Date() }, { where }); } catch (err) { /* ignore */ }
       }
-    } else {
-      console.warn('⚠️ cancelLoanSlipService: no email available to notify reader for slip', slipId);
     }
-  } catch (err) {
-    console.error('❌ cancelLoanSlipService: unexpected error after transaction', err?.message || err);
+  } catch (mailErr) {
+    console.error('cancelLoanSlipService: send email failed', mailErr?.message || mailErr);
   }
 
-  // -----------------------------
-  // SEND FCM (mới thêm)
-  // -----------------------------
+  // FCM
   try {
-    const targetReaderId = txResult.readerId || null;
-    if (targetReaderId) {
-      const title = `Phiếu mượn #${slipId} đã bị hủy`;
-      const body = `Phiếu #${slipId} đã bị hủy bởi ${txResult.librarianName}. Lý do: ${reason || '—'}.`;
-
+    if (txResult.readerId) {
       const payload = buildFcmPayload({
-        title,
-        body,
+        title: `Phiếu mượn #${slipId} đã bị hủy`,
+        body: `Phiếu #${slipId} đã bị hủy. Lý do: ${reason || '—'}.`,
         data: {
           type: 'LOAN_SLIP_CANCELLED',
           slipId: String(slipId),
@@ -2322,27 +2030,19 @@ async function cancelLoanSlipService({ slipId, reason, librarianId }) {
           link: `/loan/${slipId}`
         }
       });
-
-      const fcmResp = await sendFcmToReader(targetReaderId, payload);
-
-      if (fcmResp && fcmResp.success) {
-        console.log('✅ cancelLoanSlipService: FCM sent to reader', { readerId: targetReaderId, slipId, fcmResp });
-      } else {
-        console.warn('⚠️ cancelLoanSlipService: FCM send failed or no tokens', { readerId: targetReaderId, slipId, fcmResp });
-      }
-    } else {
-      console.warn('⚠️ cancelLoanSlipService: no readerId available — skipping FCM for slip', slipId);
+      await sendFcmToReader(txResult.readerId, payload);
     }
   } catch (fcmErr) {
-    console.error('❌ cancelLoanSlipService: unexpected error when sending FCM', fcmErr?.message || fcmErr);
+    console.error('cancelLoanSlipService: send FCM failed', fcmErr?.message || fcmErr);
   }
 
   return {
-    message: "Đã hủy phiếu thành công",
+    message: 'Đã hủy phiếu thành công',
     slipId,
     notificationId: txResult.notificationId || null
   };
 }
+
 
 
 /**
@@ -2356,236 +2056,110 @@ async function cancelLoanSlipService({ slipId, reason, librarianId }) {
  * payload: { loanSlipId, reason, librarianId }
  */
 async function cancelReservationService({ loanSlipId, reason, librarianId }) {
-  if (!loanSlipId) {
-    const e = new Error('Thiếu loanSlipId');
-    e.status = 400; throw e;
-  }
+  if (!loanSlipId) { const e = new Error('Thiếu loanSlipId'); e.status = 400; throw e; }
 
-  // Models/helpers (fallback nếu không export được)
-  const Models = require('../model');
-  const Account = Models.Account || null;
-  const Notification = Models.Notification || Models.Notifications || null;
-  const hasCreateNotificationSafe = typeof createNotificationSafe === 'function';
-  const hasSafeSendReservationEmail = typeof safeSendReservationEmail === 'function';
-
-  // 1) Transaction: xóa data chính (ghi note, xóa loanDetails, xóa slip), tạo notification (non-critical)
   const txResult = await sequelize.transaction(async (t) => {
-    // load slip + reader + loanDetails
     const slip = await LoanSlip.findByPk(Number(loanSlipId), {
       include: [
-        { model: Reader, as: 'reader', include: [{ model: Models.Account }] },
-        { model: LoanDetail, as: 'loanDetails' } // LoanDetail.note có thể chứa REQUEST_DOCUMENT_ID=...
+        { model: Reader, include: [{ model: Account }] },
+        { model: LoanDetail, as: 'details' }
       ],
       transaction: t,
       lock: t.LOCK.UPDATE
     });
 
-    if (!slip) {
-      const e = new Error('Không tìm thấy phiếu');
-      e.status = 404; throw e;
-    }
+    if (!slip) { const e = new Error('Không tìm thấy phiếu'); e.status = 404; throw e; }
 
-    const status = String(slip.status || '').toUpperCase();
-    if (status !== 'PENDING') {
-      const e = new Error('Chỉ có thể hủy phiếu ở trạng thái PENDING (phiếu đặt trước)');
-      e.status = 409; throw e;
-    }
+    const status = String((slip.status || '').toUpperCase());
+    if (status !== 'PENDING') { const e = new Error('Chỉ có thể hủy phiếu ở trạng thái PENDING'); e.status = 409; throw e; }
 
-    // lưu lý do vào slip.note
     slip.note = reason || null;
     await slip.save({ transaction: t });
 
-    // lấy loanDetails trước khi xóa để build email items
-    const loanDetails = slip.loanDetails || [];
+    const loanDetails = slip.details || [];
+    const itemsForEmail = loanDetails.map(d => ({
+      // map sang cấu trúc gần với template mail
+      requestedDocumentId: d.loanDetailId || d.id || null,
+      title: null, // reservation thường chưa gán Document, để template dùng fallback
+      originalNote: d.note || null
+    }));
 
-    // helper parse REQUEST_DOCUMENT_ID
-    const parseRequestedDocId = (note) => {
-      const m = String(note || '').match(/REQUEST_DOCUMENT_ID=(\d+)/);
-      return m ? Number(m[1]) : null;
-    };
-
-    // collect requestedDocIds -> fetch titles
-    const requestedDocIds = [...new Set(
-      loanDetails
-        .map(d => parseRequestedDocId(d.note))
-        .filter(Boolean)
-    )];
-
-    let docMap = new Map();
-    if (requestedDocIds.length) {
-      const docs = await Models.Document.findAll({
-        where: { documentId: requestedDocIds },
-        attributes: ['documentId', 'title'],
-        transaction: t
-      });
-      docMap = new Map(docs.map(d => [d.documentId, d.title]));
-    }
-
-    const itemsForEmail = loanDetails.map(d => {
-      const reqDocId = parseRequestedDocId(d.note);
-      return {
-        requestedDocumentId: reqDocId || null,
-        title: reqDocId ? (docMap.get(reqDocId) || null) : (d.title || null),
-        originalNote: d.note || null
-      };
-    });
-
-    // xóa LoanDetail (reservation chưa có copy)
-    await LoanDetail.destroy({
-      where: { loanSlipId: slip.loanSlipId },
-      transaction: t
-    });
-
-    // xóa slip
+    await LoanDetail.destroy({ where: { loanSlipId: slip.loanSlipId }, transaction: t });
     await slip.destroy({ transaction: t });
 
-    // lấy email reader/account (nếu có)
-    let readerEmail = null;
-    try {
-      const reader = slip.reader;
-      if (reader) {
-        if (reader.Account && reader.Account.email) readerEmail = reader.Account.email;
-        else if (reader.account && reader.account.email) readerEmail = reader.account.email;
-      }
-    } catch (err) {
-      readerEmail = null;
-    }
-
-    // lấy tên thủ thư (nếu librarianId được truyền)
-    let librarianName = null;
-    try {
-      if (librarianId && Account) {
-        const lib = await Account.findByPk(librarianId, { attributes: ['fullName'], transaction: t });
-        librarianName = lib?.fullName || null;
-      }
-    } catch (err) {
-      librarianName = null;
-    }
-
-    // TẠO notification inside transaction (non-critical; không throw nếu fail)
     let createdNotification = null;
-    const notifData = {
-      readerId: slip.readerId,
-      type: 'RESERVATION_CANCELLED',
-      title: `Phiếu đặt trước #${slip.loanSlipId} đã bị hủy`,
-      content: `Phiếu đặt trước #${slip.loanSlipId} đã bị hủy${librarianName ? ` bởi ${librarianName}` : ''}. Lý do: ${reason || '—'}.`,
-      priority: 'NORMAL',
-      link: `/loan/${slip.loanSlipId}`,
-      isRead: 0
-    };
-
     try {
-      if (hasCreateNotificationSafe) {
-        createdNotification = await createNotificationSafe(notifData, t);
-      } else if (Notification) {
-        createdNotification = await Notification.create(notifData, { transaction: t });
-      }
-    } catch (notifErr) {
-      // không throw, chỉ log
-      console.warn('⚠️ cancelReservationService: failed to create notification inside tx', notifErr?.message || notifErr);
+      createdNotification = await createNotificationSafe({
+        readerId: slip.readerId,
+        type: 'RESERVATION_CANCELLED',
+        title: `Phiếu đặt trước #${slip.loanSlipId} đã bị hủy`,
+        content: `Phiếu #${slip.loanSlipId} đã bị hủy. Lý do: ${reason || '—'}.`,
+        priority: 'NORMAL',
+        link: `/loan/${slip.loanSlipId}`,
+        isRead: 0
+      }, t);
+    } catch (nerr) {
       createdNotification = null;
     }
 
     return {
       slipId: slip.loanSlipId,
-      readerEmail,
-      fullName: slip.reader?.fullName || null,
+      readerId: slip.readerId,
+      readerEmail: slip.Reader?.Account?.email || slip.reader?.Account?.email || null,
+      librarianId,
       itemsForEmail,
-      reason,
-      librarianName,
-      notificationId: createdNotification ? (createdNotification.notificationID || createdNotification.id || null) : null,
-      readerId: slip.readerId
+      notificationId: createdNotification ? (createdNotification.notificationID || createdNotification.id || null) : null
     };
-  }); // end transaction
+  }); // end tx
 
-  // 2) Nếu notification chưa được tạo trong tx, thử tạo lại ngoài tx (non-critical)
+  // retry notification nếu cần
   try {
     if (!txResult.notificationId) {
-      const retryNotifData = {
-        readerId: txResult.readerId || null,
+      const retryNotif = await createNotificationSafe({
+        readerId: txResult.readerId,
         type: 'RESERVATION_CANCELLED',
         title: `Phiếu đặt trước #${txResult.slipId} đã bị hủy`,
-        content: `Phiếu đặt trước #${txResult.slipId} đã bị hủy. Lý do: ${txResult.reason || '—'}.`,
+        content: `Phiếu #${txResult.slipId} đã bị hủy. Lý do: ${reason || '—'}.`,
         priority: 'NORMAL',
         link: `/loan/${txResult.slipId}`,
         isRead: 0
-      };
-
-      if (hasCreateNotificationSafe) {
-        const retryNotif = await createNotificationSafe(retryNotifData, null);
-        if (retryNotif) txResult.notificationId = retryNotif.notificationID || retryNotif.id || null;
-      } else if (Notification) {
-        try {
-          const retryNotif = await Notification.create(retryNotifData);
-          if (retryNotif) txResult.notificationId = retryNotif.notificationID || retryNotif.id || null;
-        } catch (err) {
-          console.warn('⚠️ cancelReservationService: retry create notification failed', err?.message || err);
-        }
-      }
+      }, null);
+      if (retryNotif) txResult.notificationId = retryNotif.notificationID || retryNotif.id || null;
     }
   } catch (err) {
-    console.warn('⚠️ cancelReservationService: unexpected error while retrying notification', err?.message || err);
+    console.warn('cancelReservationService: retry create notification failed', err?.message || err);
   }
 
-  // 3) Gửi email ngoài transaction (non-critical). Nếu có safe helper, dùng nó (cập nhật emailAt); nếu không, fallback
+  // gửi email hủy reservation (non-critical) — dùng HẲN sendReservationCancelledEmail
   try {
     const finalEmail = txResult.readerEmail || process.env.ADMIN_NOTIFICATION_EMAIL || null;
     if (finalEmail) {
-      if (hasSafeSendReservationEmail) {
-        // safe helper sẽ không throw
-        await safeSendReservationEmail(finalEmail, {
-          fullName: txResult.fullName || 'Độc giả',
-          slipId: txResult.slipId,
-          items: txResult.itemsForEmail,
-          reason: txResult.reason,
-          librarianName: txResult.librarianName
-        }, txResult.notificationId);
-        console.log('✅ Reservation cancelled email attempted (via safeSendReservationEmail) to', finalEmail);
-      } else {
-        // fallback: call mailService directly but catch errors
-        try {
-          await mailService.sendReservationCancelledEmail(finalEmail, {
-            fullName: txResult.fullName || 'Độc giả',
-            slipId: txResult.slipId,
-            items: txResult.itemsForEmail,
-            reason: txResult.reason,
-            librarianName: txResult.librarianName
-          });
-          console.log('✅ Reservation cancelled email sent to', finalEmail);
+      const readerName = (await Reader.findByPk(txResult.readerId, { attributes: ['fullName'] }))?.fullName || 'Độc giả';
 
-          // update emailAt if notification exists
-          if (txResult.notificationId && Notification) {
-            try {
-              const pk = Notification.primaryKeyAttribute || 'notificationID';
-              const where = {}; where[pk] = txResult.notificationId;
-              await Notification.update({ emailAt: new Date() }, { where });
-            } catch (updErr) {
-              console.warn('⚠️ cancelReservationService: cannot update notification.emailAt', updErr?.message || updErr);
-            }
-          }
-        } catch (mailErr) {
-          console.error('❌ cancelReservationService: failed to send reservation cancelled email', mailErr?.message || mailErr);
-        }
+      await mailService.sendReservationCancelledEmail(finalEmail, {
+        fullName: readerName,
+        slipId: txResult.slipId,
+        items: txResult.itemsForEmail,
+        reason,
+        librarianName: '', // nếu muốn có tên thủ thư thì sau này tra thêm
+      });
+
+      if (txResult.notificationId && Notification) {
+        const pk = Notification.primaryKeyAttribute || 'notificationID';
+        const where = {}; where[pk] = txResult.notificationId;
+        try { await Notification.update({ emailAt: new Date() }, { where }); } catch (err) { /* ignore */ }
       }
-    } else {
-      console.warn('⚠️ cancelReservationService: no email to notify for slipId=', txResult.slipId);
     }
-  } catch (err) {
-    console.error('❌ cancelReservationService: unexpected error after transaction', err?.message || err);
+  } catch (mailErr) {
+    console.error('cancelReservationService: send email failed', mailErr?.message || mailErr);
   }
 
-  // -----------------------------
-  // SEND FCM (mới thêm)
-  // -----------------------------
+  // FCM
   try {
-    const targetReaderId = txResult.readerId || null;
-    if (targetReaderId) {
-      const title = `Phiếu đặt trước #${txResult.slipId} đã bị hủy`;
-      const body = `Phiếu đặt trước #${txResult.slipId} đã bị hủy${txResult.librarianName ? ` bởi ${txResult.librarianName}` : ''}. Lý do: ${txResult.reason || '—'}.`;
-
+    if (txResult.readerId) {
       const payload = buildFcmPayload({
-        title,
-        body,
+        title: `Phiếu đặt trước #${txResult.slipId} — Đã bị hủy`,
+        body: `Phiếu #${txResult.slipId} đã bị hủy. Lý do: ${reason || '—'}.`,
         data: {
           type: 'RESERVATION_CANCELLED',
           slipId: String(txResult.slipId),
@@ -2594,23 +2168,15 @@ async function cancelReservationService({ loanSlipId, reason, librarianId }) {
           link: `/loan/${txResult.slipId}`
         }
       });
-
-      const fcmResp = await sendFcmToReader(targetReaderId, payload);
-
-      if (fcmResp && fcmResp.success) {
-        console.log('✅ cancelReservationService: FCM sent to reader', { readerId: targetReaderId, slipId: txResult.slipId });
-      } else {
-        console.warn('⚠️ cancelReservationService: FCM send failed or no tokens', { readerId: targetReaderId, slipId: txResult.slipId, fcmResp });
-      }
-    } else {
-      console.warn('⚠️ cancelReservationService: no readerId available — skipping FCM for slip', txResult.slipId);
+      await sendFcmToReader(txResult.readerId, payload);
     }
   } catch (fcmErr) {
-    console.error('❌ cancelReservationService: unexpected error when sending FCM', fcmErr?.message || fcmErr);
+    console.error('cancelReservationService: send FCM failed', fcmErr?.message || fcmErr);
   }
 
   return { message: 'Đã hủy phiếu đặt trước thành công', slipId: txResult.slipId, notificationId: txResult.notificationId || null };
 }
+
 
 
 module.exports = {

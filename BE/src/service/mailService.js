@@ -726,5 +726,5 @@ module.exports = {
   sendLoanIssuedEmail,
   sendLoanDetailRemovedEmail,
   sendLoanSlipCancelledEmail,
-  sendReservationApprovedEmail
+  sendReservationCancelledEmail
 };
