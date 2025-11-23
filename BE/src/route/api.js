@@ -1356,6 +1356,47 @@ routeApi.get('/', (req, res) => {
         ]
       },
       {
+  group: 'Cart',
+  icon: '🛒',
+  routes: [
+    {
+      method: 'GET',
+      path: '/api/cart',
+      description: 'Lấy giỏ sách của độc giả hiện tại',
+      auth: true,
+      role: 'Reader (roleId = 3)'
+    },
+    {
+      method: 'POST',
+      path: '/api/cart/add',
+      description: 'Thêm tài liệu vào giỏ',
+      auth: true,
+      role: 'Reader (roleId = 3)',
+      body: {
+        documentId: 'number (required)'
+      }
+    },
+    {
+      method: 'DELETE',
+      path: '/api/cart/:documentId',
+      description: 'Xoá 1 tài liệu khỏi giỏ',
+      auth: true,
+      role: 'Reader (roleId = 3)',
+      params: {
+        documentId: 'number'
+      }
+    },
+    {
+      method: 'DELETE',
+      path: '/api/cart',
+      description: 'Xoá toàn bộ giỏ sách',
+      auth: true,
+      role: 'Reader (roleId = 3)'
+    }
+  ]
+},
+
+      {
         group: 'Test',
         icon: '🧪',
         routes: [
