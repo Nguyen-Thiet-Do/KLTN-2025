@@ -24,7 +24,7 @@ const Notification = require('./Notification');
 
 
 const CartItem = require('./CartItem');
-
+const FavoriteItem = require('./FavoriteItem'); 
 // NEW: Card models
 const CardType = require('./CardType');
 const MemberCard = require('./MemberCard');
@@ -145,6 +145,13 @@ CartItem.belongsTo(Reader, { foreignKey: 'readerId' });
 Document.hasMany(CartItem, { foreignKey: 'documentId', as: 'cartDocuments' });
 CartItem.belongsTo(Document, { foreignKey: 'documentId' });
 
+// FAVORITE ITEMS
+Reader.hasMany(FavoriteItem, { foreignKey: 'readerId', as: 'favoriteItems' });
+FavoriteItem.belongsTo(Reader, { foreignKey: 'readerId' });
+
+Document.hasMany(FavoriteItem, { foreignKey: 'documentId', as: 'favoriteDocuments' });
+FavoriteItem.belongsTo(Document, { foreignKey: 'documentId' });
+
 
 module.exports = {
   Account,
@@ -172,4 +179,5 @@ module.exports = {
   CardType,
   MemberCard,
   CartItem,
+  FavoriteItem,
 };
