@@ -1672,7 +1672,6 @@ async function pickupLoanSlipService(payload) {
       const e = new Error('Chỉ có thể pickup khi phiếu ở trạng thái WAITING_FOR_PICKUP'); e.status = 409; throw e;
     }
 
-    // Build where for loan details to pickup
     const whereDetails = { loanSlipId: slip.loanSlipId, status: 'WAITING_FOR_PICKUP' };
     if (Array.isArray(items) && items.length) whereDetails.loanDetailId = items.map(Number);
 
@@ -1687,24 +1686,18 @@ async function pickupLoanSlipService(payload) {
       const e = new Error('Không có item nào ở trạng thái WAITING_FOR_PICKUP để pickup'); e.status = 400; throw e;
     }
 
-    // Validate copies
     for (const d of waitingDetails) {
-      if (!d.documentCopyId) {
-        const e = new Error(`LoanDetail #${d.loanDetailId} chưa được gán bản sao`); e.status = 409; throw e;
-      }
+      if (!d.documentCopyId) throw new Error(`LoanDetail #${d.loanDetailId} chưa được gán bản sao`);
       const cp = d.DocumentCopy;
-      if (!cp) { const e = new Error(`Không tìm thấy DocumentCopy #${d.documentCopyId}`); e.status = 404; throw e; }
-      if (String((cp.status || '').toUpperCase()) !== 'ON_HOLD') {
-        const e = new Error(`Bản sao #${cp.documentCopyId} không ở trạng thái ON_HOLD (hiện tại: ${cp.status})`); e.status = 409; throw e;
-      }
+      if (!cp) throw new Error(`Không tìm thấy DocumentCopy #${d.documentCopyId}`);
+      if (String((cp.status || '').toUpperCase()) !== 'ON_HOLD')
+        throw new Error(`Bản sao #${cp.documentCopyId} không ở trạng thái ON_HOLD`);
     }
 
-    // Update slip
     const updateSlipData = { librarianId: Number(librarianId), dueDate: finalDueDate, status: 'BORROWING' };
     if (!preserveLoanDate) updateSlipData.loanDate = pickupDate;
     await slip.update(updateSlipData, { transaction: t });
 
-    // Process each detail: set BORROWED, update DocumentCopy
     const processedDetails = [];
     for (const d of waitingDetails) {
       const cp = d.DocumentCopy;
@@ -1721,7 +1714,6 @@ async function pickupLoanSlipService(payload) {
       });
     }
 
-    // Reader email if available
     let readerEmail = null;
     try {
       const reader = slip.Reader || (await Reader.findByPk(slip.readerId, { transaction: t }));
@@ -1729,11 +1721,10 @@ async function pickupLoanSlipService(payload) {
         const account = await Account.findByPk(reader.accountId, { attributes: ['email'], transaction: t });
         readerEmail = account?.email || null;
       }
-    } catch (err) {
+    } catch {
       readerEmail = null;
     }
 
-    // Create notification (non-critical)
     let createdNotification = null;
     try {
       createdNotification = await createNotificationSafe({
@@ -1745,9 +1736,7 @@ async function pickupLoanSlipService(payload) {
         link: `/loan/${slip.loanSlipId}`,
         isRead: 0
       }, t);
-    } catch (nerr) {
-      createdNotification = null;
-    }
+    } catch {}
 
     return {
       loanSlip: slip,
@@ -1757,14 +1746,15 @@ async function pickupLoanSlipService(payload) {
       dueDate: finalDueDate,
       notificationId: createdNotification ? (createdNotification.notificationID || createdNotification.id || null) : null
     };
-  }); // end tx
+  });
 
-  // send email (non-critical)
+  // EMAIL (non-critical)
   try {
     const finalEmail = txResult.readerEmail || process.env.ADMIN_NOTIFICATION_EMAIL || null;
     if (finalEmail) {
       const reader = await Reader.findByPk(txResult.loanSlip.readerId);
       const readerName = reader?.fullName || 'Độc giả';
+
       await mailService.sendLoanIssuedEmail(finalEmail, {
         fullName: readerName,
         slipId: txResult.loanSlip.loanSlipId,
@@ -1794,9 +1784,38 @@ async function pickupLoanSlipService(payload) {
         link: `/loan/${txResult.loanSlip.loanSlipId}`
       }
     });
+
     await sendFcmToReader(txResult.loanSlip.readerId, payload);
   } catch (fcmErr) {
     console.error('pickupLoanSlipService: send FCM failed', fcmErr?.message || fcmErr);
+  }
+
+  // -----------------------------
+  // SOCKET.IO EMIT (non-critical)
+  // -----------------------------
+  try {
+    // Lấy accountId để gửi socket đến đúng user
+    let targetUserId = txResult.loanSlip.readerId;
+    try {
+      const rr = await Reader.findByPk(txResult.loanSlip.readerId, { attributes: ['accountId'] });
+      if (rr?.accountId) targetUserId = rr.accountId;
+    } catch {}
+
+    const socketData = {
+      type: 'PICKUP_CONFIRMED',
+      slipId: String(txResult.loanSlip.loanSlipId),
+      loanDate: String(txResult.loanDate),
+      dueDate: String(txResult.dueDate),
+      itemsCount: String(txResult.processedDetails.length),
+      notificationId: txResult.notificationId ? String(txResult.notificationId) : '',
+      link: `/loan/${txResult.loanSlip.loanSlipId}`
+    };
+
+    emitToUser(targetUserId, 'pickupConfirmed', socketData);
+
+    console.log('✅ Socket emitted →', { targetUserId, event: 'pickupConfirmed', socketData });
+  } catch (socketErr) {
+    console.error('pickupLoanSlipService: send socket failed', socketErr?.message || socketErr);
   }
 
   return {
@@ -1807,6 +1826,7 @@ async function pickupLoanSlipService(payload) {
     dueDate: txResult.dueDate
   };
 }
+
 
 
 
@@ -1924,6 +1944,42 @@ async function removeLoanDetailService({ slipId, loanDetailId, reason, librarian
     await sendFcmToReader(txResult.readerId, payload);
   } catch (fcmErr) {
     console.error('removeLoanDetailService: send FCM failed', fcmErr?.message || fcmErr);
+  }
+
+  // -----------------------------
+  // SOCKET.IO EMIT (non-critical)
+  // -----------------------------
+  try {
+    // đảm bảo emitToUser đã được import ở đầu file:
+    // const { emitToUser } = require('../config/socket');
+
+    let targetUserId = txResult.readerId;
+    try {
+      const rr = await Reader.findByPk(txResult.readerId, { attributes: ['accountId'] });
+      if (rr?.accountId) targetUserId = rr.accountId;
+    } catch (e) {
+      // ignore, giữ targetUserId = readerId
+    }
+
+    const socketData = {
+      type: 'LOAN_DETAIL_REMOVED',
+      slipId: String(slipId),
+      loanDetailId: String(txResult.removedItem.loanDetailId || ''),
+      removedTitle: txResult.removedItem.title || '',
+      reason: reason || '',
+      notificationId: txResult.notificationId ? String(txResult.notificationId) : '',
+      link: `/loan/${slipId}`
+    };
+
+    if (typeof emitToUser === 'function') {
+      emitToUser(targetUserId, 'loanDetailRemoved', socketData);
+      console.log('✅ removeLoanDetailService: Socket emitted to user', { targetUserId, socketData });
+    } else {
+      console.warn('⚠️ removeLoanDetailService: emitToUser không khả dụng, bỏ qua emit socket');
+    }
+  } catch (socketErr) {
+    console.error('removeLoanDetailService: send socket failed', socketErr?.message || socketErr);
+    // không throw — socket lỗi không ảnh hưởng đến kết quả
   }
 
   return {
@@ -2076,12 +2132,46 @@ async function cancelLoanSlipService({ slipId, reason, librarianId }) {
     console.error('cancelLoanSlipService: send FCM failed', fcmErr?.message || fcmErr);
   }
 
+  // -----------------------------
+  // SOCKET.IO EMIT (non-critical)
+  // -----------------------------
+  try {
+    // Lấy targetUserId: ưu tiên accountId nếu có, ngược lại dùng readerId
+    let targetUserId = txResult.readerId;
+    try {
+      const rr = await Reader.findByPk(txResult.readerId, { attributes: ['accountId'] });
+      if (rr?.accountId) targetUserId = rr.accountId;
+    } catch (e) {
+      // ignore
+    }
+
+    const socketData = {
+      type: 'LOAN_SLIP_CANCELLED',
+      slipId: String(slipId),
+      reason: reason || '',
+      itemsCount: String((txResult.itemsForEmail || []).length),
+      notificationId: txResult.notificationId ? String(txResult.notificationId) : '',
+      link: `/loan/${slipId}`
+    };
+
+    if (typeof emitToUser === 'function') {
+      emitToUser(targetUserId, 'loanSlipCancelled', socketData);
+      console.log('✅ cancelLoanSlipService: Socket emitted to user', { targetUserId, socketData });
+    } else {
+      console.warn('⚠️ cancelLoanSlipService: emitToUser không khả dụng, bỏ qua emit socket');
+    }
+  } catch (socketErr) {
+    console.error('cancelLoanSlipService: send socket failed', socketErr?.message || socketErr);
+    // Không throw — socket lỗi không ảnh hưởng
+  }
+
   return {
     message: 'Đã hủy phiếu thành công',
     slipId,
     notificationId: txResult.notificationId || null
   };
 }
+
 
 
 
@@ -2214,8 +2304,42 @@ async function cancelReservationService({ loanSlipId, reason, librarianId }) {
     console.error('cancelReservationService: send FCM failed', fcmErr?.message || fcmErr);
   }
 
+  // -----------------------------
+  // SOCKET.IO EMIT (non-critical)
+  // -----------------------------
+  try {
+    // Lấy targetUserId: ưu tiên accountId nếu có, ngược lại dùng readerId
+    let targetUserId = txResult.readerId;
+    try {
+      const rr = await Reader.findByPk(txResult.readerId, { attributes: ['accountId'] });
+      if (rr?.accountId) targetUserId = rr.accountId;
+    } catch (e) {
+      // ignore
+    }
+
+    const socketData = {
+      type: 'RESERVATION_CANCELLED',
+      slipId: String(txResult.slipId),
+      reason: reason || '',
+      itemsCount: String((txResult.itemsForEmail || []).length),
+      notificationId: txResult.notificationId ? String(txResult.notificationId) : '',
+      link: `/loan/${txResult.slipId}`
+    };
+
+    if (typeof emitToUser === 'function') {
+      emitToUser(targetUserId, 'reservationCancelled', socketData);
+      console.log('✅ cancelReservationService: Socket emitted to user', { targetUserId, socketData });
+    } else {
+      console.warn('⚠️ cancelReservationService: emitToUser không khả dụng, bỏ qua emit socket');
+    }
+  } catch (socketErr) {
+    console.error('cancelReservationService: send socket failed', socketErr?.message || socketErr);
+    // Không throw — socket lỗi không ảnh hưởng
+  }
+
   return { message: 'Đã hủy phiếu đặt trước thành công', slipId: txResult.slipId, notificationId: txResult.notificationId || null };
 }
+
 
 
 
