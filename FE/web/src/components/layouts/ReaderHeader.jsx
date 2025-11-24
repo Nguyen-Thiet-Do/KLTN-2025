@@ -3,6 +3,7 @@ import { Link as RouterLink, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../../contexts/AuthContext";
 import { useCart } from "../../contexts/CartContext";
 import { useFavorite } from "../../contexts/FavoriteContext";
+import { useNotification } from "../../contexts/NotificationContext";
 
 import {
   AppBar,
@@ -46,6 +47,7 @@ export default function ReaderHeader() {
   const maxContentWidth = 1280;
 const { count } = useCart();
 const { favoriteCount } = useFavorite();
+const { unreadCount } = useNotification();
 
   const tabs = useMemo(
     () => [
@@ -214,13 +216,15 @@ const { favoriteCount } = useFavorite();
         </>
       ) : (
         <>
-          <Tooltip title="Thông báo">
-            <IconButton size="small">
-              <Badge badgeContent={3} color="error">
-                <NotificationsOutlined />
-              </Badge>
-            </IconButton>
-          </Tooltip>
+    <Tooltip title="Thông báo">
+  <IconButton size="small" onClick={() => navigate("/notifications")}>
+    <Badge badgeContent={unreadCount} color="error">
+      <NotificationsOutlined />
+    </Badge>
+  </IconButton>
+</Tooltip>
+
+
 
           {/* CART ICON ADDED */}
         <Tooltip title="Giỏ sách">

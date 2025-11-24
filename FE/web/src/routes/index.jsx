@@ -17,6 +17,9 @@ import CartPage from "../pages/cart";
 
 import FavoritePage from "../pages/favorite";
 
+import NotificationPage from "../pages/reader/NotificationPage";
+import NotificationDetailPage from "../pages/reader/NotificationDetailPage";
+
 import LoanHistoryPage from "../pages/reader/LoanHistoryPage";
 
 import ProfilePage from "../pages/reader/ProfilePage";
@@ -37,7 +40,8 @@ export const router = createBrowserRouter([
       { path: "cart", element: <CartPage /> },
       { path: "favorite", element: <FavoritePage /> },
       { path: "reader/loans/my", element: <LoanHistoryPage /> },
-
+{ path: "notifications", element: <NotificationPage /> },
+{ path: "notifications/:id", element: <NotificationDetailPage /> },
       // ▼ Chi tiết tài liệu
       { path: "reader/documents/:id", element: <DocumentDetail /> },
       { path: "/reader/ebook/:id", element: <EbookReader /> },
