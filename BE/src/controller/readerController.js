@@ -131,7 +131,54 @@ const getReaderById = async (req, res) => {
     return res.status(500).json({ success: false, message: err.message });
   }
 };
+/**
+ * PUT /:id/lock
+ * Body (JSON) (optional): { reason: "Lý do khoá" }
+ */
+const lockReaderAccount = async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({ success: false, message: "readerId không hợp lệ" });
+    }
 
+    const { reason } = req.body || {};
+    const result = await readerService.lockReaderAccount(id, reason);
+
+    if (!result.success) {
+      return res.status(404).json(result);
+    }
+
+    return res.json({ success: true, message: result.message || "Khoá tài khoản thành công" });
+  } catch (err) {
+    console.error("❌ Lỗi lockReaderAccount:", err);
+    return res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+/**
+ * PUT /:id/unlock
+ * Mở khoá tài khoản
+ */
+const unlockReaderAccount = async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({ success: false, message: "readerId không hợp lệ" });
+    }
+
+    const result = await readerService.unlockReaderAccount(id);
+
+    if (!result.success) {
+      return res.status(404).json(result);
+    }
+
+    return res.json({ success: true, message: result.message || "Mở khoá tài khoản thành công" });
+  } catch (err) {
+    console.error("❌ Lỗi unlockReaderAccount:", err);
+    return res.status(500).json({ success: false, message: err.message });
+  }
+};
 
 module.exports = {
   getAllReaders,
@@ -142,5 +189,6 @@ module.exports = {
   restoreReader,
   getReaderById,
   resetReaderPassword,
- 
+  lockReaderAccount,
+  unlockReaderAccount,
 };
