@@ -2,6 +2,7 @@
 const { Op } = require('sequelize');
 const sequelize = require('../config/database');
 const mailService = require('./mailService');
+const { emitToUser } = require('../config/socket');
 
 const {
   LoanSlip,
@@ -1110,6 +1111,44 @@ async function approveReservationService(payload) {
     console.error('❌ approveReservationService: unexpected error when sending FCM', fcmErr?.message || fcmErr);
   }
 
+  // -----------------------------
+  // SEND SOCKET (emit tới client qua Socket.IO)
+  // -----------------------------
+  try {
+    // Lấy accountId (nếu có) để dùng làm userId cho room (client thường đăng ký bằng accountId)
+    let targetUserId = txResult.readerId;
+    try {
+      const acctRow = await Reader.findByPk(txResult.readerId, { attributes: ['accountId'] });
+      if (acctRow?.accountId) targetUserId = acctRow.accountId;
+    } catch (e) {
+      // ignore - giữ targetUserId = readerId
+    }
+
+    const pickupDeadline = addDaysDateOnly(fmtToday(), 3);
+
+    const socketData = {
+      type: 'RESERVATION_APPROVED',
+      slipId: String(txResult.loanSlipId),
+      pickupDeadline,
+      dueDate: txResult.dueDate,
+      itemsCount: String((txResult.assignedCopyMap || []).length),
+      notificationId: txResult.notificationId ? String(txResult.notificationId) : '',
+      link: `/loan/${txResult.loanSlipId}`
+    };
+
+    // emit tới room tương ứng (initSocket sẽ tạo room `user_<userId>` khi client register)
+    // emitToUser có thể log lỗi nếu io chưa sẵn sàng
+    if (typeof emitToUser === 'function') {
+      emitToUser(targetUserId, 'reservationApproved', socketData);
+      console.log('✅ approveReservationService: Socket emitted to user', { targetUserId, socketData });
+    } else {
+      console.warn('⚠️ approveReservationService: emitToUser không khả dụng, bỏ qua emit socket');
+    }
+  } catch (socketErr) {
+    console.error('❌ approveReservationService: failed to emit socket', socketErr?.message || socketErr);
+    // Không throw — socket lỗi không rollback transaction
+  }
+
   return {
     message: 'Duyệt phiếu thành công. Phiếu đã chuyển sang WAITING_FOR_PICKUP (chờ độc giả đến lấy).',
     loanSlipId: txResult.loanSlipId,
@@ -1117,6 +1156,7 @@ async function approveReservationService(payload) {
     notificationId: txResult.notificationId || null
   };
 }
+
 
 
 
