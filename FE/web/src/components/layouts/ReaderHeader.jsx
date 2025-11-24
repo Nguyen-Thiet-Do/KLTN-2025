@@ -2,6 +2,8 @@ import { useMemo, useState, useEffect } from "react";
 import { Link as RouterLink, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../../contexts/AuthContext";
 import { useCart } from "../../contexts/CartContext";
+import { useFavorite } from "../../contexts/FavoriteContext";
+
 import {
   AppBar,
   Toolbar,
@@ -11,7 +13,7 @@ import {
   Button,
   IconButton,
   Avatar,
-  Menu,
+  Menu, 
   MenuItem,
   Divider,
   Typography,
@@ -28,7 +30,8 @@ import {
   AccountCircle,
   Settings,
   ExitToApp,
-  ShoppingCartOutlined,      // CART ICON ADDED
+  ShoppingCartOutlined, 
+  FavoriteBorder ,     // CART ICON ADDED
 } from "@mui/icons-material";
 
 export default function ReaderHeader() {
@@ -42,6 +45,8 @@ export default function ReaderHeader() {
 
   const maxContentWidth = 1280;
 const { count } = useCart();
+const { favoriteCount } = useFavorite();
+
   const tabs = useMemo(
     () => [
       { path: "/", label: "Trang chủ", icon: "🏠" },
@@ -222,6 +227,14 @@ const { count } = useCart();
   <IconButton size="small" onClick={() => navigate("/cart")}>
     <Badge badgeContent={count} color="primary">
       <ShoppingCartOutlined />
+    </Badge>
+  </IconButton>
+</Tooltip>
+{/* FAVORITE ICON */}
+<Tooltip title="Yêu thích">
+  <IconButton size="small" onClick={() => navigate("/favorite")}>
+    <Badge badgeContent={favoriteCount} color="error">
+      <FavoriteBorder />
     </Badge>
   </IconButton>
 </Tooltip>

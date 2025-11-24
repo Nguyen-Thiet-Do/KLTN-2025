@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import axios from "axios";
 import api from "../../services/api";
 import { useCart } from "../../contexts/CartContext";
+import { useFavorite } from "../../contexts/FavoriteContext";   // ★ ADD
 
 import { useParams, useNavigate } from "react-router-dom";
 import {
@@ -19,7 +20,8 @@ import {
   Person as PersonIcon,
   Business as BusinessIcon,
   LocalLibrary as LocalLibraryIcon,
-  AutoStories as EbookIcon
+  AutoStories as EbookIcon,
+  FavoriteBorder, Favorite    // ★ ADD
 } from "@mui/icons-material";
 
 import ReaderHeader from "../../components/layouts/ReaderHeader";
@@ -67,7 +69,11 @@ export default function DocumentDetail() {
   const [loadingSimilar, setLoadingSimilar] = useState(false);
 
   const [userId, setUserId] = useState(sessionStorage.getItem("userId"));
-const { loadCart } = useCart();
+  const { loadCart } = useCart();
+
+  const { loadFavorite } = useFavorite();      // ★ ADD
+  const [isFavorite, setIsFavorite] = useState(false);   // ★ ADD
+
   const [snack, setSnack] = useState({
     open: false,
     message: "",
@@ -79,13 +85,10 @@ const { loadCart } = useCart();
   const loadDetailIdRef = useRef(0);
   const loadSimilarIdRef = useRef(0);
 
-  // ⭐ ĐỒNG BỘ USERID KHI THAY ĐỔI (storage event từ tab khác)
   useEffect(() => {
     const handleStorageChange = (e) => {
       if (e.key === "userId") {
         const newUserId = e.newValue;
-        console.log("DocumentDetail: userId changed from storage event:", newUserId);
-        
         if (newUserId !== userId) {
           setUserId(newUserId);
         }
@@ -96,11 +99,9 @@ const { loadCart } = useCart();
     return () => window.removeEventListener("storage", handleStorageChange);
   }, [userId]);
 
-  // ⭐ KIỂM TRA USERID KHI COMPONENT MOUNT
   useEffect(() => {
     const currentUserId = sessionStorage.getItem("userId");
     if (currentUserId !== userId) {
-      console.log("DocumentDetail: userId changed on mount:", currentUserId);
       setUserId(currentUserId);
     }
   }, []);
@@ -151,6 +152,19 @@ const { loadCart } = useCart();
     }
   };
 
+  // ★ ADD: kiểm tra trạng thái yêu thích
+  const checkFavorite = async () => {
+    try {
+      const res = await api.get("/favorite");
+      const exists = res.data.some(item => item.documentId === Number(id));
+      setIsFavorite(exists);
+    } catch {}
+  };
+
+  useEffect(() => {
+    if (doc) checkFavorite();
+  }, [doc]);
+
   useEffect(() => {
     load();
     loadSimilar();
@@ -169,7 +183,7 @@ const { loadCart } = useCart();
     }
   };
 
-   const addToCart = async () => {
+  const addToCart = async () => {
     const token = sessionStorage.getItem("accessToken");
 
     if (!token) {
@@ -182,12 +196,10 @@ const { loadCart } = useCart();
     }
 
     try {
-
-
-    await api.post("/cart/add", {
-      documentId: doc.documentId 
-     });
-loadCart(); 
+      await api.post("/cart/add", {
+        documentId: doc.documentId
+      });
+      loadCart();
       setSnack({
         open: true,
         message: "Đã thêm vào giỏ sách!",
@@ -203,6 +215,47 @@ loadCart();
     }
   };
 
+  // ★ ADD: toggle favorite
+  const toggleFavorite = async () => {
+    const token = sessionStorage.getItem("accessToken");
+
+    if (!token) {
+      setSnack({
+        open: true,
+        message: "Vui lòng đăng nhập để sử dụng yêu thích!",
+        severity: "error",
+      });
+      return;
+    }
+
+    try {
+      if (isFavorite) {
+        await api.delete(`/favorite/${doc.documentId}`);
+        setIsFavorite(false);
+        loadFavorite();
+        setSnack({
+          open: true,
+          message: "Đã xóa khỏi yêu thích",
+          severity: "info",
+        });
+      } else {
+        await api.post("/favorite/add", { documentId: doc.documentId });
+        setIsFavorite(true);
+        loadFavorite();
+        setSnack({
+          open: true,
+          message: "Đã thêm vào yêu thích!",
+          severity: "success",
+        });
+      }
+    } catch {
+      setSnack({
+        open: true,
+        message: "Lỗi thao tác yêu thích",
+        severity: "error",
+      });
+    }
+  };
 
   const title = doc?.title ?? "—";
   const language = doc?.language ?? "—";
@@ -304,6 +357,16 @@ loadCart();
                       Thêm vào giỏ sách
                     </Button>
 
+                    {/* ★ ADD — Nút favorite */}
+                    <Button
+                      variant="outlined"
+                      color="error"
+                      onClick={toggleFavorite}
+                      sx={{ minWidth: 56 }}
+                    >
+                      {isFavorite ? <Favorite /> : <FavoriteBorder />}
+                    </Button>
+
                     <Button variant="outlined" onClick={() => navigate(-1)}>
                       Quay lại
                     </Button>
@@ -312,7 +375,6 @@ loadCart();
               </Stack>
             </Paper>
 
-            {/* MÔ TẢ */}
             {doc.description && (
               <Paper sx={{ p: 4, borderRadius: 4 }}>
                 <Typography variant="h5" fontWeight={700} gutterBottom>
@@ -322,7 +384,6 @@ loadCart();
               </Paper>
             )}
 
-            {/* SÁCH TƯƠNG TỰ */}
             <Paper sx={{ p: 4, borderRadius: 4 }}>
               <Typography variant="h5" fontWeight={700} mb={2}>
                 Sách tương tự
@@ -357,7 +418,6 @@ loadCart();
 
       <ReaderFooter />
 
-      {/* SNACKBAR */}
       <Snackbar
         open={snack.open}
         autoHideDuration={2500}

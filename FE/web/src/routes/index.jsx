@@ -15,6 +15,8 @@ import EbookReader from "../pages/ReaderHome/EbookReader";
 // ▼ ADD: Cart
 import CartPage from "../pages/cart";
 
+import FavoritePage from "../pages/favorite";
+
 import LoanHistoryPage from "../pages/reader/LoanHistoryPage";
 
 import ProfilePage from "../pages/reader/ProfilePage";
@@ -33,7 +35,8 @@ export const router = createBrowserRouter([
 
       // ▼ ADD CART ROUTE
       { path: "cart", element: <CartPage /> },
-{ path: "reader/loans/my", element: <LoanHistoryPage /> },
+      { path: "favorite", element: <FavoritePage /> },
+      { path: "reader/loans/my", element: <LoanHistoryPage /> },
 
       // ▼ Chi tiết tài liệu
       { path: "reader/documents/:id", element: <DocumentDetail /> },
