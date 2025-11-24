@@ -1,7 +1,8 @@
 // src/contexts/NotificationContext.jsx
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { io } from "socket.io-client";
 import api from "../services/api";
+import { useAuth } from "./AuthContext"; // <- sử dụng auth
 
 const NotificationContext = createContext();
 
@@ -9,69 +10,133 @@ export function useNotification() {
   return useContext(NotificationContext);
 }
 
-// EXPORT ĐÚNG TÊN -> KHỚP App.jsx
 export function NotificationProvider({ children }) {
+  const { user, isAuthenticated, loading: authLoading } = useAuth();
   const [unreadCount, setUnreadCount] = useState(0);
+  const socketRef = useRef(null);
 
-  // Lấy số thông báo chưa đọc
+  const getSocketBaseUrl = () => {
+    const socketEnv = import.meta.env.VITE_SOCKET_URL;
+    if (socketEnv) return socketEnv;
+    const apiUrl = import.meta.env.VITE_API_URL;
+    if (apiUrl) return apiUrl.replace(/\/api\/?$/, "");
+    return window.location.origin;
+  };
+
+  // Load số chưa đọc — chỉ gọi khi đã có auth và token
   const loadUnreadCount = async () => {
     try {
       const res = await api.get("/notifications", {
-        page: 1,
-        limit: 1,
-        isRead: 0,
+        params: { page: 1, limit: 1, isRead: 0 },
       });
-
-      setUnreadCount(res.data?.total || 0);
-    } catch {
+      setUnreadCount(res.data?.total ?? 0);
+    } catch (err) {
+      // Nếu backend trả 401 và có interceptor redirect -> vẫn catch ở đây.
+      // Không clear sessionStorage ở đây để tránh vòng lặp.
+      console.error("loadUnreadCount failed:", err?.response?.status || err);
       setUnreadCount(0);
     }
   };
 
-  // Load đầu tiên
+  // Chỉ load khi auth đã sẵn sàng và user/authenticated
   useEffect(() => {
+    if (authLoading) return; // chờ init auth xong
+    if (!isAuthenticated) {
+      setUnreadCount(0);
+      return;
+    }
     loadUnreadCount();
-  }, []);
+  }, [authLoading, isAuthenticated]); // chạy lại khi auth thay đổi
 
-  // Kết nối realtime Socket.IO
+  // Kết nối socket — chỉ khi user đã login
   useEffect(() => {
+    if (authLoading) return;
+    if (!isAuthenticated) return;
+
     const token = sessionStorage.getItem("accessToken");
     if (!token) return;
 
-    const accountId = sessionStorage.getItem("accountId");
+    const accountId = user?.accountId || sessionStorage.getItem("accountId");
     if (!accountId) return;
 
-    const socket = io("http://localhost:8080", {
+    const baseUrl = getSocketBaseUrl();
+
+    // Nếu còn socket cũ -> disconnect
+    if (socketRef.current) {
+      try {
+        socketRef.current.disconnect();
+      } catch { }
+      socketRef.current = null;
+    }
+
+    const socket = io(baseUrl, {
       auth: { token },
+      autoConnect: true,
+      transports: ["websocket", "polling"],
     });
+    socketRef.current = socket;
 
-    // Join đúng room
-    socket.emit("join", `user_${accountId}`);
+    const onConnect = () => {
+      socket.emit("join", `user_${accountId}`);
+    };
 
-    // Khi có thông báo mới -> tăng số chưa đọc
-    socket.on("notification:new", () => {
+    const onConnectError = (err) => {
+      console.error("Socket connect_error:", err);
+      // KHÔNG redirect ở đây
+    };
+
+    const onNewNotification = () => {
       setUnreadCount((v) => v + 1);
-    });
+    };
 
-    return () => socket.disconnect();
-  }, []);
+    socket.on("connect", onConnect);
+    socket.on("connect_error", onConnectError);
+    socket.on("notification:new", onNewNotification);
 
-  // API: đánh dấu đã đọc
+    return () => {
+      try {
+        socket.off("connect", onConnect);
+        socket.off("connect_error", onConnectError);
+        socket.off("notification:new", onNewNotification);
+        socket.disconnect();
+      } catch (err) {
+        console.warn("Socket cleanup error:", err);
+      } finally {
+        socketRef.current = null;
+      }
+    };
+  }, [authLoading, isAuthenticated, user?.accountId]);
+
+  // Mark read/unread/markAll: bắt lỗi cẩn thận
   const markRead = async (id) => {
-    await api.post(`/notifications/${id}/mark-read`);
-    setUnreadCount((v) => Math.max(0, v - 1));
+    try {
+      await api.post(`/notifications/${id}/mark-read`);
+      setUnreadCount((v) => Math.max(0, v - 1));
+    } catch (err) {
+      console.error("markRead error:", err?.response?.status || err);
+      // không throw nếu bạn muốn tránh crash gọi từ UI
+      throw err;
+    }
   };
 
-  // API: đánh dấu chưa đọc
   const markUnread = async (id) => {
-    await api.post(`/notifications/${id}/mark-unread`);
-    setUnreadCount((v) => v + 1);
+    try {
+      await api.post(`/notifications/${id}/mark-unread`);
+      setUnreadCount((v) => v + 1);
+    } catch (err) {
+      console.error("markUnread error:", err?.response?.status || err);
+      throw err;
+    }
   };
 
-  // API: đánh dấu tất cả đã đọc
   const markAllRead = async () => {
-    await api.post("/notifications/mark-all-read");
-    setUnreadCount(0);
+    try {
+      await api.post("/notifications/mark-all-read");
+      setUnreadCount(0);
+    } catch (err) {
+      console.error("markAllRead error:", err?.response?.status || err);
+      throw err;
+    }
   };
 
   return (

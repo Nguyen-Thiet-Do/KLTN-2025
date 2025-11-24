@@ -25,6 +25,10 @@ import {
   Button,
   TextField,
   InputAdornment,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
 } from "@mui/material";
 import {
   ExpandMore,
@@ -32,11 +36,22 @@ import {
   Refresh as RefreshIcon,
   Search as SearchIcon,
 } from "@mui/icons-material";
-import { fetchLoanSlips, getDocumentDetail } from "../../services/loanSlips";
+import { fetchLoanSlips, getDocumentDetail, cancelReservation } from "../../services/loanSlips";
 import AddLoanSlipDialog from "../Borrow/AddLoanSlipDialog";
 import ApproveReservationDialog from "./ApproveReservationDialog";
 import ReturnSingleDialog from "./ReturnSingleDialog";
 import ReturnBulkDialog from "./ReturnBulkDialog";
+import { useAuth } from "../../contexts/AuthContext"; // điều chỉnh path nếu khác
+
+/**
+ * FULL Borrow.jsx với chức năng:
+ * - Hiển thị danh sách phiếu
+ * - Duyệt (approve)
+ * - Trả (single/bulk)
+ * - Hủy phiếu đặt trước (PENDING) với dialog nhập lý do => gọi API cancelReservation
+ *
+ * Lưu ý: chức năng cancelReservation cần export ở src/services/loanSlips.js
+ */
 
 const TABS = [
   { key: "PENDING", label: "Chờ duyệt" },
@@ -90,7 +105,17 @@ function parseRequestedDocumentId(note) {
   return m ? Number(m[1]) : null;
 }
 
-function Row({ row, titleCache, onApprove, onSingleReturn, onBulkReturn }) {
+function Money({ value }) {
+  if (value == null || value === "") return "-";
+  const n = Number(value);
+  return isNaN(n) ? String(value) : `${nf.format(n)}₫`;
+}
+
+/**
+ * Row component
+ * nhận thêm onCancel prop để kích hoạt dialog hủy từ parent
+ */
+function Row({ row, titleCache, onApprove, onSingleReturn, onBulkReturn, onCancel }) {
   const [open, setOpen] = useState(false);
   const librarianName = row?.Librarian?.fullName || (row?.librarianId ? `#${row.librarianId}` : "-");
 
@@ -166,9 +191,21 @@ function Row({ row, titleCache, onApprove, onSingleReturn, onBulkReturn }) {
 
         <TableCell align="right">
           {String(row.status).toUpperCase() === "PENDING" && (
-            <Button size="small" variant="contained" onClick={() => onApprove?.(row)}>
-              Duyệt
-            </Button>
+            <>
+              <Button size="small" variant="contained" onClick={() => onApprove?.(row)}>
+                Duyệt
+              </Button>
+
+              <Button
+                size="small"
+                variant="outlined"
+                color="error"
+                sx={{ ml: 1 }}
+                onClick={() => onCancel?.(row)}
+              >
+                Hủy
+              </Button>
+            </>
           )}
 
           {String(row.status).toUpperCase() === "BORROWING" && (
@@ -345,13 +382,8 @@ function Row({ row, titleCache, onApprove, onSingleReturn, onBulkReturn }) {
   );
 }
 
-function Money({ value }) {
-  if (value == null || value === "") return "-";
-  const n = Number(value);
-  return isNaN(n) ? String(value) : `${nf.format(n)}₫`;
-}
-
 export default function Borrow() {
+  const { user } = useAuth(); // lấy user từ AuthContext
   const [openCreate, setOpenCreate] = useState(false);
   const [openApprove, setOpenApprove] = useState(false);
   const [selectedSlip, setSelectedSlip] = useState(null);
@@ -361,6 +393,10 @@ export default function Borrow() {
 
   const [openReturnBulk, setOpenReturnBulk] = useState(false);
   const [selectedSlipForBulkReturn, setSelectedSlipForBulkReturn] = useState(null);
+
+  // Cancel reservation states
+  const [openCancel, setOpenCancel] = useState(false);
+  const [selectedSlipForCancel, setSelectedSlipForCancel] = useState(null);
 
   const [tab, setTab] = useState("PENDING");
   const [page, setPage] = useState(1);
@@ -480,6 +516,19 @@ export default function Borrow() {
     setSelectedSlipForBulkReturn(null);
   }
 
+  // Cancel handlers
+  function handleOpenCancel(slip) {
+    setSelectedSlipForCancel(slip);
+    setOpenCancel(true);
+  }
+  function handleCloseCancel() {
+    setOpenCancel(false);
+    setSelectedSlipForCancel(null);
+  }
+
+  // Lấy librarianId từ auth context (theo AuthContext bạn cung cấp user.accountId)
+  const librarianId = user?.accountId ? Number(user.accountId) : null;
+
   return (
     <Box sx={{ p: 3 }}>
       <Box sx={{ mb: 4 }}>
@@ -567,7 +616,6 @@ export default function Borrow() {
                 </Button>
               </Stack>
             </Stack>
-
 
             <Divider />
 
@@ -691,6 +739,7 @@ export default function Borrow() {
                     row={r}
                     titleCache={titleCache}
                     onApprove={(slip) => { setSelectedSlip(slip); setOpenApprove(true); }}
+                    onCancel={(slip) => handleOpenCancel(slip)}
                     onSingleReturn={(slip, detail) => handleOpenSingleReturn(slip, detail)}
                     onBulkReturn={(slip) => handleOpenBulkReturn(slip)}
                   />
@@ -757,6 +806,95 @@ export default function Borrow() {
           load();
         }}
       />
+
+      {/* Cancel Reservation Dialog (embedded) */}
+      <CancelReservationDialog
+        open={openCancel}
+        onClose={() => handleCloseCancel()}
+        slip={selectedSlipForCancel}
+        librarianId={librarianId}
+        onCancelled={(resp) => {
+          // đóng dialog và reload
+          handleCloseCancel();
+          load();
+        }}
+      />
     </Box>
+  );
+}
+
+/**
+ * CancelReservationDialog (embedded component)
+ * Gọi API cancelReservation (DELETE) từ services/loanSlips
+ */
+function CancelReservationDialog({ open, onClose, slip, librarianId, onCancelled }) {
+  const [reason, setReason] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const slipId = slip?.loanSlipId ?? null;
+
+  useEffect(() => {
+    if (!open) {
+      setReason("");
+      setSubmitting(false);
+    }
+  }, [open]);
+
+  async function handleConfirm() {
+    if (!slipId) return;
+    if (!librarianId) {
+      alert("Không xác định thủ thư (librarianId). Vui lòng đăng nhập lại.");
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const res = await cancelReservation(slipId, { librarianId, reason });
+      if (res && res.success) {
+        // successful
+        if (onCancelled) onCancelled(res);
+      } else {
+        alert(res?.message || "Hủy phiếu thất bại");
+      }
+    } catch (err) {
+      console.error("cancelReservation error", err);
+      alert(err?.message || "Lỗi khi hủy phiếu");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <Dialog open={Boolean(open)} onClose={onClose} fullWidth maxWidth="sm">
+      <DialogTitle>Hủy phiếu đặt trước #{slipId ?? ""}</DialogTitle>
+      <DialogContent>
+        <Stack spacing={1} sx={{ mt: 1 }}>
+          <Typography variant="body2" color="text.secondary">
+            Hủy phiếu đặt trước sẽ xóa các bản ghi đặt (LoanDetail) liên quan và gửi thông báo tới độc giả.
+            Vui lòng nhập lý do (tùy chọn) để lưu vào ghi chú phiếu.
+          </Typography>
+          <TextField
+            label="Lý do hủy (tùy chọn)"
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            multiline
+            minRows={3}
+            fullWidth
+            sx={{ mt: 1 }}
+          />
+        </Stack>
+      </DialogContent>
+
+      <DialogActions sx={{ px: 3, pb: 2 }}>
+        <Button onClick={onClose} disabled={submitting}>Đóng</Button>
+        <Button
+          variant="contained"
+          color="error"
+          onClick={handleConfirm}
+          disabled={submitting}
+        >
+          {submitting ? "Đang xử lý..." : "Xác nhận hủy"}
+        </Button>
+      </DialogActions>
+    </Dialog>
   );
 }
