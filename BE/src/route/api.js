@@ -1395,6 +1395,46 @@ routeApi.get('/', (req, res) => {
     }
   ]
 },
+{
+  group: 'Favorite',
+  icon: '❤️',
+  routes: [
+    {
+      method: 'GET',
+      path: '/api/favorite',
+      description: 'Lấy danh sách tài liệu yêu thích của độc giả',
+      auth: true,
+      role: 'Reader (roleId = 3)'
+    },
+    {
+      method: 'POST',
+      path: '/api/favorite/add',
+      description: 'Thêm tài liệu vào danh sách yêu thích',
+      auth: true,
+      role: 'Reader (roleId = 3)',
+      body: {
+        documentId: 'number (required)'
+      }
+    },
+    {
+      method: 'DELETE',
+      path: '/api/favorite/:documentId',
+      description: 'Xóa 1 tài liệu khỏi danh sách yêu thích',
+      auth: true,
+      role: 'Reader (roleId = 3)',
+      params: {
+        documentId: 'number'
+      }
+    },
+    {
+      method: 'DELETE',
+      path: '/api/favorite',
+      description: 'Xóa toàn bộ danh sách yêu thích',
+      auth: true,
+      role: 'Reader (roleId = 3)'
+    }
+  ]
+},
 
       {
         group: 'Test',
