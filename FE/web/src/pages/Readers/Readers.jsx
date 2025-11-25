@@ -45,11 +45,13 @@ import {
   deleteReader,
   resetReaderPassword,
   restoreReader,
-   lockReaderAccount,
+  lockReaderAccount,
   unlockReaderAccount,
 } from "../../services/readerService";
 import AddReader from "./AddReader";
 import EditReader from "./EditReader";
+import QRPaymentModal from "./QRPaymentModal";
+import { completeRegistration } from "../../services/authService";
 
 export default function Readers() {
   const [readers, setReaders] = useState([]);
@@ -59,8 +61,11 @@ export default function Readers() {
   const [editingReader, setEditingReader] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
-  const [tabValue, setTabValue] = useState(0); // 0: Đã có thẻ, 1: Chưa có thẻ
+  const [tabValue, setTabValue] = useState(0);
   const itemsPerPage = 5;
+
+  const [paymentModalOpen, setPaymentModalOpen] = useState(false);
+  const [currentPaymentData, setCurrentPaymentData] = useState(null);
 
   const fetchData = async () => {
     try {
@@ -106,7 +111,6 @@ export default function Readers() {
     return "-";
   };
 
-  // 🗑️ Xóa mềm độc giả
   const handleDelete = async (id, name) => {
     const confirmed = window.confirm(`Bạn có chắc chắn muốn xóa độc giả "${name}" không?`);
     if (!confirmed) return;
@@ -124,7 +128,6 @@ export default function Readers() {
     }
   };
 
-  // ♻️ Khôi phục độc giả
   const handleRestore = async (id, name) => {
     const confirmed = window.confirm(`Khôi phục độc giả "${name}"?`);
     if (!confirmed) return;
@@ -142,7 +145,6 @@ export default function Readers() {
     }
   };
 
-  // 🔐 Đặt lại mật khẩu thủ công
   const handleResetPassword = async (reader) => {
     const newPassword = prompt(`Nhập mật khẩu mới cho "${reader.fullName}":`);
     if (!newPassword || newPassword.trim() === "") return alert("Mật khẩu không hợp lệ.");
@@ -156,38 +158,144 @@ export default function Readers() {
     }
   };
 
-  // 🔒 Khoá tài khoản
- const handleLockAccount = async (readerId, name) => {
-  if (!window.confirm(`Khoá tài khoản của "${name}"?`)) return;
-  try {
-    const token = sessionStorage.getItem("accessToken");
-    const res = await lockReaderAccount(readerId, token);
-    alert(res.message || "Đã khoá tài khoản");
-    fetchData();
-  } catch (err) {
-    alert("Lỗi: " + (err.response?.data?.message || err.message));
-  }
-};
+  const handleLockAccount = async (readerId, name) => {
+    if (!window.confirm(`Khoá tài khoản của "${name}"?`)) return;
+    try {
+      const token = sessionStorage.getItem("accessToken");
+      const res = await lockReaderAccount(readerId, token);
+      alert(res.message || "Đã khoá tài khoản");
+      fetchData();
+    } catch (err) {
+      alert("Lỗi: " + (err.response?.data?.message || err.message));
+    }
+  };
 
+  const handleUnlockAccount = async (readerId, name) => {
+    if (!window.confirm(`Mở khoá tài khoản của "${name}"?`)) return;
+    try {
+      const token = sessionStorage.getItem("accessToken");
+      const res = await unlockReaderAccount(readerId, token);
+      alert(res.message || "Đã mở khoá tài khoản");
+      fetchData();
+    } catch (err) {
+      alert("Lỗi: " + (err.response?.data?.message || err.message));
+    }
+  };
 
-  // 🔓 Mở khoá tài khoản
-const handleUnlockAccount = async (readerId, name) => {
-  if (!window.confirm(`Mở khoá tài khoản của "${name}"?`)) return;
-  try {
-    const token = sessionStorage.getItem("accessToken");
-    const res = await unlockReaderAccount(readerId, token);
-    alert(res.message || "Đã mở khoá tài khoản");
-    fetchData();
-  } catch (err) {
-    alert("Lỗi: " + (err.response?.data?.message || err.message));
-  }
-};
+  // ✅ Tạo thẻ thành viên - CẢI THIỆN với xử lý lỗi đầy đủ
+  const handleCreateMemberCard = async (readerId) => {
+    if (!window.confirm("Tạo thẻ thành viên cho độc giả này?")) return;
+
+    try {
+      const token = sessionStorage.getItem("accessToken");
+      setLoading(true);
+
+      console.log("📤 Đang gọi API tạo thanh toán cho reader:", readerId);
+
+      const res = await completeRegistration(
+        {
+          readerId: readerId,
+          cardTypeId: 2, // PREMIUM card
+          action: "PAY"
+        },
+        token
+      );
+
+      console.log("✅ API response:", res);
+
+      // ✅ Xử lý response từ backend
+      // Backend trả về: { ok: true, data: { payment: {...}, paymentLink: {...} } }
+      const responseData = res.data || res;
+      
+      // Lấy thông tin thanh toán
+      const payment = responseData.payment;
+      const paymentLink = responseData.paymentLink;
+      
+      if (!payment || !payment.paymentId) {
+        throw new Error("Không nhận được thông tin thanh toán từ server");
+      }
+
+      // ✅ Chuẩn bị dữ liệu cho modal
+      const paymentInfo = {
+        paymentId: payment.paymentId,
+        qrCodeUrl: paymentLink?.qrCode || null,
+        checkoutUrl: paymentLink?.checkoutUrl || null,
+        amount: payment.amount || 10000
+      };
+
+      console.log("💳 Payment info:", paymentInfo);
+
+      // Validate có thông tin thanh toán
+      if (!paymentInfo.qrCodeUrl && !paymentInfo.checkoutUrl) {
+        throw new Error("Không có thông tin thanh toán (QR hoặc link). Vui lòng kiểm tra cấu hình PayOS.");
+      }
+
+      // ✅ Mở modal hiển thị QR
+      setCurrentPaymentData(paymentInfo);
+      setPaymentModalOpen(true);
+      setLoading(false);
+
+    } catch (err) {
+      setLoading(false);
+      console.error("❌ Lỗi tạo thẻ:", err);
+      
+      // ✅ Xử lý lỗi chi tiết
+      let errorMessage = "Không thể tạo thẻ thành viên";
+      
+      if (err.response) {
+        const serverError = err.response.data;
+        
+        // Xử lý các loại lỗi cụ thể
+        if (serverError.message === "PAYOS_CREATE_FAILED") {
+          errorMessage = `⚠️ Không thể kết nối với cổng thanh toán PayOS.
+
+Nguyên nhân có thể:
+- PayOS API Key không hợp lệ
+- PayOS Service đang bảo trì
+- Cấu hình backend chưa đúng
+
+Vui lòng liên hệ quản trị viên hoặc thử lại sau.`;
+        } else if (serverError.message === "Reader already has an active member card") {
+          errorMessage = "⚠️ Độc giả này đã có thẻ thành viên rồi!";
+        } else if (serverError.message) {
+          errorMessage = serverError.message;
+        }
+        
+        // Log chi tiết để debug
+        console.error("Server error details:", {
+          status: err.response.status,
+          data: serverError
+        });
+      } else if (err.message) {
+        errorMessage = err.message;
+      }
+      
+      alert(`❌ ${errorMessage}`);
+    }
+  };
+
+  // ✅ Xử lý sau khi thanh toán thành công
+  const handlePaymentSuccess = async () => {
+    console.log("✅ Thanh toán thành công - Đang reload data...");
+    
+    // Reload danh sách độc giả
+    await fetchData();
+    
+    // Tự động chuyển sang tab "Đã có thẻ"
+    setTabValue(0);
+    
+    // Đóng modal
+    setPaymentModalOpen(false);
+    setCurrentPaymentData(null);
+    
+    // Hiển thị thông báo
+    alert("🎉 Thẻ thành viên đã được kích hoạt thành công!");
+  };
 
   const filteredReaders = useMemo(() => {
     const keyword = searchQuery.trim().toLowerCase();
     let filtered = readers;
 
-    // Lọc theo từ khoá
     if (keyword) {
       filtered = filtered.filter(
         (r) =>
@@ -197,12 +305,9 @@ const handleUnlockAccount = async (readerId, name) => {
       );
     }
 
-    // Lọc theo tab
     if (tabValue === 0) {
-      // Đã có thẻ
       filtered = filtered.filter((r) => r.memberCard !== null);
     } else if (tabValue === 1) {
-      // Chưa có thẻ
       filtered = filtered.filter((r) => r.memberCard === null);
     }
 
@@ -311,7 +416,6 @@ const handleUnlockAccount = async (readerId, name) => {
             />
           </Stack>
 
-          {/* Tabs phân loại theo thẻ */}
           <Box sx={{ mt: 2, borderBottom: 1, borderColor: "divider" }}>
             <Tabs
               value={tabValue}
@@ -349,19 +453,19 @@ const handleUnlockAccount = async (readerId, name) => {
             <Table>
               <TableHead>
                 <TableRow sx={{ backgroundColor: "rgba(102,126,234,0.08)" }}>
-                  <TableCell sx={{ fontWeight: 700 }}>Mã thư thư</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>Mã độc giả</TableCell>
                   <TableCell sx={{ fontWeight: 700 }}>Họ tên</TableCell>
                   <TableCell sx={{ fontWeight: 700 }}>Giới tính</TableCell>
                   <TableCell sx={{ fontWeight: 700 }}>Ngày sinh</TableCell>
                   <TableCell sx={{ fontWeight: 700 }}>Số điện thoại</TableCell>
                   <TableCell sx={{ fontWeight: 700 }}>CCCD</TableCell>
                   <TableCell sx={{ fontWeight: 700 }}>Địa chỉ</TableCell>
-                   <TableCell sx={{ fontWeight: 700 }}>Email</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>Email</TableCell>
                   {tabValue === 0 && (
                     <>
-                      <TableCell sx={{ fontWeight: 700 }}>Số sách đang mượn</TableCell>
-                      <TableCell sx={{ fontWeight: 700 }}>Số sách đang chờ</TableCell>
-                      <TableCell sx={{ fontWeight: 700 }}>Số sách quá hạn</TableCell>
+                      <TableCell sx={{ fontWeight: 700 }}>Đang mượn</TableCell>
+                      <TableCell sx={{ fontWeight: 700 }}>Đang chờ</TableCell>
+                      <TableCell sx={{ fontWeight: 700 }}>Quá hạn</TableCell>
                     </>
                   )}
                   <TableCell sx={{ fontWeight: 700, textAlign: "center" }}>Hành động</TableCell>
@@ -369,9 +473,9 @@ const handleUnlockAccount = async (readerId, name) => {
               </TableHead>
 
               <TableBody>
-{currentReaders.length === 0 ? (
+                {currentReaders.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={tabValue === 0 ? 11 : 8} sx={{ textAlign: "center", py: 4 }}>
+                    <TableCell colSpan={tabValue === 0 ? 12 : 9} sx={{ textAlign: "center", py: 4 }}>
                       <Typography variant="body1" color="text.secondary">
                         Không có dữ liệu độc giả
                       </Typography>
@@ -436,10 +540,9 @@ const handleUnlockAccount = async (readerId, name) => {
                         <TableCell>{r.cccd || "-"}</TableCell>
                         <TableCell>{r.address || "-"}</TableCell>
                         <TableCell>{r.email || "-"}</TableCell>
-                        {/* Chỉ hiển thị các cột thống kê cho tab "Đã có thẻ" */}
+
                         {tabValue === 0 && (
                           <>
-                            {/* Số sách đang mượn */}
                             <TableCell>
                               <Chip
                                 icon={<BookIcon />}
@@ -448,8 +551,6 @@ const handleUnlockAccount = async (readerId, name) => {
                                 color={borrowedCount > 0 ? "primary" : "default"}
                               />
                             </TableCell>
-
-                            {/* Số sách đang chờ */}
                             <TableCell>
                               <Chip
                                 label={pendingCount + waitingForPickupCount}
@@ -457,8 +558,6 @@ const handleUnlockAccount = async (readerId, name) => {
                                 color={pendingCount + waitingForPickupCount > 0 ? "info" : "default"}
                               />
                             </TableCell>
-
-                            {/* Số sách quá hạn */}
                             <TableCell>
                               {overdueCount > 0 ? (
                                 <Badge badgeContent={overdueCount} color="error">
@@ -478,6 +577,21 @@ const handleUnlockAccount = async (readerId, name) => {
 
                         <TableCell sx={{ textAlign: "center" }}>
                           <Stack direction="row" spacing={1} justifyContent="center" flexWrap="wrap">
+                            {tabValue === 1 && !r.deleted && (
+                              <Tooltip title="Tạo thẻ thành viên">
+                                <IconButton
+                                  size="small"
+                                  onClick={() => handleCreateMemberCard(r.readerId)}
+                                  sx={{
+                                    color: "#3182CE",
+                                    "&:hover": { backgroundColor: "rgba(49,130,206,0.1)" },
+                                  }}
+                                >
+                                  <CardIcon />
+                                </IconButton>
+                              </Tooltip>
+                            )}
+
                             {!r.deleted && (
                               <Tooltip title="Sửa thông tin">
                                 <IconButton
@@ -595,6 +709,18 @@ const handleUnlockAccount = async (readerId, name) => {
             </Box>
           )}
         </Card>
+      )}
+
+      {paymentModalOpen && currentPaymentData && (
+        <QRPaymentModal
+          open={paymentModalOpen}
+          onClose={() => {
+            setPaymentModalOpen(false);
+            setCurrentPaymentData(null);
+          }}
+          paymentData={currentPaymentData}
+          onPaymentSuccess={handlePaymentSuccess}
+        />
       )}
 
       {showAddModal && (
