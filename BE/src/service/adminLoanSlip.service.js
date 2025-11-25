@@ -431,14 +431,14 @@ async function createLoanSlipService(body) {
   const loanDateStr = loanDate || fmtToday();
   const loanD = parseDateOnly(loanDateStr);
   if (!loanD) {
-    const e = new Error('Định dạng loanDate không hợp lệ (YYYY-MM-DD)');
+    const e = new Error('Định dạng ngày hẹn trả không hợp lệ');
     e.status = 400; throw e;
   }
 
   const requestedCopyIds = items.map(i => Number(i.documentCopyId));
   const uniqueRequestedCopyIds = new Set(requestedCopyIds);
   if (uniqueRequestedCopyIds.size !== items.length) {
-    const e = new Error('Danh sách items có bản sao tài liệu bị trùng (documentCopyId)');
+    const e = new Error('Danh sách tài liệu không được trùng lặp bản sao');
     e.status = 400; throw e;
   }
 
@@ -464,7 +464,7 @@ async function createLoanSlipService(body) {
       lock: t.LOCK.UPDATE
     });
     if (!memberCard) {
-      const e = new Error('Độc giả chưa có thẻ hội viên hợp lệ (MemberCard).');
+      const e = new Error('Độc giả chưa có thẻ hội viên hợp lệ.');
       e.status = 403; throw e;
     }
 
@@ -492,7 +492,7 @@ async function createLoanSlipService(body) {
     const borrowDuration = Number(cardType.borrowDuration) || 0;
 
     if (maxBorrowLimit <= 0 || borrowDuration <= 0) {
-      const e = new Error('Loại thẻ này không có quyền mượn (maxBorrowLimit hoặc borrowDuration không hợp lệ)');
+      const e = new Error('Loại thẻ này không có quyền mượn');
       e.status = 403; throw e;
     }
 
@@ -564,11 +564,11 @@ async function createLoanSlipService(body) {
     // dueDate mặc định từ cardType nếu không truyền
     let finalDueDate = dueDate || addDaysDateOnly(loanDateStr, borrowDuration);
     const dueD = parseDateOnly(finalDueDate);
-    if (!dueD) { const e = new Error('Định dạng dueDate không hợp lệ (YYYY-MM-DD)'); e.status = 400; throw e; }
+    if (!dueD) { const e = new Error('Định dạng ngày hẹn trả không hợp lệ'); e.status = 400; throw e; }
     const dd = daysDiff(loanDateStr, finalDueDate);
     if (!(dd > 0)) { const e = new Error('Hạn trả phải sau ngày mượn'); e.status = 400; throw e; }
     if (dd > borrowDuration) {
-      const e = new Error(`Hạn trả không được quá ${borrowDuration} ngày theo loại thẻ (${cardType.typeName})`);
+      const e = new Error(`Hạn trả không được quá ${borrowDuration} ngày`);
       e.status = 400; throw e;
     }
 

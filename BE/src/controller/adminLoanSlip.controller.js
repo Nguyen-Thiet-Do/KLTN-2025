@@ -34,8 +34,8 @@ exports.createLoanSlip = async (req, res) => {
     const code = err.status || 500;
     return res.status(code).json({
       success: false,
-      message: 'Lỗi tạo phiếu mượn',
-      error: err.message,
+      message: err.message,
+      error: "Lỗi tạo phiếu mượn",
     });
   }
 };
