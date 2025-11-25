@@ -106,7 +106,7 @@ export default function Librarians() {
       const token = sessionStorage.getItem("accessToken");
       const res = await deleteLibrarian(id, token);
       if (res.success) {
-        alert("✅ Đã xóa mềm thủ thư thành công!");
+        alert("✅ Đã xóa  thủ thư thành công!");
         fetchData();
       } else alert(res.message || "Không thể xóa thủ thư.");
     } catch (err) {
@@ -358,7 +358,7 @@ export default function Librarians() {
                             size="small"
                             onClick={() => handleDelete(lib.librarianId, lib.fullName)}
                             sx={{ color: "#E53E3E" }}
-                            title="Xóa mềm thủ thư"
+                            title="Xóa thủ thư"
                           >
                             <DeleteIcon />
                           </IconButton>

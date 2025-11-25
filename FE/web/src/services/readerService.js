@@ -90,3 +90,22 @@ export const updateCurrentReader = async (data, token) => {
   });
   return res.data;
 };
+// 🔒 KHÓA tài khoản độc giả
+export const lockReaderAccount = async (id, token) => {
+  const res = await api.put(
+    `/reader/${id}/lock`,
+    {},
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  return res.data;
+};
+
+// 🔓 MỞ KHÓA tài khoản độc giả
+export const unlockReaderAccount = async (id, token) => {
+  const res = await api.put(
+    `/reader/${id}/unlock`,
+    {},
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  return res.data;
+};
