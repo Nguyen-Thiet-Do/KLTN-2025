@@ -1,20 +1,40 @@
-import React, { useEffect, useState, useMemo } from "react";
+// src/components/Borrow/PickupDialog.jsx
+import React, { useEffect, useMemo, useState } from "react";
 import { Dialog, DialogTitle, DialogContent, DialogActions, Stack, Typography, TextField, Button } from "@mui/material";
 import { pickupLoanSlip } from "../../services/loanSlips";
 import { useSnackbar } from "notistack";
 import { useAuth } from "../../contexts/AuthContext";
 
+// helper: today's date in yyyy-mm-dd
+function todayISO() {
+  const d = new Date();
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+// helper: date + n days in yyyy-mm-dd
+function todayPlus(days) {
+  const d = new Date();
+  d.setDate(d.getDate() + days);
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
 /**
- * Dialog xác nhận độc giả đến lấy (PICKUP)
- * body: { librarianId, pickupDate?, dueDate?, items?, preserveLoanDate? }
+ * PickupDialog
+ * - pickupDate: mặc định = hôm nay, **không cho sửa** (disabled/readOnly)
+ * - dueDate: mặc định = hôm nay + 30, cho phép sửa
  */
 export default function PickupDialog({ open, onClose, slip, librarianId: librarianIdProp, onPicked }) {
   const { enqueueSnackbar } = useSnackbar();
   const { user } = useAuth();
 
-  const [dueDate, setDueDate] = useState("");
   const [pickupDate, setPickupDate] = useState("");
-  const [preserveLoanDate, setPreserveLoanDate] = useState(false);
+  const [dueDate, setDueDate] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   // derive effective librarianId similar to Approve dialog (prop > user.librarianId > profile > accountId)
@@ -33,11 +53,15 @@ export default function PickupDialog({ open, onClose, slip, librarianId: librari
     return fromProp || contextLibrarianId || null;
   }, [librarianIdProp, contextLibrarianId]);
 
+  // Khi dialog mở: set mặc định 1 lần
   useEffect(() => {
-    if (!open) {
-      setDueDate("");
+    if (open) {
+      setPickupDate(todayISO());   // ngày đến lấy = hôm nay, không sửa được
+      setDueDate(todayPlus(30));   // hạn trả mặc định 30 ngày sau (có thể sửa)
+      setSubmitting(false);
+    } else {
       setPickupDate("");
-      setPreserveLoanDate(false);
+      setDueDate("");
       setSubmitting(false);
     }
   }, [open]);
@@ -49,13 +73,14 @@ export default function PickupDialog({ open, onClose, slip, librarianId: librari
       enqueueSnackbar("Không xác định thủ thư. Vui lòng đăng nhập bằng tài khoản thủ thư.", { variant: "warning" });
       return;
     }
+
     setSubmitting(true);
     try {
       const payload = {
         librarianId: lid,
         pickupDate: pickupDate || undefined,
         dueDate: dueDate || undefined,
-        preserveLoanDate,
+        // preserveLoanDate: omitted so backend default applies
       };
       const res = await pickupLoanSlip(slip.loanSlipId, payload);
       if (res?.success) {
@@ -80,29 +105,31 @@ export default function PickupDialog({ open, onClose, slip, librarianId: librari
       <DialogContent>
         <Stack spacing={2} sx={{ mt: 1 }}>
           <Typography variant="body2" color="text.secondary">
-            Hành động này sẽ chuyển phiếu sang trạng thái <strong>BORROWING</strong> và gán loanDate/dueDate (nếu gửi).
           </Typography>
 
           <TextField
             type="date"
-            label="Ngày đến lấy (tùy chọn)"
-            value={pickupDate}
-            onChange={(e) => setPickupDate(e.target.value)}
+            label="Ngày đến lấy"
             InputLabelProps={{ shrink: true }}
+            fullWidth
+            value={pickupDate}
+            // disabled để không cho sửa
+            disabled
+            // thêm aria-readonly để rõ ràng cho accessibility
+            inputProps={{ "aria-readonly": true }}
+            onChange={() => {
+              /* không cho chỉnh, nhưng React yêu cầu onChange không bắt lỗi */
+            }}
           />
 
           <TextField
             type="date"
-            label="Hạn trả (tùy chọn)"
+            label="Hạn trả"
+            InputLabelProps={{ shrink: true }}
+            fullWidth
             value={dueDate}
             onChange={(e) => setDueDate(e.target.value)}
-            InputLabelProps={{ shrink: true }}
           />
-
-          <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <input type="checkbox" checked={preserveLoanDate} onChange={(e) => setPreserveLoanDate(e.target.checked)} />
-            <span>Giữ nguyên loanDate nếu backend đã gán</span>
-          </label>
         </Stack>
       </DialogContent>
       <DialogActions sx={{ px: 3, pb: 2 }}>

@@ -130,17 +130,41 @@ export default function AddLoanSlipDialog({ open, onClose, onCreated }) {
         setCreating(false);
     };
 
+    // Kiểm tra độc giả có được phép mượn không
+    const readerCanBorrow = (r) => {
+        if (!r) return false;
+        // Quy ước hệ thống: nếu không có memberCard hoặc cardType.typeName !== 'PREMIUM' thì KHÔNG được mượn.
+        const typeName = r?.memberCard?.cardType?.typeName;
+        if (!typeName) return false;
+        return String(typeName).toUpperCase() === "PREMIUM";
+    };
+
     // ---- Fetch độc giả theo ID ----
     const fetchReader = async (id) => {
         if (!id) { setReaderInfo(null); return; }
         try {
             const data = await getReaderById(id);
             const reader = data?.data ?? data;
-            setReaderInfo(reader || null);
             if (!reader) {
+                setReaderInfo(null);
                 const msg = "Không tìm thấy độc giả với ID đã nhập.";
                 setError(msg);
                 notify.warn(msg);
+                return;
+            }
+
+            // Chuẩn hoá: nếu memberCard không tồn tại -> hiển thị như 'chưa có thẻ'
+            // Nhưng lưu nguyên dữ liệu thực vào readerInfo để có thể dùng memberCard nếu có.
+            setReaderInfo(reader);
+
+            // Nếu độc giả không đủ điều kiện mượn, báo warn (vẫn show thông tin)
+            if (!readerCanBorrow(reader)) {
+                // không set error blocking ở đây, chỉ cảnh báo; validate khi tạo phiếu sẽ chặn
+                const msg = "Độc giả hiện chưa có thẻ hợp lệ để mượn (chỉ thẻ PREMIUM được phép).";
+                setError(msg);
+                notify.warn(msg);
+            } else {
+                setError("");
             }
         } catch (e) {
             const msg = serverErrorMsg(e, "Không lấy được thông tin độc giả.");
@@ -195,6 +219,13 @@ export default function AddLoanSlipDialog({ open, onClose, onCreated }) {
             const msg = "Không tìm thấy thông tin độc giả theo ID đã nhập.";
             setError(msg); notify.warn(msg); return false;
         }
+
+        // MỚI: kiểm tra loại thẻ - chỉ cho phép khi là PREMIUM
+        if (!readerCanBorrow(readerInfo)) {
+            const msg = "Độc giả hiện không có thẻ hợp lệ để mượn. (Chỉ thẻ PREMIUM được phép mượn.)";
+            setError(msg); notify.warn(msg); return false;
+        }
+
         if (!items.length) {
             const msg = "Cần ít nhất 1 đầu mục mượn.";
             setError(msg); notify.warn(msg); return false;
@@ -254,6 +285,17 @@ export default function AddLoanSlipDialog({ open, onClose, onCreated }) {
 
     const totalItems = items.length;
     const readerDisplayName = readerInfo?.fullName ? `${readerInfo.fullName}` : "";
+    const canBorrow = readerCanBorrow(readerInfo);
+
+    // Helper hiển thị văn bản thể hiện trạng thái thẻ (theo yêu cầu: hiển thị "Độc giả chưa có thẻ" thay vì "FREE")
+    const cardDisplayText = (r) => {
+        if (!r) return "";
+        if (!r?.memberCard || !r?.memberCard?.cardType) return "Độc giả chưa có thẻ";
+        // nếu có memberCard nhưng type không phải PREMIUM, vẫn coi như chưa có thẻ (theo yêu cầu hiển thị)
+        const typeName = String(r.memberCard.cardType.typeName || "").toUpperCase();
+        if (typeName !== "PREMIUM") return "Độc giả chưa có thẻ";
+        return "Độc giả có thẻ";
+    };
 
     return (
         <Dialog
@@ -336,16 +378,46 @@ export default function AddLoanSlipDialog({ open, onClose, onCreated }) {
                                                 {readerDisplayName || `Reader #${readerInfo.readerId}`}
                                             </Typography>
                                             <Typography variant="body2" color="text.secondary">
-                                                {readerInfo.cccd ? `CCCD: ${readerInfo.cccd}` : ""}
+                                                {/* Hiển thị CCCD nếu có */}
+                                                {readerInfo.cccd ? `CCCD: ${readerInfo.cccd}` : cardDisplayText(readerInfo)}
                                             </Typography>
+
+                                            {/* Hiển thị thông tin account (email / phone) nếu có */}
+                                            <Typography variant="caption" color="text.secondary" display="block">
+                                                {readerInfo.email ? `Email: ${readerInfo.email}` : ""}
+                                                {readerInfo.phoneNumber ? ` ${readerInfo.phoneNumber ? ` • SĐT: ${readerInfo.phoneNumber}` : ""}` : ""}
+                                            </Typography>
+
+                                            {/* Hiển thị trạng thái có/không có thẻ (không hiện ngày/thông tin chi tiết) */}
+                                            <Typography variant="caption" color="text.secondary" display="block">
+                                                {readerInfo?.memberCard && readerInfo?.memberCard?.cardType && String(readerInfo.memberCard.cardType.typeName).toUpperCase() === "PREMIUM"
+                                                    ? "Độc giả có thẻ"
+                                                    : "Độc giả chưa có thẻ"}
+                                            </Typography>
+
                                         </Box>
+
+                                        {/* Thống kê trạng thái mượn */}
                                         <Box sx={{ ml: "auto", textAlign: "right" }}>
-                                            <Typography variant="subtitle2">Số đầu mục</Typography>
-                                            <Typography variant="h6" fontWeight={800}>{totalItems}</Typography>
+                                            <Typography variant="subtitle2">Trạng thái</Typography>
+                                            <Typography variant="caption" display="block" color="text.secondary">
+                                                Đang chờ duyệt: {readerInfo.stats?.pendingCount ?? 0}
+                                            </Typography>
+                                            <Typography variant="caption" display="block" color="text.secondary">
+                                                Đang chờ lấy: {readerInfo.stats?.waitingForPickupCount ?? 0}
+                                            </Typography>
+                                            <Typography variant="caption" display="block" color="text.secondary">
+                                                Đang mượn: {readerInfo.stats?.borrowedCount ?? 0}
+                                            </Typography>
+                                            <Typography variant="caption" display="block" color="error">
+                                                Quá hạn: {readerInfo.stats?.overdueCount ?? 0}
+                                            </Typography>
+                                            <Typography variant="h6" fontWeight={800}></Typography>
                                         </Box>
                                     </Stack>
                                 ) : (
                                     <Typography variant="body2" color="text.secondary">
+                                        {/* Trống khi chưa tìm độc giả */}
                                     </Typography>
                                 )}
                             </Grid>
@@ -454,7 +526,7 @@ export default function AddLoanSlipDialog({ open, onClose, onCreated }) {
                     <Button
                         onClick={createSlip}
                         variant="contained"
-                        disabled={creating}
+                        disabled={creating || !canBorrow}
                         sx={{ fontWeight: 700 }}
                     >
                         {creating ? "Đang xử lý..." : "Tạo phiếu"}
