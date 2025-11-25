@@ -101,12 +101,21 @@ function buildTextReminder(data) {
 
 function buildHtmlOverdue(data) {
   const itemsHtml = (data.items || []).map(it => `<li>${escapeHtml(it.title || `Tài liệu #${it.documentId}`)} (Bản sao #${it.documentCopyId || '—'})</li>`).join('');
+
+  // 🔥 Thêm cảnh báo khóa tài khoản nếu >= 30 ngày
+  const warningHtml = data.overdueDays >= 30
+    ? '<p style="color:red;font-weight:bold">⚠️ TÀI KHOẢN CỦA BẠN ĐÃ BỊ KHÓA DO QUÁ HẠN 30 NGÀY. Vui lòng liên hệ thư viện ngay để xử lý.</p>'
+    : data.overdueDays >= 25
+      ? '<p style="color:orange;font-weight:bold">⚠️ Cảnh báo: Tài khoản sẽ bị khóa nếu quá hạn 30 ngày!</p>'
+      : '';
+
   return `
   <!doctype html>
   <html><body style="font-family:Arial,sans-serif;color:#333">
     <h3>THÔNG BÁO QUÁ HẠN — Phiếu #${escapeHtml(String(data.slipId))}</h3>
     <p>Chào <strong>${escapeHtml(data.fullName || 'Độc giả')}</strong>,</p>
     <p>Phiếu mượn của bạn đã <strong>quá hạn ${escapeHtml(String(data.overdueDays))} ngày</strong> (hạn trả: ${escapeHtml(data.dueDate)}).</p>
+    ${warningHtml}
     <p><strong>Danh sách tài liệu đang quá hạn:</strong></p>
     <ul>${itemsHtml}</ul>
     <p>Vui lòng trả ngay để tránh phí cao hơn hoặc xử lý vi phạm. Nếu có lý do cần gia hạn, liên hệ thư viện.</p>
@@ -118,7 +127,8 @@ function buildHtmlOverdue(data) {
 }
 function buildTextOverdue(data) {
   const itemsText = (data.items || []).map(it => `- ${it.title || ('Tài liệu #' + it.documentId)} (copy:${it.documentCopyId || '—'})`).join('\n');
-  return `QUÁ HẠN: Phiếu #${data.slipId}\nQuá hạn ${data.overdueDays} ngày (due: ${data.dueDate})\n\nDanh sách:\n${itemsText}\n\nVui lòng trả hoặc liên hệ: ${process.env.SUPPORT_EMAIL || ''} ${process.env.SUPPORT_PHONE || ''}`;
+  const warning = data.overdueDays >= 30 ? '\n⚠️ TÀI KHOẢN ĐÃ BỊ KHÓA!\n' : '';
+  return `QUÁ HẠN: Phiếu #${data.slipId}\nQuá hạn ${data.overdueDays} ngày (due: ${data.dueDate})${warning}\n\nDanh sách:\n${itemsText}\n\nVui lòng trả hoặc liên hệ: ${process.env.SUPPORT_EMAIL || ''} ${process.env.SUPPORT_PHONE || ''}`;
 }
 
 function escapeHtml(str) {
@@ -334,8 +344,154 @@ async function runNotificationJob() {
     for (const slip of overdueSlips) {
       try {
         const overdueDays = daysDiff(slip.dueDate, today);
-        if (isNaN(overdueDays) || overdueDays <= 0 || overdueDays > 30) {
-          // skip non-relevant
+        if (isNaN(overdueDays) || overdueDays <= 0) {
+          continue;
+        }
+
+        // 🔥 FEATURE 1: Chuyển status sang OVERDUE ngay khi phát hiện quá hạn
+        if (slip.status === 'BORROWING') {
+          await slip.update({ status: 'OVERDUE' });
+          console.log(`[notificationJob] ✅ Updated slip ${slip.loanSlipId} to OVERDUE (${overdueDays} days)`);
+
+          // 📦 Đồng thời chuyển tất cả DocumentCopy sang BORROWED_OVERDUE
+          try {
+            const loanDetails = await LoanDetail.findAll({
+              where: { loanSlipId: slip.loanSlipId },
+              include: [{ model: DocumentCopy }]
+            });
+
+            const overdueCopies = [];
+            for (const detail of loanDetails) {
+              if (detail.DocumentCopy && detail.DocumentCopy.status === 'BORROWED') {
+                await detail.DocumentCopy.update({
+                  status: 'BORROWED_OVERDUE',
+                  conditionNote: (detail.DocumentCopy.conditionNote || '') + `\n[AUTO] Marked BORROWED_OVERDUE on ${today} - slip overdue ${overdueDays} days`
+                });
+                overdueCopies.push({
+                  documentCopyId: detail.DocumentCopy.documentCopyId,
+                  barCode: detail.DocumentCopy.barCode
+                });
+                console.log(`[notificationJob] 📦 Updated DocumentCopy ${detail.DocumentCopy.documentCopyId} to BORROWED_OVERDUE (barCode: ${detail.DocumentCopy.barCode})`);
+              }
+            }
+
+            // Emit realtime event về cả slip và copies
+            try {
+              emitToUser(slip.readerId, 'slip:status_changed', {
+                loanSlipId: slip.loanSlipId,
+                oldStatus: 'BORROWING',
+                newStatus: 'OVERDUE',
+                overdueDays,
+                overdueCopies
+              });
+            } catch (emitErr) {
+              console.warn('[notificationJob] emit slip:status_changed failed', emitErr?.message);
+            }
+          } catch (copyErr) {
+            console.error('[notificationJob] error updating copies to BORROWED_OVERDUE for slip', slip.loanSlipId, copyErr?.message || copyErr);
+          }
+        }
+
+        // 🔥 FEATURE 2: Khóa tài khoản + Đánh dấu bản sao LOST nếu quá hạn >= 30 ngày
+        if (overdueDays >= 30 && slip.Reader?.accountId) {
+          try {
+            const account = await Account.findByPk(slip.Reader.accountId);
+            if (account && account.status !== 'locked') {
+              await account.update({ status: 'locked' });
+              console.log(`[notificationJob] 🔒 LOCKED account ${account.accountId} (readerId: ${slip.readerId}) - overdue ${overdueDays} days on slip ${slip.loanSlipId}`);
+
+              // Emit realtime event
+              try {
+                emitToUser(slip.readerId, 'account:locked', {
+                  accountId: account.accountId,
+                  reason: 'OVERDUE_30_DAYS',
+                  loanSlipId: slip.loanSlipId,
+                  overdueDays
+                });
+              } catch (emitErr) {
+                console.warn('[notificationJob] emit account:locked failed', emitErr?.message);
+              }
+
+              // 📦 Đánh dấu tất cả bản sao trong phiếu này là LOST
+              try {
+                const loanDetails = await LoanDetail.findAll({
+                  where: { loanSlipId: slip.loanSlipId },
+                  include: [{ model: DocumentCopy }]
+                });
+
+                const lostCopies = [];
+                for (const detail of loanDetails) {
+                  // Chuyển từ BORROWED hoặc BORROWED_OVERDUE sang LOST
+                  if (detail.DocumentCopy && !['LOST', 'DAMAGED'].includes(detail.DocumentCopy.status)) {
+                    const oldStatus = detail.DocumentCopy.status;
+                    await detail.DocumentCopy.update({
+                      status: 'LOST',
+                      conditionNote: (detail.DocumentCopy.conditionNote || '') + `\n[AUTO] Marked LOST on ${today} - overdue ${overdueDays} days (was ${oldStatus})`
+                    });
+                    lostCopies.push({
+                      documentCopyId: detail.DocumentCopy.documentCopyId,
+                      barCode: detail.DocumentCopy.barCode,
+                      oldStatus
+                    });
+                    console.log(`[notificationJob] 📦 Marked DocumentCopy ${detail.DocumentCopy.documentCopyId} as LOST from ${oldStatus} (barCode: ${detail.DocumentCopy.barCode})`);
+                  }
+                }
+
+                if (lostCopies.length > 0) {
+                  // Emit realtime event về các bản sao bị mất
+                  try {
+                    emitToUser(slip.readerId, 'copies:marked_lost', {
+                      loanSlipId: slip.loanSlipId,
+                      lostCopies,
+                      overdueDays
+                    });
+                  } catch (emitErr) {
+                    console.warn('[notificationJob] emit copies:marked_lost failed', emitErr?.message);
+                  }
+                }
+              } catch (lostErr) {
+                console.error('[notificationJob] error marking copies as LOST for slip', slip.loanSlipId, lostErr?.message || lostErr);
+              }
+
+              // Tạo notification về việc khóa tài khoản
+              const lockNotif = await createNotificationRow({
+                readerId: slip.readerId,
+                type: 'ACCOUNT_LOCKED',
+                title: '[KHÓA TÀI KHOẢN] Quá hạn trả sách 30 ngày',
+                content: `Tài khoản đã bị khóa do phiếu #${slip.loanSlipId} quá hạn ${overdueDays} ngày. Các tài liệu đã được đánh dấu là mất. Vui lòng liên hệ thư viện.`
+              });
+
+              // Gửi email thông báo khóa tài khoản
+              const lockEmail = account.email;
+              if (lockEmail) {
+                const items = await buildItemsForSlip(slip.loanSlipId);
+                const itemsHtml = items.map(it => `<li>${escapeHtml(it.title || `Tài liệu #${it.documentId}`)} (Bản sao #${it.documentCopyId || '—'})</li>`).join('');
+
+                const lockHtml = `
+                  <!doctype html>
+                  <html><body style="font-family:Arial,sans-serif;color:#333">
+                    <h3 style="color:red">🔒 TÀI KHOẢN ĐÃ BỊ KHÓA</h3>
+                    <p>Chào <strong>${escapeHtml(slip.Reader?.fullName || 'Độc giả')}</strong>,</p>
+                    <p>Tài khoản của bạn đã bị khóa do phiếu mượn #${slip.loanSlipId} <strong>quá hạn ${overdueDays} ngày</strong>.</p>
+                    <p><strong>⚠️ Các tài liệu sau đã được đánh dấu là MẤT:</strong></p>
+                    <ul>${itemsHtml}</ul>
+                    <p>Bạn cần liên hệ thư viện để xử lý bồi thường và mở khóa tài khoản.</p>
+                    <p>Hỗ trợ: ${escapeHtml(process.env.SUPPORT_EMAIL || '')} — ${escapeHtml(process.env.SUPPORT_PHONE || '')}</p>
+                  </body></html>
+                `;
+                const lockText = `TÀI KHOẢN BỊ KHÓA\n\nPhiếu #${slip.loanSlipId} quá hạn ${overdueDays} ngày.\nCác tài liệu đã được đánh dấu MẤT.\nLiên hệ: ${process.env.SUPPORT_EMAIL || ''} ${process.env.SUPPORT_PHONE || ''}`;
+
+                await sendEmailAndMarkNotification(lockNotif, lockEmail, '[KHÓA TÀI KHOẢN] Quá hạn 30 ngày - Tài liệu mất', lockHtml, lockText);
+              }
+            }
+          } catch (lockErr) {
+            console.error('[notificationJob] error locking account for readerId', slip.readerId, lockErr?.message || lockErr);
+          }
+        }
+
+        // Skip notification nếu quá 30 ngày (đã khóa rồi)
+        if (overdueDays > 30) {
+          console.log('[notificationJob] skip overdue notification for slip', slip.loanSlipId, '(over 30 days)');
           continue;
         }
 

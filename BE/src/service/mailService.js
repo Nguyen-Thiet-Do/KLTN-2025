@@ -683,10 +683,10 @@ async function sendReservationCancelledEmail(to, data = {}) {
   // HTML
   const itemsHtml = items.length
     ? items.map(it => {
-        const titlePart = it.title ? escapeHtml(it.title) : (it.requestedDocumentId ? `ID: ${escapeHtml(String(it.requestedDocumentId))}` : '—');
-        const notePart = it.originalNote ? ` — <em>${escapeHtml(it.originalNote)}</em>` : '';
-        return `<li>${titlePart}${notePart}</li>`;
-      }).join('')
+      const titlePart = it.title ? escapeHtml(it.title) : (it.requestedDocumentId ? `ID: ${escapeHtml(String(it.requestedDocumentId))}` : '—');
+      const notePart = it.originalNote ? ` — <em>${escapeHtml(it.originalNote)}</em>` : '';
+      return `<li>${titlePart}${notePart}</li>`;
+    }).join('')
     : '<li>—</li>';
 
   const html = `
@@ -715,7 +715,171 @@ async function sendReservationCancelledEmail(to, data = {}) {
 
   return sendEmail(to, subject, html, text);
 }
+/**
+ * Gửi email biên nhận trả tài liệu cho độc giả
+ *
+ * @param {string} to                  Email người nhận
+ * @param {object} data                Dữ liệu email
+ * @param {string} data.fullName       Tên độc giả
+ * @param {number|string} data.slipId  Mã phiếu mượn
+ * @param {string} data.title          Tên tài liệu
+ * @param {string} data.returnDate     Ngày trả (YYYY-MM-DD)
+ * @param {number} data.overdueFine    Phạt trễ hạn
+ * @param {number} data.damageFine     Phạt hư hỏng
+ * @param {number} data.lostFine       Phạt mất sách
+ * @param {number} data.totalFine      Tổng phạt
+ */
+async function sendReturnReceiptEmail(to, data = {}) {
+  if (!to) throw new Error('sendReturnReceiptEmail: missing "to"');
 
+  const {
+    fullName = 'Độc giả',
+    slipId = '',
+    title = '',
+    returnDate = '',
+    overdueFine = 0,
+    damageFine = 0,
+    lostFine = 0,
+    totalFine = 0,
+    supportEmail = SUPPORT_EMAIL,
+    supportPhone = SUPPORT_PHONE,
+    year = new Date().getFullYear()
+  } = data;
+
+  const subject = `[Book Tech] Biên nhận trả tài liệu — Phiếu #${escapeHtml(String(slipId))}`;
+
+  // Plain text fallback
+  const textLines = [
+    `Kính gửi ${fullName},`,
+    '',
+    `Chúng tôi xác nhận bạn đã trả tài liệu thuộc Phiếu mượn: ${slipId} vào ngày ${returnDate}.`,
+    `Tên tài liệu: ${title}`,
+    '',
+    `Chi tiết tiền phạt:`,
+    `- Phạt trễ hạn: ${Number(overdueFine).toLocaleString('vi-VN')} đ`,
+    `- Phạt hư hỏng: ${Number(damageFine).toLocaleString('vi-VN')} đ`,
+    `- Phạt mất sách: ${Number(lostFine).toLocaleString('vi-VN')} đ`,
+    `- Tổng: ${Number(totalFine).toLocaleString('vi-VN')} đ`,
+    '',
+    `Nếu bạn có thắc mắc, vui lòng liên hệ: ${supportEmail} — ${supportPhone}`,
+    '',
+    'Trân trọng,',
+    'Thư viện Book Tech',
+    `© ${year} Book Tech Library`
+  ];
+  const text = textLines.join('\n');
+
+  // HTML content
+  const html = `
+  <!doctype html>
+  <html>
+  <head><meta charset="utf-8"></head>
+  <body style="font-family:Arial, sans-serif; color:#333;">
+    <div style="max-width:720px; margin:12px auto; padding:18px; border:1px solid #eee; border-radius:8px;">
+      <h2 style="color:#0b5cff; margin-top:0;">Biên nhận trả tài liệu</h2>
+      <p>Xin chào <strong>${escapeHtml(fullName)}</strong>,</p>
+
+      <p>Chúng tôi xác nhận bạn đã trả tài liệu thuộc <strong>Phiếu #${escapeHtml(String(slipId))}</strong> vào ngày <strong>${escapeHtml(returnDate)}</strong>.</p>
+
+      <p><strong>Tên tài liệu:</strong> ${escapeHtml(title)}</p>
+
+      <h3 style="margin-bottom:6px;">Chi tiết tiền phạt</h3>
+      <table style="width:100%; border-collapse:collapse; margin-top:8px;">
+        <tr>
+          <td style="padding:8px; background:#f7f7f7; width:50%"><strong>Phạt trễ hạn</strong></td>
+          <td style="padding:8px;">${Number(overdueFine).toLocaleString('vi-VN')} đ</td>
+        </tr>
+        <tr>
+          <td style="padding:8px; background:#f7f7f7;"><strong>Phạt hư hỏng</strong></td>
+          <td style="padding:8px;">${Number(damageFine).toLocaleString('vi-VN')} đ</td>
+        </tr>
+        <tr>
+          <td style="padding:8px; background:#f7f7f7;"><strong>Phạt mất sách</strong></td>
+          <td style="padding:8px;">${Number(lostFine).toLocaleString('vi-VN')} đ</td>
+        </tr>
+        <tr>
+          <td style="padding:12px; background:#fff; font-size:16px;"><strong>Tổng</strong></td>
+          <td style="padding:12px; font-size:16px;"><strong>${Number(totalFine).toLocaleString('vi-VN')} đ</strong></td>
+        </tr>
+      </table>
+
+      <p style="margin-top:12px;">Nếu bạn cần hỗ trợ hoặc có thắc mắc, vui lòng liên hệ:</p>
+      <p style="font-size:13px; color:#555;">Email: ${escapeHtml(supportEmail)} — SĐT: ${escapeHtml(supportPhone)}</p>
+
+      <hr style="border:none; border-top:1px solid #eee; margin:18px 0;">
+      <p style="font-size:12px; color:#999;">Email này được gửi tự động. Vui lòng không trả lời trực tiếp.</p>
+      <p style="font-size:12px; color:#999;">&copy; ${year} Book Tech Library</p>
+    </div>
+  </body>
+  </html>
+  `;
+
+  // Gọi wrapper sendEmail (dùng SendGrid nếu config)
+  return sendEmail(to, subject, html, text);
+}
+async function sendRenewalRequestReceivedEmail(to, data = {}) {
+  if (!to) throw new Error('sendRenewalRequestReceivedEmail: missing "to"');
+  const {
+    fullName = '',
+    renewalId = '',
+    loanDetailId = '',
+    oldDueDate = '',
+    proposedNewDue = '',
+    supportEmail = SUPPORT_EMAIL,
+    supportPhone = SUPPORT_PHONE,
+    year = new Date().getFullYear()
+  } = data;
+
+  const subject = `[Book Tech] Yêu cầu gia hạn #${renewalId} — Đã tiếp nhận`;
+
+  const textLines = [
+    `Kính gửi ${fullName},`,
+    '',
+    `Yêu cầu gia hạn (Mã: ${renewalId}) cho mục mượn (LoanDetail: ${loanDetailId}) của bạn đã được tiếp nhận và đang chờ thủ thư xử lý.`,
+    `Hạn trả hiện tại: ${oldDueDate}`,
+    `Hạn dự kiến nếu được duyệt: ${proposedNewDue}`,
+    '',
+    `Khi thủ thư duyệt hoặc từ chối, chúng tôi sẽ gửi email thông báo tiếp theo.`,
+    '',
+    `Nếu cần hỗ trợ, vui lòng liên hệ:`,
+    `- Email: ${supportEmail}`,
+    `- SĐT: ${supportPhone}`,
+    '',
+    `Trân trọng,`,
+    `Đội ngũ Book Tech Library`,
+    `© ${year} Book Tech Library`
+  ];
+  const text = textLines.join('\n');
+
+  const html = `
+  <!doctype html>
+  <html>
+  <head><meta charset="utf-8"></head>
+  <body style="font-family:Arial, sans-serif; color:#333;">
+    <div style="max-width:680px; margin:20px auto; padding:22px; border:1px solid #eee; border-radius:8px;">
+      <h2 style="color:#0b5cff; margin-top:0;">Yêu cầu gia hạn đã được tiếp nhận</h2>
+      <p>Xin chào <strong>${escapeHtml(fullName)}</strong>,</p>
+
+      <p>Yêu cầu gia hạn <strong>#${escapeHtml(String(renewalId))}</strong> cho mục mượn <strong>LoanDetail #${escapeHtml(String(loanDetailId))}</strong> đã được tiếp nhận và đang chờ thủ thư xử lý.</p>
+
+      <table style="width:100%; border-collapse:collapse; margin:12px 0;">
+        <tr><td style="padding:8px; background:#f7f7f7; width:40%"><strong>Hạn trả hiện tại</strong></td><td style="padding:8px;">${escapeHtml(String(oldDueDate))}</td></tr>
+        <tr><td style="padding:8px; background:#f7f7f7;"><strong>Hạn dự kiến nếu duyệt</strong></td><td style="padding:8px;">${escapeHtml(String(proposedNewDue))}</td></tr>
+      </table>
+
+      <p>Chúng tôi sẽ gửi email thông báo khi thủ thư xử lý yêu cầu (duyệt hoặc từ chối).</p>
+
+      <hr style="border:none; border-top:1px solid #eee; margin:18px 0;">
+
+      <p style="font-size:13px; color:#555;">Hỗ trợ: ${escapeHtml(supportEmail)} | ${escapeHtml(supportPhone)}</p>
+      <p style="font-size:12px; color:#999;">Đây là email tự động. Vui lòng không trả lời trực tiếp.<br>&copy; ${year} Book Tech Library</p>
+    </div>
+  </body>
+  </html>
+  `;
+
+  return sendEmail(to, subject, html, text);
+}
 
 module.exports = {
   sendOtpEmail,
@@ -726,5 +890,7 @@ module.exports = {
   sendLoanIssuedEmail,
   sendLoanDetailRemovedEmail,
   sendLoanSlipCancelledEmail,
-  sendReservationCancelledEmail
+  sendReservationCancelledEmail,
+  sendReturnReceiptEmail,
+  sendRenewalRequestReceivedEmail
 };
