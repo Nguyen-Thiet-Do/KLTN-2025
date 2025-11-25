@@ -1,4 +1,3 @@
-// src/components/Return/ReturnBulkDialog.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import {
     Dialog,
@@ -22,6 +21,7 @@ import {
 } from "@mui/material";
 import { useAuth } from "../../contexts/AuthContext";
 import { returnBulkItems } from "../../services/loanSlips";
+import { useSnackbar } from "notistack";
 
 const nf = new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 0 });
 
@@ -63,9 +63,19 @@ function calculateLostFine(coverPrice) {
 }
 
 export default function ReturnBulkDialog({ open, onClose, slip, onReturned }) {
+    const { enqueueSnackbar } = useSnackbar();
     const { user } = useAuth();
-    // Lấy librarianId từ user (ưu tiên librarianId, fallback accountId, id)
-    const librarianIdFromAuth = user?.librarianId ?? user?.accountId ?? user?.id ?? null;
+
+    // derive librarianId robustly (prioritize explicit librarianId fields, fallback accountId)
+    const librarianIdFromAuth = useMemo(() => {
+        return (
+            Number(user?.librarianId) ||
+            Number(user?.profile?.librarianId) ||
+            Number(user?.Librarian?.librarianId) ||
+            Number(user?.accountId) ||
+            null
+        );
+    }, [user]);
 
     const [returnDate, setReturnDate] = useState(() => parseDateOnly(new Date().toISOString()));
     const [items, setItems] = useState([]); // [{loanDetailId, conditionReturn, isLost, note, depositAmount, borrowCond, coverPrice}]
@@ -75,7 +85,7 @@ export default function ReturnBulkDialog({ open, onClose, slip, onReturned }) {
     useEffect(() => {
         if (open && slip) {
             setReturnDate(parseDateOnly(new Date().toISOString()));
-            const borroweds = (slip.details || []).filter(d => d.status === "BORROWED" && !d.returnDate);
+            const borroweds = (slip.details || []).filter(d => String(d.status).toUpperCase() === "BORROWED");
             setItems(borroweds.map(d => ({
                 loanDetailId: d.loanDetailId,
                 conditionReturn: d.conditionBorrow != null ? Number(d.conditionBorrow) : 100,
@@ -127,26 +137,34 @@ export default function ReturnBulkDialog({ open, onClose, slip, onReturned }) {
             items: items.map(it => ({
                 loanDetailId: it.loanDetailId,
                 conditionReturn: it.isLost ? 0 : Number(it.conditionReturn),
-                isLost: it.isLost,
+                isLost: !!it.isLost,
                 note: it.note || undefined
             }))
         };
 
         // Gửi librarianId nếu có
         if (librarianIdFromAuth) {
-            payload.librarianId = librarianIdFromAuth;
+            payload.librarianId = Number(librarianIdFromAuth);
         }
 
         setLoading(true);
         setErrorMsg(null);
         try {
             const res = await returnBulkItems(payload);
-            onReturned && onReturned(res);
-            onClose && onClose();
+            if (res?.success) {
+                enqueueSnackbar("Trả toàn bộ thành công.", { variant: "success" });
+                onReturned && onReturned(res);
+                onClose && onClose();
+            } else {
+                const msg = res?.message || "Trả toàn bộ thất bại";
+                setErrorMsg(msg);
+                enqueueSnackbar(msg, { variant: "error" });
+            }
         } catch (err) {
             console.error(err);
-            const msg = err?.message || "Lỗi khi trả toàn bộ";
+            const msg = err?.response?.data?.message || err?.message || "Lỗi khi trả toàn bộ";
             setErrorMsg(msg);
+            enqueueSnackbar(msg, { variant: "error" });
         } finally {
             setLoading(false);
         }
@@ -203,7 +221,7 @@ export default function ReturnBulkDialog({ open, onClose, slip, onReturned }) {
                                     <TableRow key={it.loanDetailId}>
                                         <TableCell>{it.loanDetailId}</TableCell>
                                         <TableCell sx={{ fontFamily: "monospace" }}>{it.barCode || "-"}</TableCell>
-                                        <TableCell>{/* title not provided here; it's okay */}</TableCell>
+                                        <TableCell>{/* title không có ở đây */}</TableCell>
                                         <TableCell>{nf.format(it.depositAmount)}₫</TableCell>
                                         <TableCell>{it.borrowCond ?? "-"}</TableCell>
                                         <TableCell>

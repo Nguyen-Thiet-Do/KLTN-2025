@@ -103,3 +103,46 @@ export async function cancelReservation(loanSlipId, { librarianId, reason } = {}
     throw err;
   }
 }
+
+/** Xác nhận độc giả đến lấy (PICKUP)
+ * POST /api/loans/admin/slips/:loanSlipId/pickup
+ * body: { librarianId, pickupDate?, dueDate?, items?, preserveLoanDate? }
+ */
+export async function pickupLoanSlip(loanSlipId, { librarianId, pickupDate, dueDate, items = [], preserveLoanDate = false } = {}) {
+  if (!loanSlipId) throw new Error("loanSlipId is required");
+  if (!librarianId) throw new Error("Thiếu librarianId.");
+  const payload = { librarianId, preserveLoanDate };
+  if (pickupDate) payload.pickupDate = pickupDate;
+  if (dueDate) payload.dueDate = dueDate;
+  if (items && Array.isArray(items) && items.length) payload.items = items;
+  const res = await api.post(`/loans/admin/slips/${loanSlipId}/pickup`, payload);
+  return res?.data ?? { success: false };
+}
+
+/** Xóa 1 tài liệu khỏi phiếu
+ * DELETE /api/loans/admin/slips/:loanSlipId/details/:loanDetailId
+ * body: { librarianId, reason? }
+ * axios.delete needs { data: {...} }
+ */
+export async function deleteLoanDetail(loanSlipId, loanDetailId, { librarianId, reason } = {}) {
+  if (!loanSlipId) throw new Error("loanSlipId is required");
+  if (!loanDetailId) throw new Error("loanDetailId is required");
+  if (!librarianId) throw new Error("Thiếu librarianId.");
+  const res = await api.delete(`/loans/admin/slips/${loanSlipId}/details/${loanDetailId}`, {
+    data: { librarianId, reason }
+  });
+  return res?.data ?? { success: false };
+}
+
+/** Hủy toàn bộ phiếu (trạng thái nào cũng nên có kiểm tra trên BE)
+ * DELETE /api/loans/admin/slips/:loanSlipId
+ * body: { librarianId, reason? }
+ */
+export async function cancelLoanSlip(loanSlipId, { librarianId, reason } = {}) {
+  if (!loanSlipId) throw new Error("loanSlipId is required");
+  if (!librarianId) throw new Error("Thiếu librarianId.");
+  const res = await api.delete(`/loans/admin/slips/${loanSlipId}`, {
+    data: { librarianId, reason }
+  });
+  return res?.data ?? { success: false };
+}

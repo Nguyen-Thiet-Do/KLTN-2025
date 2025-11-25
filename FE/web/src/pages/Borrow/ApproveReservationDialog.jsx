@@ -1,4 +1,3 @@
-// src/components/Borrow/ApproveReservationDialog.jsx
 import { useEffect, useMemo, useState } from "react";
 import {
     Alert,
@@ -52,22 +51,22 @@ export default function ApproveReservationDialog({
     const { enqueueSnackbar } = useSnackbar();
     const { user } = useAuth();
 
-    // Prefer librarianId from logged-in user
+    // Prefer librarianId from logged-in user (try multiple places), fallback to accountId if necessary
     const contextLibrarianId = useMemo(() => {
         return (
             Number(user?.librarianId) ||
             Number(user?.profile?.librarianId) ||
             Number(user?.Librarian?.librarianId) ||
+            Number(user?.accountId) || // fallback: accountId (if your BE accepts it)
             null
         );
     }, [user]);
 
     const effectiveLibrarianId = useMemo(() => {
         const idFromProp = Number(librarianIdProp) || null;
-        return contextLibrarianId || idFromProp || null;
+        return idFromProp || contextLibrarianId || null;
     }, [contextLibrarianId, librarianIdProp]);
 
-    // Fixed pricing mode per requirements
     const PRICING_MODE = "AUTO_MIN";
     const defaultDueDate = useMemo(() => todayPlus(30), [open]);
 
@@ -83,9 +82,9 @@ export default function ApproveReservationDialog({
         }));
     }, [pendingDetails]);
 
-    const [assignmentMap, setAssignmentMap] = useState({}); // loanDetailId -> copyId
-    const [copiesByDoc, setCopiesByDoc] = useState({});     // documentId -> response
-    const [loadingByDoc, setLoadingByDoc] = useState({});   // documentId -> boolean
+    const [assignmentMap, setAssignmentMap] = useState({});
+    const [copiesByDoc, setCopiesByDoc] = useState({});
+    const [loadingByDoc, setLoadingByDoc] = useState({});
     const [error, setError] = useState("");
     const [submitting, setSubmitting] = useState(false);
 
@@ -100,7 +99,6 @@ export default function ApproveReservationDialog({
 
     const loadCopiesForDoc = async (documentId) => {
         if (!documentId) return;
-        // Avoid reloading if already loaded
         if (copiesByDoc[documentId]) return;
         try {
             setLoadingByDoc((s) => ({ ...s, [documentId]: true }));
@@ -108,12 +106,12 @@ export default function ApproveReservationDialog({
             setCopiesByDoc((prev) => ({ ...prev, [documentId]: res }));
         } catch (e) {
             setError("Không tải được danh sách bản sao khả dụng. Vui lòng thử lại.");
+            enqueueSnackbar("Không tải được danh sách bản sao khả dụng.", { variant: "error" });
         } finally {
             setLoadingByDoc((s) => ({ ...s, [documentId]: false }));
         }
     };
 
-    // Preload copies for all requested doc IDs when dialog opens
     useEffect(() => {
         if (!open) return;
         const uniqDocIds = Array.from(
@@ -164,10 +162,16 @@ export default function ApproveReservationDialog({
                 assignments,
             };
 
-            await approveReservation(body);
-            enqueueSnackbar("Duyệt đặt trước thành công.", { variant: "success" });
-            onApproved?.();
-            onClose();
+            const resp = await approveReservation(body);
+            if (resp?.success) {
+                enqueueSnackbar("Duyệt đặt trước thành công.", { variant: "success" });
+                onApproved?.();
+                onClose();
+            } else {
+                const msg = resp?.message || "Duyệt thất bại";
+                setError(msg);
+                enqueueSnackbar(msg, { variant: "error" });
+            }
         } catch (e) {
             const msg = e?.response?.data?.message || e?.message || "Có lỗi xảy ra khi duyệt phiếu.";
             setError(msg);

@@ -36,22 +36,22 @@ import {
   Refresh as RefreshIcon,
   Search as SearchIcon,
 } from "@mui/icons-material";
-import { fetchLoanSlips, getDocumentDetail, cancelReservation } from "../../services/loanSlips";
+import {
+  fetchLoanSlips,
+  getDocumentDetail,
+  cancelReservation,
+  pickupLoanSlip,
+  deleteLoanDetail,
+  cancelLoanSlip,
+} from "../../services/loanSlips";
 import AddLoanSlipDialog from "../Borrow/AddLoanSlipDialog";
 import ApproveReservationDialog from "./ApproveReservationDialog";
 import ReturnSingleDialog from "./ReturnSingleDialog";
 import ReturnBulkDialog from "./ReturnBulkDialog";
+import PickupDialog from "./PickupDialog";
+import CancelSlipDialog from "./CancelSlipDialog";
+import DeleteDetailDialog from "./DeleteDetailDialog";
 import { useAuth } from "../../contexts/AuthContext"; // điều chỉnh path nếu khác
-
-/**
- * FULL Borrow.jsx với chức năng:
- * - Hiển thị danh sách phiếu
- * - Duyệt (approve)
- * - Trả (single/bulk)
- * - Hủy phiếu đặt trước (PENDING) với dialog nhập lý do => gọi API cancelReservation
- *
- * Lưu ý: chức năng cancelReservation cần export ở src/services/loanSlips.js
- */
 
 const TABS = [
   { key: "PENDING", label: "Chờ duyệt" },
@@ -113,9 +113,18 @@ function Money({ value }) {
 
 /**
  * Row component
- * nhận thêm onCancel prop để kích hoạt dialog hủy từ parent
+ * thêm props: onPickup, onDeleteDetail
  */
-function Row({ row, titleCache, onApprove, onSingleReturn, onBulkReturn, onCancel }) {
+function Row({
+  row,
+  titleCache,
+  onApprove,
+  onSingleReturn,
+  onBulkReturn,
+  onCancel,
+  onPickup,
+  onDeleteDetail,
+}) {
   const [open, setOpen] = useState(false);
   const librarianName = row?.Librarian?.fullName || (row?.librarianId ? `#${row.librarianId}` : "-");
 
@@ -204,6 +213,24 @@ function Row({ row, titleCache, onApprove, onSingleReturn, onBulkReturn, onCance
                 onClick={() => onCancel?.(row)}
               >
                 Hủy
+              </Button>
+            </>
+          )}
+
+          {String(row.status).toUpperCase() === "WAITING_FOR_PICKUP" && (
+            <>
+              <Button size="small" variant="contained" onClick={() => onPickup?.(row)}>
+                Xác nhận lấy
+              </Button>
+
+              <Button
+                size="small"
+                variant="outlined"
+                color="error"
+                sx={{ ml: 1 }}
+                onClick={() => onCancel?.(row)}
+              >
+                Hủy phiếu
               </Button>
             </>
           )}
@@ -367,6 +394,12 @@ function Row({ row, titleCache, onApprove, onSingleReturn, onBulkReturn, onCance
                                 Trả
                               </Button>
                             )}
+
+                            {row.status === "WAITING_FOR_PICKUP" && (
+                              <Button size="small" variant="outlined" color="error" onClick={() => onDeleteDetail?.(row, d)}>
+                                Xóa
+                              </Button>
+                            )}
                           </TableCell>
                         </TableRow>
                       );
@@ -384,6 +417,43 @@ function Row({ row, titleCache, onApprove, onSingleReturn, onBulkReturn, onCance
 
 export default function Borrow() {
   const { user } = useAuth(); // lấy user từ AuthContext
+
+  // ---------- helper: resolve librarianId from user/session ----------
+  function resolveLibrarianId() {
+    // 1) ưu tiên user.librarianId
+    if (user && (user.librarianId || user.librarian_id)) {
+      return Number(user.librarianId ?? user.librarian_id);
+    }
+
+    // 2) check sessionStorage.profile
+    try {
+      const profileRaw = sessionStorage.getItem("profile");
+      if (profileRaw) {
+        const profile = JSON.parse(profileRaw);
+        if (profile && (profile.librarianId || profile.librarian_id)) {
+          return Number(profile.librarianId ?? profile.librarian_id);
+        }
+      }
+    } catch (e) {
+      // ignore parse error
+    }
+
+    // 3) check sessionStorage.account (rare, if account contains librarianId)
+    try {
+      const accountRaw = sessionStorage.getItem("account");
+      if (accountRaw) {
+        const account = JSON.parse(accountRaw);
+        if (account && (account.librarianId || account.librarian_id)) {
+          return Number(account.librarianId ?? account.librarian_id);
+        }
+      }
+    } catch (e) { }
+
+    // not found
+    return null;
+  }
+
+  // ---------- state ----------
   const [openCreate, setOpenCreate] = useState(false);
   const [openApprove, setOpenApprove] = useState(false);
   const [selectedSlip, setSelectedSlip] = useState(null);
@@ -394,9 +464,22 @@ export default function Borrow() {
   const [openReturnBulk, setOpenReturnBulk] = useState(false);
   const [selectedSlipForBulkReturn, setSelectedSlipForBulkReturn] = useState(null);
 
-  // Cancel reservation states
+  // Cancel reservation (PENDING)
   const [openCancel, setOpenCancel] = useState(false);
   const [selectedSlipForCancel, setSelectedSlipForCancel] = useState(null);
+
+  // Pickup dialog (WAITING_FOR_PICKUP)
+  const [openPickup, setOpenPickup] = useState(false);
+  const [selectedSlipForPickup, setSelectedSlipForPickup] = useState(null);
+
+  // Cancel full slip (WAITING_FOR_PICKUP)
+  const [openCancelSlip, setOpenCancelSlip] = useState(false);
+  const [selectedSlipForCancelSlip, setSelectedSlipForCancelSlip] = useState(null);
+
+  // Delete single detail (from waiting slip)
+  const [openDeleteDetail, setOpenDeleteDetail] = useState(false);
+  const [selectedDetailToDelete, setSelectedDetailToDelete] = useState(null);
+  const [selectedSlipForDelete, setSelectedSlipForDelete] = useState(null);
 
   const [tab, setTab] = useState("PENDING");
   const [page, setPage] = useState(1);
@@ -516,7 +599,7 @@ export default function Borrow() {
     setSelectedSlipForBulkReturn(null);
   }
 
-  // Cancel handlers
+  // Cancel handlers (PENDING)
   function handleOpenCancel(slip) {
     setSelectedSlipForCancel(slip);
     setOpenCancel(true);
@@ -526,8 +609,55 @@ export default function Borrow() {
     setSelectedSlipForCancel(null);
   }
 
-  // Lấy librarianId từ auth context (theo AuthContext bạn cung cấp user.accountId)
-  const librarianId = user?.accountId ? Number(user.accountId) : null;
+  // Pickup handlers - CHECK librarianId before opening dialog
+  function handleOpenPickup(slip) {
+    const libId = resolveLibrarianId();
+    if (!libId) {
+      alert("Không xác định thủ thư. Tài khoản của bạn chưa được cấu hình là thủ thư. Vui lòng liên hệ quản trị viên.");
+      return;
+    }
+    setSelectedSlipForPickup(slip);
+    setOpenPickup(true);
+  }
+  function handleClosePickup() {
+    setOpenPickup(false);
+    setSelectedSlipForPickup(null);
+  }
+
+  // Cancel full slip (WAITING_FOR_PICKUP) - CHECK librarianId
+  function handleOpenCancelSlip(slip) {
+    const libId = resolveLibrarianId();
+    if (!libId) {
+      alert("Không xác định thủ thư. Tài khoản của bạn chưa được cấu hình là thủ thư. Vui lòng liên hệ quản trị viên.");
+      return;
+    }
+    setSelectedSlipForCancelSlip(slip);
+    setOpenCancelSlip(true);
+  }
+  function handleCloseCancelSlip() {
+    setOpenCancelSlip(false);
+    setSelectedSlipForCancelSlip(null);
+  }
+
+  // Delete single detail handlers - CHECK librarianId
+  function handleOpenDeleteDetail(slip, detail) {
+    const libId = resolveLibrarianId();
+    if (!libId) {
+      alert("Không xác định thủ thư. Tài khoản của bạn chưa được cấu hình là thủ thư. Vui lòng liên hệ quản trị viên.");
+      return;
+    }
+    setSelectedSlipForDelete(slip);
+    setSelectedDetailToDelete(detail);
+    setOpenDeleteDetail(true);
+  }
+  function handleCloseDeleteDetail() {
+    setOpenDeleteDetail(false);
+    setSelectedSlipForDelete(null);
+    setSelectedDetailToDelete(null);
+  }
+
+  // Lấy librarianId đã resolve để truyền vào dialog/hàm service
+  const resolvedLibrarianId = resolveLibrarianId();
 
   return (
     <Box sx={{ p: 3 }}>
@@ -565,7 +695,7 @@ export default function Borrow() {
                 variant="scrollable"
                 allowScrollButtonsMobile
                 sx={{
-                  "& .MuiTab-root": {
+                  "& .MuiTab.root": {
                     fontWeight: 600,
                     textTransform: "none",
                     minHeight: 48,
@@ -739,9 +869,15 @@ export default function Borrow() {
                     row={r}
                     titleCache={titleCache}
                     onApprove={(slip) => { setSelectedSlip(slip); setOpenApprove(true); }}
-                    onCancel={(slip) => handleOpenCancel(slip)}
+                    onCancel={(slip) => {
+                      // phân biệt: nếu đang PENDING => cancelReservation; nếu WAITING_FOR_PICKUP => cancelLoanSlip
+                      if (String(slip.status).toUpperCase() === "PENDING") handleOpenCancel(slip);
+                      else handleOpenCancelSlip(slip);
+                    }}
+                    onPickup={(slip) => handleOpenPickup(slip)}
                     onSingleReturn={(slip, detail) => handleOpenSingleReturn(slip, detail)}
                     onBulkReturn={(slip) => handleOpenBulkReturn(slip)}
+                    onDeleteDetail={(slip, detail) => handleOpenDeleteDetail(slip, detail)}
                   />
                 ))
               )}
@@ -807,17 +943,44 @@ export default function Borrow() {
         }}
       />
 
-      {/* Cancel Reservation Dialog (embedded) */}
+      {/* Cancel Reservation Dialog (embedded) - dùng cho PENDING */}
       <CancelReservationDialog
         open={openCancel}
         onClose={() => handleCloseCancel()}
         slip={selectedSlipForCancel}
-        librarianId={librarianId}
+        librarianId={resolvedLibrarianId}
         onCancelled={(resp) => {
-          // đóng dialog và reload
           handleCloseCancel();
           load();
         }}
+      />
+
+      {/* Pickup dialog (WAITING_FOR_PICKUP) */}
+      <PickupDialog
+        open={openPickup}
+        onClose={() => handleClosePickup()}
+        slip={selectedSlipForPickup}
+        librarianId={resolvedLibrarianId}
+        onPicked={() => { handleClosePickup(); load(); }}
+      />
+
+      {/* Cancel full slip (WAITING_FOR_PICKUP) */}
+      <CancelSlipDialog
+        open={openCancelSlip}
+        onClose={() => handleCloseCancelSlip()}
+        slip={selectedSlipForCancelSlip}
+        librarianId={resolvedLibrarianId}
+        onCancelled={() => { handleCloseCancelSlip(); load(); }}
+      />
+
+      {/* Delete single detail (from waiting slip) */}
+      <DeleteDetailDialog
+        open={openDeleteDetail}
+        onClose={() => handleCloseDeleteDetail()}
+        slip={selectedSlipForDelete}
+        detail={selectedDetailToDelete}
+        librarianId={resolvedLibrarianId}
+        onDeleted={() => { handleCloseDeleteDetail(); load(); }}
       />
     </Box>
   );
@@ -826,6 +989,7 @@ export default function Borrow() {
 /**
  * CancelReservationDialog (embedded component)
  * Gọi API cancelReservation (DELETE) từ services/loanSlips
+ * Dành cho PENDING (phiếu chưa gán bản sao)
  */
 function CancelReservationDialog({ open, onClose, slip, librarianId, onCancelled }) {
   const [reason, setReason] = useState("");
@@ -842,7 +1006,7 @@ function CancelReservationDialog({ open, onClose, slip, librarianId, onCancelled
   async function handleConfirm() {
     if (!slipId) return;
     if (!librarianId) {
-      alert("Không xác định thủ thư (librarianId). Vui lòng đăng nhập lại.");
+      alert("Không xác định thủ thư (librarianId). Vui lòng đăng nhập lại hoặc liên hệ admin.");
       return;
     }
 
@@ -850,7 +1014,6 @@ function CancelReservationDialog({ open, onClose, slip, librarianId, onCancelled
     try {
       const res = await cancelReservation(slipId, { librarianId, reason });
       if (res && res.success) {
-        // successful
         if (onCancelled) onCancelled(res);
       } else {
         alert(res?.message || "Hủy phiếu thất bại");

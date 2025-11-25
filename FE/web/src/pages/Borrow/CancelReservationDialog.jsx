@@ -1,5 +1,4 @@
-// src/components/Borrow/CancelReservationDialog.jsx
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   Dialog,
   DialogTitle,
@@ -11,6 +10,7 @@ import {
   Typography,
 } from "@mui/material";
 import { cancelReservation } from "../../services/loanSlips";
+import { useSnackbar } from "notistack";
 
 export default function CancelReservationDialog({
   open,
@@ -19,11 +19,12 @@ export default function CancelReservationDialog({
   librarianId, // số (bắt buộc)
   onCancelled, // callback khi thành công
 }) {
+  const { enqueueSnackbar } = useSnackbar();
   const [reason, setReason] = useState("");
   const [loading, setLoading] = useState(false);
   const slipId = slip?.loanSlipId ?? null;
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (!open) {
       setReason("");
       setLoading(false);
@@ -33,22 +34,23 @@ export default function CancelReservationDialog({
   async function handleConfirm() {
     if (!slipId) return;
     if (!librarianId) {
-      // nếu thiếu librarianId có thể báo lỗi người dùng hoặc dùng fallback
-      alert("Không xác định thủ thư (librarianId). Vui lòng đăng nhập lại.");
+      enqueueSnackbar("Không xác định thủ thư (librarianId). Vui lòng đăng nhập lại.", { variant: "warning" });
       return;
     }
     setLoading(true);
     try {
       const resp = await cancelReservation(slipId, { librarianId, reason });
       if (resp && resp.success) {
-        if (onCancelled) onCancelled(resp);
+        enqueueSnackbar("Hủy phiếu đặt trước thành công.", { variant: "success" });
+        onCancelled?.(resp);
       } else {
-        // show error message from server if any
-        alert(resp?.message || "Hủy phiếu thất bại");
+        const msg = resp?.message || "Hủy phiếu thất bại";
+        enqueueSnackbar(msg, { variant: "error" });
       }
     } catch (err) {
       console.error("cancelReservation error", err);
-      alert(err?.message || "Lỗi khi hủy phiếu");
+      const msg = err?.message || err?.response?.data?.message || "Lỗi khi hủy phiếu";
+      enqueueSnackbar(msg, { variant: "error" });
     } finally {
       setLoading(false);
     }

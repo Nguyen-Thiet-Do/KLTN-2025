@@ -1,4 +1,3 @@
-// src/components/Return/ReturnSingleDialog.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import {
     Dialog,
@@ -17,6 +16,7 @@ import {
 } from "@mui/material";
 import { useAuth } from "../../contexts/AuthContext";
 import { returnSingleItem } from "../../services/loanSlips";
+import { useSnackbar } from "notistack";
 
 const nf = new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 0 });
 
@@ -25,7 +25,7 @@ function parseDateOnly(d = null) {
     return String(d).slice(0, 10);
 }
 
-/** Helpers client-side (same logic như BE để ước lượng) */
+/** Helpers client-side (ước lượng) */
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 function daysDiff(a, b) {
     if (!a || !b) return 0;
@@ -55,9 +55,19 @@ function calculateLostFine(coverPrice) {
 }
 
 export default function ReturnSingleDialog({ open, onClose, loanDetail, onReturned }) {
+    const { enqueueSnackbar } = useSnackbar();
     const { user } = useAuth();
-    // Lấy librarianId từ user (ưu tiên librarianId, fallback accountId, id)
-    const librarianIdFromAuth = user?.librarianId ?? user?.accountId ?? user?.id ?? null;
+
+    // derive librarianId robustly
+    const librarianIdFromAuth = useMemo(() => {
+        return (
+            Number(user?.librarianId) ||
+            Number(user?.profile?.librarianId) ||
+            Number(user?.Librarian?.librarianId) ||
+            Number(user?.accountId) ||
+            null
+        );
+    }, [user]);
 
     const [returnDate, setReturnDate] = useState(() => parseDateOnly(new Date().toISOString()));
     const [conditionReturn, setConditionReturn] = useState(100);
@@ -80,7 +90,7 @@ export default function ReturnSingleDialog({ open, onClose, loanDetail, onReturn
 
     const preview = useMemo(() => {
         if (!loanDetail) return null;
-        const slipDue = loanDetail?.LoanSlip?.dueDate;
+        const slipDue = loanDetail?.LoanSlip?.dueDate || loanDetail?.dueDate;
         const borrowCond = loanDetail?.conditionBorrow;
         const coverPrice = loanDetail?.DocumentCopy?.Document?.coverPrice ?? 0;
         const over = calculateOverdueFine(slipDue, returnDate);
@@ -116,20 +126,30 @@ export default function ReturnSingleDialog({ open, onClose, loanDetail, onReturn
                 loanDetailId: loanDetail.loanDetailId,
                 returnDate,
                 conditionReturn: isLost ? 0 : Number(conditionReturn),
-                isLost,
+                isLost: !!isLost,
                 note: note || undefined,
-                librarianId: librarianIdFromAuth 
             };
-            console.log("Mã thủ thư:", librarianIdFromAuth);     
-            console.log("Payload trả:", payload);       
+
+            if (librarianIdFromAuth) {
+                payload.librarianId = Number(librarianIdFromAuth);
+            }
+
             const res = await returnSingleItem(payload);
-            setSuccessMsg(res?.message || "Trả thành công");
-            onReturned && onReturned(res);
-            onClose?.();
+            if (res?.success) {
+                const msg = res?.message || "Trả thành công";
+                enqueueSnackbar(msg, { variant: "success" });
+                onReturned && onReturned(res);
+                onClose?.();
+            } else {
+                const msg = res?.message || "Trả thất bại";
+                setErrorMsg(msg);
+                enqueueSnackbar(msg, { variant: "error" });
+            }
         } catch (err) {
             console.error(err);
-            const msg = err?.message || "Lỗi khi trả";
+            const msg = err?.response?.data?.message || err?.message || "Lỗi khi trả";
             setErrorMsg(msg);
+            enqueueSnackbar(msg, { variant: "error" });
         } finally {
             setLoading(false);
         }
