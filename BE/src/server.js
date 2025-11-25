@@ -42,7 +42,7 @@ const port = process.env.PORT || 8080;
 
 const cartRoutes = require("./route/cartRoutes");
 const favoriteRoutes = require("./route/favoriteRoutes");
-
+const paymentRoutes = require('./route/payment');
 // ============================================================
 // CORS CONFIGURATION
 // ============================================================
@@ -103,6 +103,8 @@ app.use('/api/fcm', fcmRoutes);
 
 app.use("/api/cart", cartRoutes);
 app.use("/api/favorite", favoriteRoutes);
+
+app.use('/api', paymentRoutes);
 // ============================================================
 // HEALTH CHECK
 // ============================================================

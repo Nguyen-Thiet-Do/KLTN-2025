@@ -361,7 +361,7 @@ async function reserveLoanForReaderService(user, payload) {
         content: notifContent,
         priority: 'normal',
         link: `/loan/${slip.loanSlipId}`,
-        isRead: false,
+        isRead: 0,
         emailAt: null,
         deleted: false,
       });
@@ -369,6 +369,18 @@ async function reserveLoanForReaderService(user, payload) {
       console.error('❌ Failed to create Notification record:', err.message || err);
       // Không throw — không làm hỏng luồng chính
     }
+// Emit socket để FE tăng số thông báo
+try {
+  if (createdNotification && createdNotification.notificationID) {
+    emitToUser(reader.readerId, "notification:new", {
+      notificationID: createdNotification.notificationID,
+      title: createdNotification.title,
+      content: createdNotification.content,
+    });
+  }
+} catch (err) {
+  console.error("❌ Socket emit failed:", err);
+}
 
     // Gửi email — background
     setImmediate(async () => {
