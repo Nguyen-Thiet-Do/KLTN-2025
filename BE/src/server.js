@@ -4,6 +4,19 @@
 
 // ⚠️ NẠP BIẾN MÔI TRƯỜNG PHẢI ĐƯỢC ĐẶT Ở DÒNG ĐẦU TIÊN
 require('dotenv').config();
+const sendEmail = require("./utils/sendEmail");
+
+(async () => {
+  try {
+    await sendEmail("dauphaihiepga@gmail.com", "TEST OTP", "<b>OK</b>");
+    console.log("EMAIL SENT");
+  } catch (e) {
+    console.error("EMAIL ERROR:", e);
+  }
+})();
+
+console.log("MAIL_USER = ", process.env.MAIL_USER);
+console.log("MAIL_PASS = ", process.env.MAIL_PASS);
 
 const express = require('express');
 const httpsRedirect = require('./middleware/httpsRedirect');
@@ -33,7 +46,7 @@ const notificationRoutes = require('./route/notificationRoutes');
 const debugJobRoutes = require("./route/debugJob.routes");
 const fcmRoutes = require('./route/fcm.api');
 
-
+const forgotRoute = require("./route/auth.forgot.route");
 const nodemailer = require('nodemailer');
 const { scheduleDailyJob, runNotificationJob } = require('./service/notificationJob.service');
 
@@ -103,7 +116,7 @@ app.use('/api/fcm', fcmRoutes);
 
 app.use("/api/cart", cartRoutes);
 app.use("/api/favorite", favoriteRoutes);
-
+app.use("/api/auth/forgot", forgotRoute);
 app.use('/api', paymentRoutes);
 // ============================================================
 // HEALTH CHECK
@@ -198,7 +211,7 @@ const startServer = async () => {
       console.log(`❤️  Health Check: http://localhost:${port}/health`);
       console.log('='.repeat(50));
     });
-
+    
   } catch (error) {
     console.error('❌ Không thể kết nối database:', error.message);
     console.error('Chi tiết lỗi:', error);
@@ -238,7 +251,6 @@ process.on('uncaughtException', (error) => {
   console.error('❌ Uncaught Exception:', error);
   process.exit(1);
 });
-
 // ============================================================
 // RUN SERVER
 // ============================================================

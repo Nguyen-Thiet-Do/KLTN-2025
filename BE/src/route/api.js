@@ -370,6 +370,62 @@ routeApi.get('/', (req, res) => {
         ]
       },
       {
+  group: 'Forgot Password',
+  icon: '📧',
+  routes: [
+    {
+      method: 'POST',
+      path: '/api/auth/forgot/send-otp',
+      description: 'Gửi mã OTP khôi phục mật khẩu đến email người dùng',
+      auth: false,
+      body: {
+        email: 'string (required)'
+      },
+      response: {
+        success: { success: true },
+        error: {
+          'ACCOUNT_NOT_FOUND': 'Email không tồn tại'
+        }
+      }
+    },
+    {
+      method: 'POST',
+      path: '/api/auth/forgot/verify-otp',
+      description: 'Xác thực OTP để tiếp tục quá trình đặt lại mật khẩu',
+      auth: false,
+      body: {
+        email: 'string (required)',
+        otp: 'string (required)'
+      },
+      response: {
+        success: { success: true },
+        error: {
+          'OTP_INVALID': 'OTP không hợp lệ',
+          'OTP_EXPIRED': 'OTP đã hết hạn'
+        }
+      }
+    },
+    {
+      method: 'POST',
+      path: '/api/auth/forgot/reset-password',
+      description: 'Đặt lại mật khẩu cho tài khoản sau khi xác thực OTP',
+      auth: false,
+      body: {
+        email: 'string (required)',
+        newPassword: 'string (required)'
+      },
+      response: {
+        success: { success: true, message: 'Đặt lại mật khẩu thành công' },
+        error: {
+          'ACCOUNT_NOT_FOUND': 'Email không tồn tại',
+          'INVALID_PASSWORD': 'Mật khẩu không hợp lệ'
+        }
+      }
+    }
+  ]
+},
+
+      {
         group: 'Profile',
         icon: '👤',
         routes: [

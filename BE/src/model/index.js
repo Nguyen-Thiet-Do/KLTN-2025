@@ -29,6 +29,7 @@ const FavoriteItem = require('./FavoriteItem');
 const CardType = require('./CardType');
 const MemberCard = require('./MemberCard');
 
+const ResetOTP = require('./ResetOTP');
 
 //
 
@@ -153,6 +154,8 @@ Document.hasMany(FavoriteItem, { foreignKey: 'documentId', as: 'favoriteDocument
 FavoriteItem.belongsTo(Document, { foreignKey: 'documentId' });
 
 
+
+
 module.exports = {
   Account,
   Role,
@@ -180,4 +183,5 @@ module.exports = {
   MemberCard,
   CartItem,
   FavoriteItem,
+  ResetOTP,
 };
