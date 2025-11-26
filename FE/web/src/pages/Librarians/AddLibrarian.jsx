@@ -66,7 +66,7 @@ export default function AddLibrarian({ onSuccess, onCancel, open = true }) {
       }
     } catch (err) {
       console.error(err);
-      const msg = err.response?.data?.message || "Lỗi khi thêm thủ thư";
+      const msg = err.response?.data?.message || "Email đã tồn tại trong hệ thống. ";
       enqueueSnackbar(`❌ ${msg}`, { variant: "error" }); // ✅ thông báo lỗi
       setError(msg);
     } finally {

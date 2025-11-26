@@ -63,18 +63,34 @@ export default function AddReader({ onSuccess, onCancel, open = true }) {
       const res = await createReader(token, form);
 
       if (res.success) {
-        enqueueSnackbar("✅ Thêm độc giả thành công!", { variant: "success" });
-        onSuccess(); // reload lại danh sách
-      } else {
-        enqueueSnackbar(res.message || "❌ Thêm độc giả thất bại!", {
-          variant: "error",
-        });
-        setError(res.message || "Thêm thất bại.");
-      }
+  enqueueSnackbar("Thêm độc giả thành công!", { variant: "success" });
+  onSuccess();
+} else {
+  if (res.message?.toLowerCase().includes("email")) {
+    enqueueSnackbar("Email đã tồn tại trong hệ thống.", { variant: "error" });
+    setError("Email đã tồn tại.");
+  } else {
+    enqueueSnackbar(res.message || "Thêm độc giả thất bại.", {
+      variant: "error",
+    });
+    setError(res.message || "Thêm thất bại.");
+  }
+}
+
     } catch (err) {
-      console.error("❌ Lỗi khi thêm độc giả:", err);
-      enqueueSnackbar("⚠️ Lỗi khi kết nối đến máy chủ!", { variant: "error" });
-      setError(err.response?.data?.message || "Lỗi khi thêm độc giả");
+  console.error("❌ Lỗi khi thêm độc giả:", err);
+
+  const msg = err.response?.data?.message;
+
+  if (msg?.toLowerCase().includes("email")) {
+    enqueueSnackbar("Email đã tồn tại trong hệ thống.", { variant: "error" });
+    setError("Email đã tồn tại.");
+  } else {
+    // enqueueSnackbar(msg || "Lỗi khi kết nối đến máy chủ!", { variant: "error" });
+    setError(msg || "Email đã tồn tại trong hệ thống");
+  }
+
+
     } finally {
       setLoading(false);
     }
