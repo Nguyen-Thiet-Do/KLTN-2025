@@ -201,32 +201,37 @@ export default function Readers() {
         token
       );
 
-      console.log("✅ API response:", res);
+      console.log("✅ API response (full):", JSON.stringify(res, null, 2));
 
       // ✅ Xử lý response từ backend
-      // Backend trả về: { ok: true, data: { payment: {...}, paymentLink: {...} } }
-      // hoặc { data: { payment: {...}, paymentLink: {...} } }
-      const responseData = res.data?.data || res.data || res;
+      // Backend THỰC TẾ trả về: { ok: true, data: { paymentId, amount, qrCode, checkoutUrl, ... } }
+      // KHÔNG phải: { ok: true, data: { payment: {...}, paymentLink: {...} } }
       
-      // Lấy thông tin thanh toán
-      const payment = responseData.payment;
-      const paymentLink = responseData.paymentLink;
+      const responseData = res.data || res;
       
-      console.log("💾 Extracted data:", { payment, paymentLink });
+      console.log("💾 Response data:", JSON.stringify(responseData, null, 2));
       
-      if (!payment || !payment.paymentId) {
-        throw new Error("Không nhận được thông tin thanh toán từ server");
+      // ✅ Lấy thông tin thanh toán TRỰC TIẾP từ responseData
+      const paymentId = responseData.paymentId;
+      const amount = responseData.amount;
+      const qrCode = responseData.qrCode;
+      const checkoutUrl = responseData.checkoutUrl;
+      
+      console.log("💳 Payment info:", { paymentId, amount, qrCode, checkoutUrl });
+      
+      if (!paymentId) {
+        throw new Error("Không nhận được paymentId từ server");
       }
 
       // ✅ Chuẩn bị dữ liệu cho modal
       const paymentInfo = {
-        paymentId: payment.paymentId,
-        qrCodeUrl: paymentLink?.qrCode || null,
-        checkoutUrl: paymentLink?.checkoutUrl || null,
-        amount: payment.amount || 10000
+        paymentId: paymentId,
+        qrCodeUrl: qrCode || null,
+        checkoutUrl: checkoutUrl || null,
+        amount: amount || 10000
       };
 
-      console.log("💳 Payment info:", paymentInfo);
+      console.log("🎯 Final payment info for modal:", paymentInfo);
 
       // Validate có thông tin thanh toán
       if (!paymentInfo.qrCodeUrl && !paymentInfo.checkoutUrl) {
