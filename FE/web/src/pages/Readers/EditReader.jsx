@@ -250,7 +250,7 @@ export default function EditReader({ open = true, reader = {}, onSuccess, onCanc
                   placeholder="Nhập email đăng nhập"
                   sx={fieldSx}
                 />
-                <TextField
+                {/* <TextField
                   name="password"
                   type="password"
                   label="Mật khẩu (để trống nếu không đổi)"
@@ -259,7 +259,7 @@ export default function EditReader({ open = true, reader = {}, onSuccess, onCanc
                   disabled={loading}
                   placeholder="Nhập mật khẩu mới (nếu có)"
                   sx={fieldSx}
-                />
+                /> */}
               </Box>
             </CardContent>
           </Card>
@@ -374,7 +374,7 @@ export default function EditReader({ open = true, reader = {}, onSuccess, onCanc
                   }}
                 />
 
-                <TextField
+                {/* <TextField
                   name="note"
                   label="Ghi chú"
                   value={form.note}
@@ -387,7 +387,7 @@ export default function EditReader({ open = true, reader = {}, onSuccess, onCanc
                     ...fieldSx,
                     gridColumn: { xs: "auto", md: "1 / span 2" },
                   }}
-                />
+                /> */}
               </Box>
             </CardContent>
           </Card>

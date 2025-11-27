@@ -50,8 +50,12 @@ export const deleteLibrarian = async (id, token) => {
 
 // ♻️ Khôi phục thủ thư
 export const restoreLibrarian = async (id, token) => {
-  const res = await api.put(`/librarian/${id}/restore`, null, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
+  const res = await api.put(
+    `/librarian/${id}/restore`,
+    {}, 
+    {
+      headers: { Authorization: `Bearer ${token}` },
+    }
+  );
   return res.data;
 };

@@ -1,3 +1,4 @@
+// src/contexts/AuthContext.jsx 
 import { createContext, useContext, useState, useEffect } from 'react';
 import { authService } from '../services/authService';
 
@@ -20,12 +21,20 @@ export const AuthProvider = ({ children }) => {
           const accountData = JSON.parse(storedAccount);
           const profileData = storedProfile ? JSON.parse(storedProfile) : {};
           
-          // Merge account và profile
+          // ✅ FIX: Merge đúng cách với email và phoneNumber từ account
           const userData = {
-            ...accountData,
-            ...profileData
+            // Account fields
+            accountId: accountData.accountId,
+            roleId: accountData.roleId,
+            email: accountData.email,
+            phoneNumber: accountData.phoneNumber,
+            status: accountData.status,
+            
+            // Profile fields
+            ...profileData,
           };
           
+          console.log('✅ Init auth - userData:', userData);
           setUser(userData);
         }
       } catch (err) {
@@ -65,18 +74,25 @@ export const AuthProvider = ({ children }) => {
         sessionStorage.setItem('profile', JSON.stringify(profile));
       }
       
-      // Merge account + profile để hiển thị đầy đủ thông tin
+      // ✅ FIX: Merge đầy đủ account + profile với email và phoneNumber
       const userData = {
+        // Account fields - IMPORTANT: phải lấy email và phoneNumber từ account
         accountId: account.accountId,
         roleId: account.roleId,
         email: account.email,
-        ...profile   // chứa readerId, fullName,...
+        phoneNumber: account.phoneNumber,
+        status: account.status,
+        
+        // Profile fields (readerId, fullName, gender, dateOfBirth, cccd, address,...)
+        ...profile,
       };
 
+      console.log('✅ Login success - userData:', userData);
+      
       // Update state
       setUser(userData);
       
-      return userData;
+      return { account, profile, data: response.data };
     } catch (err) {
       setError(err.message);
       throw err;
@@ -98,6 +114,9 @@ export const AuthProvider = ({ children }) => {
       sessionStorage.removeItem('refreshToken');
       sessionStorage.removeItem('account');
       sessionStorage.removeItem('profile');
+      sessionStorage.removeItem('readerId');
+      sessionStorage.removeItem('roleId');
+      sessionStorage.removeItem('accountId');
       setUser(null);
     }
   };
@@ -106,8 +125,10 @@ export const AuthProvider = ({ children }) => {
     const newUserData = { ...user, ...updatedData };
     setUser(newUserData);
     
-    // Update profile nếu dữ liệu là từ profile
-    const profileKeys = ['avatar', 'phone', 'address', 'department', 'position'];
+    // Update sessionStorage
+    const profileKeys = ['readerId', 'fullName', 'gender', 'dateOfBirth', 
+                        'phoneNumber', 'cccd', 'address', 'avatar'];
+    const profileData = {};
     const accountData = {};
     
     Object.keys(updatedData).forEach(key => {
@@ -129,19 +150,22 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  // ✅ THÊM HÀM MỚI: updateUserContext (tương tự updateUserProfile nhưng đơn giản hơn)
+  // ✅ HÀM updateUserContext - Đơn giản hơn, chỉ merge vào user
   const updateUserContext = (updatedData) => {
+    console.log('📝 Updating user context with:', updatedData);
+    
     // Merge dữ liệu mới vào user hiện tại
     const newUserData = { 
       ...user, 
       ...updatedData 
     };
     
+    console.log('✅ New user data:', newUserData);
+    
     // Cập nhật state
     setUser(newUserData);
     
     // Cập nhật sessionStorage
-    // Phân loại dữ liệu thuộc profile hay account
     const profileKeys = [
       'readerId', 'fullName', 'gender', 'dateOfBirth', 
       'phoneNumber', 'cccd', 'address', 'avatar'
@@ -161,19 +185,17 @@ export const AuthProvider = ({ children }) => {
     // Cập nhật profile trong sessionStorage
     if (Object.keys(profileData).length > 0) {
       const existingProfile = JSON.parse(sessionStorage.getItem('profile') || '{}');
-      sessionStorage.setItem('profile', JSON.stringify({ 
-        ...existingProfile, 
-        ...profileData 
-      }));
+      const updatedProfile = { ...existingProfile, ...profileData };
+      sessionStorage.setItem('profile', JSON.stringify(updatedProfile));
+      console.log('✅ Profile updated in sessionStorage:', updatedProfile);
     }
     
     // Cập nhật account trong sessionStorage
     if (Object.keys(accountData).length > 0) {
       const existingAccount = JSON.parse(sessionStorage.getItem('account') || '{}');
-      sessionStorage.setItem('account', JSON.stringify({ 
-        ...existingAccount, 
-        ...accountData 
-      }));
+      const updatedAccount = { ...existingAccount, ...accountData };
+      sessionStorage.setItem('account', JSON.stringify(updatedAccount));
+      console.log('✅ Account updated in sessionStorage:', updatedAccount);
     }
   };
 
@@ -185,7 +207,7 @@ export const AuthProvider = ({ children }) => {
     logout,
     isAuthenticated: !!user,
     updateUserProfile,
-    updateUserContext, // ✅ THÊM VÀO ĐÂY
+    updateUserContext,
   };
 
   return (

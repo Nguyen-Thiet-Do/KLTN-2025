@@ -38,6 +38,8 @@ import {
 } from "../../services/librarianService";
 import AddLibrarian from "./AddLibrarian";
 import EditLibrarian from "./EditLibrarian";
+import ViewLibrarianDetail from "./ViewLibrarianDetail";
+
 import ButtonLoader from "../../components/Loading/ButtonLoader";
 
 export default function Librarians() {
@@ -48,6 +50,8 @@ export default function Librarians() {
   const [editingLibrarian, setEditingLibrarian] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
+  const [viewingLibrarian, setViewingLibrarian] = useState(null);
+
   const itemsPerPage = 5;
 
   // 🔄 Lấy danh sách thủ thư
@@ -281,100 +285,106 @@ export default function Librarians() {
         <Card sx={{ borderRadius: 3, boxShadow: "0 8px 32px rgba(0,0,0,0.1)", overflow: "hidden" }}>
           <TableContainer>
             <Table>
-              <TableHead>
-                <TableRow sx={{ backgroundColor: "rgba(102,126,234,0.08)" }}>
-                  <TableCell sx={{ fontWeight: 700 }}>Mã thủ thư</TableCell>
-                  <TableCell sx={{ fontWeight: 700 }}>Họ tên</TableCell>
-                  <TableCell sx={{ fontWeight: 700 }}>Giới tính</TableCell>
-                  <TableCell sx={{ fontWeight: 700 }}>Ngày sinh</TableCell>
-                  <TableCell sx={{ fontWeight: 700 }}>Số điện thoại</TableCell>
-                  <TableCell sx={{ fontWeight: 700 }}>CCCD</TableCell>
-                  <TableCell sx={{ fontWeight: 700 }}>Địa chỉ</TableCell>
-                  <TableCell sx={{ fontWeight: 700 }}>Lương cơ bản</TableCell>
-                  <TableCell sx={{ fontWeight: 700 }}>Email</TableCell>
-                  <TableCell sx={{ fontWeight: 700, textAlign: "center" }}>Hành động</TableCell>
-                </TableRow>
-              </TableHead>
+            <TableHead>
+  <TableRow sx={{ backgroundColor: "rgba(102,126,234,0.08)" }}>
+    <TableCell sx={{ fontWeight: 700 }}>Mã thủ thư</TableCell>
+    <TableCell sx={{ fontWeight: 700 }}>Họ tên</TableCell>
+    <TableCell sx={{ fontWeight: 700 }}>Email</TableCell>
+    <TableCell sx={{ fontWeight: 700, textAlign: "center" }}>Hành động</TableCell>
+  </TableRow>
+</TableHead>
+
 
               <TableBody>
                 {currentLibrarians.map((lib) => (
-                  <TableRow
-                    key={lib.librarianId}
-                    sx={{
-                      opacity: lib.deleted ? 0.5 : 1,
-                      backgroundColor: lib.deleted ? "rgba(255,0,0,0.03)" : "inherit",
-                    }}
-                  >
-                    <TableCell>
-                      <Chip
-                        label={lib.librarianCode || `TT${lib.librarianId}`}
-                        size="small"
-                        sx={{
-                          backgroundColor: "rgba(102,126,234,0.1)",
-                          color: "#667EEA",
-                          fontWeight: 600,
-                        }}
-                      />
-                    </TableCell>
-                    <TableCell>{lib.fullName}</TableCell>
-                    <TableCell>
-                      <Chip label={getGenderDisplay(lib.gender)} size="small" variant="outlined" />
-                    </TableCell>
-                    <TableCell>
-                      {lib.dateOfBirth ? new Date(lib.dateOfBirth).toLocaleDateString("vi-VN") : "-"}
-                    </TableCell>
-                    <TableCell>{lib.phoneNumber || "-"}</TableCell>
-                    <TableCell>{lib.cccd || "-"}</TableCell>
-                    <TableCell>{lib.address || "-"}</TableCell>
-                    <TableCell>
-                      {lib.basicSalary ? lib.basicSalary.toLocaleString("vi-VN") + " ₫" : "-"}
-                    </TableCell>
-                    <TableCell>{lib.email || "-"}</TableCell>
+                <TableRow
+  key={lib.librarianId}
+  sx={{
+    opacity: lib.deleted ? 0.5 : 1,
+    backgroundColor: lib.deleted ? "rgba(255,0,0,0.03)" : "inherit",
+  }}
+>
+  {/* Mã thủ thư */}
+  <TableCell>
+    <Chip
+      label={lib.librarianCode || `TT${lib.librarianId}`}
+      size="small"
+      sx={{
+        backgroundColor: "rgba(102,126,234,0.1)",
+        color: "#667EEA",
+        fontWeight: 600,
+      }}
+    />
+  </TableCell>
 
-                    {/* Nút hành động */}
-                    <TableCell sx={{ textAlign: "center" }}>
-                      <Stack direction="row" spacing={1} justifyContent="center">
-                        <IconButton
-                          size="small"
-                          onClick={() => setEditingLibrarian(lib)}
-                          sx={{ color: "#667EEA" }}
-                          disabled={lib.deleted}
-                        >
-                          <EditIcon />
-                        </IconButton>
+  {/* Họ tên */}
+  <TableCell>{lib.fullName}</TableCell>
 
-                        <IconButton
-                          size="small"
-                          onClick={() => handleResetPassword(lib)}
-                          sx={{ color: "#ED8936" }}
-                          title="Đặt lại mật khẩu"
-                          disabled={lib.deleted}
-                        >
-                          <ResetIcon />
-                        </IconButton>
+  {/* Email */}
+  <TableCell>{lib.email || "-"}</TableCell>
 
-                        {!lib.deleted ? (
-                          <IconButton
-                            size="small"
-                            onClick={() => handleDelete(lib.librarianId, lib.fullName)}
-                            sx={{ color: "#E53E3E" }}
-                            title="Xóa thủ thư"
-                          >
-                            <DeleteIcon />
-                          </IconButton>
-                        ) : (
-                          <IconButton
-                            size="small"
-                            onClick={() => handleRestore(lib.librarianId, lib.fullName)}
-                            sx={{ color: "#38A169" }}
-                            title="Khôi phục thủ thư"
-                          >
-                            <RefreshIcon />
-                          </IconButton>
-                        )}
-                      </Stack>
-                    </TableCell>
-                  </TableRow>
+  {/* Hành động */}
+  <TableCell sx={{ textAlign: "center" }}>
+  <Stack direction="row" spacing={1} justifyContent="center">
+
+    {/* Xem chi tiết */}
+    <IconButton
+      size="small"
+      onClick={() => setViewingLibrarian(lib)}
+      sx={{ color: "#3182CE" }}
+      title="Xem chi tiết"
+    >
+      <SearchIcon />
+    </IconButton>
+
+    {/* Sửa thông tin */}
+    <IconButton
+      size="small"
+      onClick={() => setEditingLibrarian(lib)}
+      sx={{ color: "#667EEA" }}
+      disabled={lib.deleted}
+      title="Sửa thông tin"
+    >
+      <EditIcon />
+    </IconButton>
+
+    {/* Đặt lại mật khẩu */}
+    <IconButton
+      size="small"
+      onClick={() => handleResetPassword(lib)}
+      sx={{ color: "#ED8936" }}
+      disabled={lib.deleted}
+      title="Đặt lại mật khẩu"
+    >
+      <ResetIcon />
+    </IconButton>
+
+    {!lib.deleted ? (
+      /* Xóa thủ thư */
+      <IconButton
+        size="small"
+        onClick={() => handleDelete(lib.librarianId, lib.fullName)}
+        sx={{ color: "#E53E3E" }}
+        title="Xóa thủ thư"
+      >
+        <DeleteIcon />
+      </IconButton>
+    ) : (
+      /* Khôi phục */
+      <IconButton
+        size="small"
+        onClick={() => handleRestore(lib.librarianId, lib.fullName)}
+        sx={{ color: "#38A169" }}
+        title="Khôi phục thủ thư"
+      >
+        <RefreshIcon />
+      </IconButton>
+    )}
+  </Stack>
+</TableCell>
+
+</TableRow>
+
                 ))}
               </TableBody>
             </Table>
@@ -407,6 +417,13 @@ export default function Librarians() {
           onCancel={() => setShowAddModal(false)}
         />
       )}
+{viewingLibrarian && (
+  <ViewLibrarianDetail
+    open={!!viewingLibrarian}
+    librarian={viewingLibrarian}
+    onClose={() => setViewingLibrarian(null)}
+  />
+)}
 
       {/* Modal sửa */}
       {editingLibrarian && (

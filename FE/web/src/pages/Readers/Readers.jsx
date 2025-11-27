@@ -38,6 +38,7 @@ import {
   CreditCard as CardIcon,
   Book as BookIcon,
   Warning as WarningIcon,
+  
 } from "@mui/icons-material";
 
 import {
@@ -50,6 +51,8 @@ import {
 } from "../../services/readerService";
 import AddReader from "./AddReader";
 import EditReader from "./EditReader";
+import ViewReaderDetail from "./ViewReaderDetail";
+
 import QRPaymentModal from "./QRPaymentModal";
 import { completeRegistration } from "../../services/authService";
 
@@ -66,6 +69,7 @@ export default function Readers() {
 
   const [paymentModalOpen, setPaymentModalOpen] = useState(false);
   const [currentPaymentData, setCurrentPaymentData] = useState(null);
+const [viewingReader, setViewingReader] = useState(null);
 
   const fetchData = async () => {
     try {
@@ -471,26 +475,24 @@ Vui lòng liên hệ quản trị viên hoặc thử lại sau.`;
         <Card sx={{ borderRadius: 3, boxShadow: "0 8px 32px rgba(0,0,0,0.1)", overflow: "hidden" }}>
           <TableContainer>
             <Table>
-              <TableHead>
-                <TableRow sx={{ backgroundColor: "rgba(102,126,234,0.08)" }}>
-                  <TableCell sx={{ fontWeight: 700 }}>Mã độc giả</TableCell>
-                  <TableCell sx={{ fontWeight: 700 }}>Họ tên</TableCell>
-                  <TableCell sx={{ fontWeight: 700 }}>Giới tính</TableCell>
-                  <TableCell sx={{ fontWeight: 700 }}>Ngày sinh</TableCell>
-                  <TableCell sx={{ fontWeight: 700 }}>Số điện thoại</TableCell>
-                  <TableCell sx={{ fontWeight: 700 }}>CCCD</TableCell>
-                  <TableCell sx={{ fontWeight: 700 }}>Địa chỉ</TableCell>
-                  <TableCell sx={{ fontWeight: 700 }}>Email</TableCell>
-                  {tabValue === 0 && (
-                    <>
-                      <TableCell sx={{ fontWeight: 700 }}>Đang mượn</TableCell>
-                      <TableCell sx={{ fontWeight: 700 }}>Đang chờ</TableCell>
-                      <TableCell sx={{ fontWeight: 700 }}>Quá hạn</TableCell>
-                    </>
-                  )}
-                  <TableCell sx={{ fontWeight: 700, textAlign: "center" }}>Hành động</TableCell>
-                </TableRow>
-              </TableHead>
+        <TableHead>
+  <TableRow sx={{ backgroundColor: "rgba(102,126,234,0.08)" }}>
+    <TableCell sx={{ fontWeight: 700 }}>Mã độc giả</TableCell>
+    <TableCell sx={{ fontWeight: 700 }}>Họ tên</TableCell>
+    <TableCell sx={{ fontWeight: 700 }}>Email</TableCell>
+
+    {tabValue === 0 && (
+      <>
+        <TableCell sx={{ fontWeight: 700 }}>Đang mượn</TableCell>
+        <TableCell sx={{ fontWeight: 700 }}>Đang chờ</TableCell>
+        <TableCell sx={{ fontWeight: 700 }}>Quá hạn</TableCell>
+      </>
+    )}
+
+    <TableCell sx={{ fontWeight: 700, textAlign: "center" }}>Hành động</TableCell>
+  </TableRow>
+</TableHead>
+
 
               <TableBody>
                 {currentReaders.length === 0 ? (
@@ -511,197 +513,208 @@ Vui lòng liên hệ quản trị viên hoặc thử lại sau.`;
                     const isLocked = r.status === "locked";
 
                     return (
-                      <TableRow
-                        key={r.readerId}
-                        sx={{
-                          "&:hover": { backgroundColor: "rgba(102,126,234,0.02)" },
-                          opacity: r.deleted ? 0.6 : 1,
-                        }}
-                      >
-                        <TableCell>
-                          <Chip
-                            label={`DG${r.readerId}`}
-                            size="small"
-                            sx={{
-                              backgroundColor: "rgba(102,126,234,0.1)",
-                              color: "#667EEA",
-                              fontWeight: 600,
-                            }}
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <Stack direction="row" spacing={1} alignItems="center">
-                            <Typography fontWeight={600}>{r.fullName}</Typography>
-                            {isLocked && (
-                              <Tooltip title="Tài khoản đã bị khoá">
-                                <LockIcon fontSize="small" color="error" />
-                              </Tooltip>
-                            )}
-                          </Stack>
-                        </TableCell>
-                        <TableCell>
-                          <Chip
-                            label={getGenderDisplay(r.gender)}
-                            size="small"
-                            variant="outlined"
-                            color={
-                              getGenderDisplay(r.gender) === "Nam"
-                                ? "primary"
-                                : getGenderDisplay(r.gender) === "Nữ"
-                                ? "secondary"
-                                : "default"
-                            }
-                          />
-                        </TableCell>
-                        <TableCell>
-                          {r.dateOfBirth ? new Date(r.dateOfBirth).toLocaleDateString("vi-VN") : "-"}
-                        </TableCell>
-                        <TableCell>{r.phoneNumber || "-"}</TableCell>
-                        <TableCell>{r.cccd || "-"}</TableCell>
-                        <TableCell>{r.address || "-"}</TableCell>
-                        <TableCell>{r.email || "-"}</TableCell>
+                     <TableRow
+  key={r.readerId}
+  sx={{
+    "&:hover": { backgroundColor: "rgba(102,126,234,0.02)" },
+    opacity: r.deleted ? 0.6 : 1,
+  }}
+>
+  {/* Mã độc giả */}
+  <TableCell>
+    <Chip
+      label={`DG${r.readerId}`}
+      size="small"
+      sx={{
+        backgroundColor: "rgba(102,126,234,0.1)",
+        color: "#667EEA",
+        fontWeight: 600,
+      }}
+    />
+  </TableCell>
 
-                        {tabValue === 0 && (
-                          <>
-                            <TableCell>
-                              <Chip
-                                icon={<BookIcon />}
-                                label={borrowedCount}
-                                size="small"
-                                color={borrowedCount > 0 ? "primary" : "default"}
-                              />
-                            </TableCell>
-                            <TableCell>
-                              <Chip
-                                label={pendingCount + waitingForPickupCount}
-                                size="small"
-                                color={pendingCount + waitingForPickupCount > 0 ? "info" : "default"}
-                              />
-                            </TableCell>
-                            <TableCell>
-                              {overdueCount > 0 ? (
-                                <Badge badgeContent={overdueCount} color="error">
-                                  <Chip
-                                    icon={<WarningIcon />}
-                                    label="Quá hạn"
-                                    size="small"
-                                    color="error"
-                                  />
-                                </Badge>
-                              ) : (
-                                <Chip label="0" size="small" color="default" />
-                              )}
-                            </TableCell>
-                          </>
-                        )}
+  {/* Họ tên */}
+  <TableCell>
+    <Stack direction="row" spacing={1} alignItems="center">
+      <Typography fontWeight={600}>{r.fullName}</Typography>
+      {r.status === "locked" && (
+        <Tooltip title="Tài khoản đã bị khoá">
+          <LockIcon fontSize="small" color="error" />
+        </Tooltip>
+      )}
+    </Stack>
+  </TableCell>
 
-                        <TableCell sx={{ textAlign: "center" }}>
-                          <Stack direction="row" spacing={1} justifyContent="center" flexWrap="wrap">
-                            {tabValue === 1 && !r.deleted && (
-                              <Tooltip title="Tạo thẻ thành viên">
-                                <IconButton
-                                  size="small"
-                                  onClick={() => handleCreateMemberCard(r.readerId)}
-                                  sx={{
-                                    color: "#3182CE",
-                                    "&:hover": { backgroundColor: "rgba(49,130,206,0.1)" },
-                                  }}
-                                >
-                                  <CardIcon />
-                                </IconButton>
-                              </Tooltip>
-                            )}
+  {/* Email */}
+  <TableCell>{r.email || "-"}</TableCell>
 
-                            {!r.deleted && (
-                              <Tooltip title="Sửa thông tin">
-                                <IconButton
-                                  size="small"
-                                  onClick={() => setEditingReader(r)}
-                                  sx={{
-                                    color: "#667EEA",
-                                    "&:hover": { backgroundColor: "rgba(102,126,234,0.1)" },
-                                  }}
-                                >
-                                  <EditIcon />
-                                </IconButton>
-                              </Tooltip>
-                            )}
+  {/* Nếu đã có thẻ → hiện thống kê */}
+  {tabValue === 0 && (
+    <>
+      <TableCell>
+        <Chip
+          icon={<BookIcon />}
+          label={r.stats?.borrowedCount || 0}
+          size="small"
+          color={(r.stats?.borrowedCount || 0) > 0 ? "primary" : "default"}
+        />
+      </TableCell>
 
-                            {!r.deleted && (
-                              <Tooltip title="Đặt lại mật khẩu">
-                                <IconButton
-                                  size="small"
-                                  onClick={() => handleResetPassword(r)}
-                                  sx={{
-                                    color: "#ED8936",
-                                    "&:hover": { backgroundColor: "rgba(237,137,54,0.1)" },
-                                  }}
-                                >
-                                  <ResetIcon />
-                                </IconButton>
-                              </Tooltip>
-                            )}
+      <TableCell>
+        <Chip
+          label={(r.stats?.pendingCount || 0) + (r.stats?.waitingForPickupCount || 0)}
+          size="small"
+          color={
+            (r.stats?.pendingCount || 0) + (r.stats?.waitingForPickupCount || 0) > 0
+              ? "info"
+              : "default"
+          }
+        />
+      </TableCell>
 
-                            {!r.deleted && !isLocked && (
-                              <Tooltip title="Khoá tài khoản">
-                                <IconButton
-                                  size="small"
-                                  onClick={() => handleLockAccount(r.readerId, r.fullName)}
-                                  sx={{
-                                    color: "#E53E3E",
-                                    "&:hover": { backgroundColor: "rgba(229,62,62,0.1)" },
-                                  }}
-                                >
-                                  <LockIcon />
-                                </IconButton>
-                              </Tooltip>
-                            )}
+      <TableCell>
+        {(r.stats?.overdueCount || 0) > 0 ? (
+          <Badge badgeContent={r.stats.overdueCount} color="error">
+            <Chip icon={<WarningIcon />} label="Quá hạn" size="small" color="error" />
+          </Badge>
+        ) : (
+          <Chip label="0" size="small" color="default" />
+        )}
+      </TableCell>
+    </>
+  )}
 
-                            {!r.deleted && isLocked && (
-                              <Tooltip title="Mở khoá tài khoản">
-                                <IconButton
-                                  size="small"
-                                  onClick={() => handleUnlockAccount(r.readerId, r.fullName)}
-                                  sx={{
-                                    color: "#38A169",
-                                    "&:hover": { backgroundColor: "rgba(56,161,105,0.1)" },
-                                  }}
-                                >
-                                  <UnlockIcon />
-                                </IconButton>
-                              </Tooltip>
-                            )}
+  {/* Hành động */}
+  <TableCell sx={{ textAlign: "center" }}>
+  <Stack direction="row" spacing={1} justifyContent="center" flexWrap="wrap">
 
-                            {r.deleted ? (
-                              <Tooltip title="Khôi phục độc giả">
-                                <IconButton
-                                  size="small"
-                                  onClick={() => handleRestore(r.readerId, r.fullName)}
-                                  sx={{
-                                    color: "#38A169",
-                                    "&:hover": { backgroundColor: "rgba(56,161,105,0.1)" },
-                                  }}
-                                >
-                                  <RestoreIcon />
-                                </IconButton>
-                              </Tooltip>
-                            ) : (
-                              <Tooltip title="Xóa độc giả">
-                                <IconButton
-                                  size="small"
-                                  onClick={() => handleDelete(r.readerId, r.fullName)}
-                                  sx={{
-                                    color: "#E53E3E",
-                                    "&:hover": { backgroundColor: "rgba(229,62,62,0.1)" },
-                                  }}
-                                >
-                                  <DeleteIcon />
-                                </IconButton>
-                              </Tooltip>
-                            )}
-                          </Stack>
-                        </TableCell>
-                      </TableRow>
+    {/* Xem chi tiết */}
+  <Tooltip title="Xem chi tiết">
+  <IconButton
+    size="small"
+    onClick={() => setViewingReader(r)}
+    sx={{ color: "#3182CE" }}
+  >
+    <SearchIcon />
+  </IconButton>
+</Tooltip>
+
+
+    {/* Tạo thẻ thành viên (chỉ hiện ở tab 'Chưa có thẻ') */}
+    {tabValue === 1 && !r.deleted && (
+      <Tooltip title="Tạo thẻ thành viên">
+        <IconButton
+          size="small"
+          onClick={() => handleCreateMemberCard(r.readerId)}
+          sx={{
+            color: "#7B3FE4",
+            "&:hover": { backgroundColor: "rgba(123,63,228,0.1)" },
+          }}
+        >
+          <CardIcon />
+        </IconButton>
+      </Tooltip>
+    )}
+
+    {/* Sửa thông tin */}
+    {!r.deleted && (
+      <Tooltip title="Sửa thông tin">
+        <IconButton
+          size="small"
+          onClick={() => setEditingReader(r)}
+          sx={{
+            color: "#667EEA",
+            "&:hover": { backgroundColor: "rgba(102,126,234,0.1)" },
+          }}
+        >
+          <EditIcon />
+        </IconButton>
+      </Tooltip>
+    )}
+
+    {/* Reset mật khẩu */}
+    {!r.deleted && (
+      <Tooltip title="Đặt lại mật khẩu">
+        <IconButton
+          size="small"
+          onClick={() => handleResetPassword(r)}
+          sx={{
+            color: "#ED8936",
+            "&:hover": { backgroundColor: "rgba(237,137,54,0.1)" },
+          }}
+        >
+          <ResetIcon />
+        </IconButton>
+      </Tooltip>
+    )}
+
+    {/* Khoá tài khoản */}
+    {!r.deleted && r.status !== "locked" && (
+      <Tooltip title="Khoá tài khoản">
+        <IconButton
+          size="small"
+          onClick={() => handleLockAccount(r.readerId, r.fullName)}
+          sx={{
+            color: "#E53E3E",
+            "&:hover": { backgroundColor: "rgba(229,62,62,0.1)" },
+          }}
+        >
+          <LockIcon />
+        </IconButton>
+      </Tooltip>
+    )}
+
+    {/* Mở khoá tài khoản */}
+    {!r.deleted && r.status === "locked" && (
+      <Tooltip title="Mở khoá tài khoản">
+        <IconButton
+          size="small"
+          onClick={() => handleUnlockAccount(r.readerId, r.fullName)}
+          sx={{
+            color: "#38A169",
+            "&:hover": { backgroundColor: "rgba(56,161,105,0.1)" },
+          }}
+        >
+          <UnlockIcon />
+        </IconButton>
+      </Tooltip>
+    )}
+
+    {/* Khôi phục độc giả */}
+    {r.deleted ? (
+      <Tooltip title="Khôi phục độc giả">
+        <IconButton
+          size="small"
+          onClick={() => handleRestore(r.readerId, r.fullName)}
+          sx={{
+            color: "#38A169",
+            "&:hover": { backgroundColor: "rgba(56,161,105,0.1)" },
+          }}
+        >
+          <RestoreIcon />
+        </IconButton>
+      </Tooltip>
+    ) : (
+      /* Xóa độc giả */
+      <Tooltip title="Xóa độc giả">
+        <IconButton
+          size="small"
+          onClick={() => handleDelete(r.readerId, r.fullName)}
+          sx={{
+            color: "#E53E3E",
+            "&:hover": { backgroundColor: "rgba(229,62,62,0.1)" },
+          }}
+        >
+          <DeleteIcon />
+        </IconButton>
+      </Tooltip>
+    )}
+
+  </Stack>
+</TableCell>
+
+</TableRow>
+
                     );
                   })
                 )}
@@ -765,6 +778,14 @@ Vui lòng liên hệ quản trị viên hoặc thử lại sau.`;
           onCancel={() => setEditingReader(null)}
         />
       )}
+      {viewingReader && (
+  <ViewReaderDetail
+    open={!!viewingReader}
+    reader={viewingReader}
+    onClose={() => setViewingReader(null)}
+  />
+)}
+
     </Box>
   );
 }

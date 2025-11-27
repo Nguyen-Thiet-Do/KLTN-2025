@@ -346,7 +346,7 @@ export default function AddReader({ onSuccess, onCancel, open = true }) {
                   }}
                 />
 
-                <TextField
+                {/* <TextField
                   name="note"
                   label="Ghi chú"
                   value={form.note}
@@ -359,7 +359,7 @@ export default function AddReader({ onSuccess, onCancel, open = true }) {
                     ...fieldSx,
                     gridColumn: { xs: "auto", md: "1 / span 2" },
                   }}
-                />
+                /> */}
               </Box>
             </CardContent>
           </Card>
