@@ -10,7 +10,6 @@ import {
   CircularProgress,
   Alert,
   Stack,
-  Chip,
 } from "@mui/material";
 import {
   CheckCircle as CheckIcon,
@@ -24,12 +23,15 @@ export default function QRPaymentModal({
   paymentData, 
   onPaymentSuccess 
 }) {
-  const [paymentStatus, setPaymentStatus] = useState("pending"); // pending | checking | success | failed
+  const [paymentStatus, setPaymentStatus] = useState("pending");
   const [checkInterval, setCheckInterval] = useState(null);
 
   // ✅ Kiểm tra trạng thái thanh toán định kỳ
   useEffect(() => {
     if (!open || !paymentData?.paymentId) return;
+
+    console.log("💳 Payment modal opened with ID:", paymentData.paymentId);
+    console.log("🔄 Starting auto-check payment status every 3 seconds...");
 
     // Kiểm tra mỗi 3 giây
     const interval = setInterval(async () => {
@@ -39,74 +41,97 @@ export default function QRPaymentModal({
     setCheckInterval(interval);
 
     return () => {
-      if (interval) clearInterval(interval);
+      if (interval) {
+        console.log("⏹️ Stopping payment status check");
+        clearInterval(interval);
+      }
     };
   }, [open, paymentData]);
 
   // ✅ Gọi API kiểm tra thanh toán
   const checkPaymentStatus = async () => {
-  try {
-    const token = sessionStorage.getItem("accessToken");
-    
-    // ✅ THÊM ĐOẠN NÀY
-    const getApiBaseUrl = () => {
-      // Vite env
-      if (import.meta.env.VITE_API_URL) {
-        return import.meta.env.VITE_API_URL;
-      }
+    try {
+      const token = sessionStorage.getItem("accessToken");
       
-      // Fallback Create React App
-      if (process.env.REACT_APP_API_URL) {
-        return process.env.REACT_APP_API_URL;
-      }
-      
-      // Local dev
-      if (window.location.hostname === 'localhost') {
+      // ✅ Auto-detect API URL
+      const getApiBaseUrl = () => {
+        console.log("🔍 Detecting environment...");
+        console.log("   - hostname:", window.location.hostname);
+        console.log("   - VITE_API_URL:", import.meta.env.VITE_API_URL);
+        
+        // 1. ƯU TIÊN: Check production first
+        const isProduction = window.location.hostname !== 'localhost' 
+                          && window.location.hostname !== '127.0.0.1';
+        
+        if (isProduction) {
+          console.log("   ✅ Production detected");
+          return 'https://kltn-2025-ehsx.onrender.com/api';
+        }
+        
+        // 2. Check Vite env variables
+        if (import.meta.env.VITE_API_URL) {
+          console.log("   ✅ Using VITE_API_URL");
+          return import.meta.env.VITE_API_URL;
+        }
+        
+        // 3. Fallback Create React App
+        if (process.env.REACT_APP_API_URL) {
+          console.log("   ✅ Using REACT_APP_API_URL");
+          return process.env.REACT_APP_API_URL;
+        }
+        
+        // 4. Fallback localhost
+        console.log("   ✅ Fallback to localhost");
         return 'http://localhost:8080/api';
-      }
+      };
       
-      // Production
-      return 'https://kltn-2025-ehsx.onrender.com/api';
-    };
-    
-    const API_BASE_URL = getApiBaseUrl();
-    
-    console.log("🔧 API_BASE_URL:", API_BASE_URL);
-    
-    // ✅ SỬA DÒNG NÀY
-    const response = await fetch(
-      `${API_BASE_URL}/payments/${paymentData.paymentId}/status`,  // ← Thay vì hardcode localhost
-      {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      }
-    );
-
-    if (!response.ok) {
-      console.error("❌ API response not OK:", response.status, response.statusText);
-      return;
-    }
-
-    const result = await response.json();
-    
-    console.log("💳 Payment status:", result);
-
-    if (result.success && (result.status === "SUCCESS" || result.status === "PAID")) {
-      setPaymentStatus("success");
+      const API_BASE_URL = getApiBaseUrl();
       
-      if (checkInterval) {
-        clearInterval(checkInterval);
+      console.log("🔧 Final API_BASE_URL:", API_BASE_URL);
+      console.log("🔍 Checking payment status at:", `${API_BASE_URL}/payments/${paymentData.paymentId}/status`);
+      
+      const response = await fetch(
+        `${API_BASE_URL}/payments/${paymentData.paymentId}/status`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+
+      if (!response.ok) {
+        console.error("❌ API response not OK:", response.status, response.statusText);
+        return;
       }
 
-      setTimeout(() => {
-        onPaymentSuccess();
-      }, 2000);
+      const result = await response.json();
+      
+      console.log("💳 Payment status:", result);
+
+      // ✅ Nếu thanh toán thành công
+      if (result.success && (result.status === "SUCCESS" || result.status === "PAID")) {
+        console.log("🎉 Payment successful! Updating UI...");
+        setPaymentStatus("success");
+        
+        // Dừng interval
+        if (checkInterval) {
+          clearInterval(checkInterval);
+        }
+
+        // Đợi 2 giây để hiện thông báo thành công
+        setTimeout(() => {
+          onPaymentSuccess();
+        }, 2000);
+      }
+    } catch (error) {
+      console.error("❌ Lỗi kiểm tra thanh toán:", error);
+      console.error("⚠️ Chi tiết:", {
+        message: error.message,
+        name: error.name,
+        stack: error.stack
+      });
     }
-  } catch (error) {
-    console.error("❌ Lỗi kiểm tra thanh toán:", error);
-  }
-};
+  };
 
   // ✅ Xử lý đóng modal
   const handleClose = () => {
