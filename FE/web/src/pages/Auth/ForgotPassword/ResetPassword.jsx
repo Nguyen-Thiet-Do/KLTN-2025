@@ -18,15 +18,22 @@ import api from "../../../services/api";
 export default function ResetPassword() {
   const [email, setEmail] = useState("");
   const [newPassword, setNewPassword] = useState("");
-  const [show, setShow] = useState(false);
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
   const [error, setError] = useState("");
+  const [success, setSuccess] = useState(""); // ✅ Thêm state success
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
     const savedEmail = sessionStorage.getItem("reset_email");
     const verified = sessionStorage.getItem("otp_verified");
 
+    console.log("📧 ResetPassword - Email:", savedEmail);
+    console.log("✅ OTP Verified:", verified);
+
     if (!savedEmail || verified !== "true") {
+      console.warn("⚠️ Chưa verify OTP, redirect về ForgotPassword");
       window.location.href = "/ForgotPassword";
       return;
     }
@@ -36,27 +43,59 @@ export default function ResetPassword() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    setError("");
+    setSuccess("");
 
-    if (!newPassword || newPassword.length < 6) {
+    // Validation
+    if (!newPassword || newPassword.trim() === "") {
+      setError("Vui lòng nhập mật khẩu mới");
+      return;
+    }
+
+    if (newPassword.length < 6) {
       setError("Mật khẩu phải chứa ít nhất 6 ký tự");
       return;
     }
 
-    setError("");
+    if (confirmPassword && newPassword !== confirmPassword) {
+      setError("Mật khẩu xác nhận không khớp");
+      return;
+    }
+
     setIsSubmitting(true);
 
     try {
+      console.log("🔄 Sending reset password request...");
+      console.log("📧 Email:", email);
+      console.log("🔑 Password length:", newPassword.length);
+
       const res = await api.post("/auth/forgot/reset-password", {
         email,
         newPassword,
       });
-  setSuccess("Đặt lại mật khẩu thành công!");
+
+      console.log("✅ Response:", res.data);
+
+      // Hiển thị thông báo thành công
+      setSuccess("Đặt lại mật khẩu thành công! Đang chuyển đến trang đăng nhập...");
+
+      // Xóa session
       sessionStorage.removeItem("reset_email");
       sessionStorage.removeItem("otp_verified");
 
-      window.location.href = "/login";
+      // Chuyển hướng sau 2 giây
+      setTimeout(() => {
+        window.location.href = "/login";
+      }, 2000);
+
     } catch (err) {
-      setError(err.response?.data?.message || "Không thể đặt lại mật khẩu");
+      console.error("❌ Reset password error:", err);
+      console.error("❌ Error response:", err.response?.data);
+
+      setError(
+        err.response?.data?.message || 
+        "Không thể đặt lại mật khẩu. Vui lòng thử lại."
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -101,36 +140,80 @@ export default function ResetPassword() {
             Đặt lại mật khẩu
           </Typography>
 
-          <Typography textAlign="center">Email: <b>{email}</b></Typography>
+          <Typography textAlign="center" sx={{ opacity: 0.8 }}>
+            Email: <strong>{email}</strong>
+          </Typography>
 
-          {error && <Alert severity="error">{error}</Alert>}
+          {/* Success message */}
+          {success && (
+            <Alert severity="success" sx={{ borderRadius: 2.5, fontWeight: 500 }}>
+              {success}
+            </Alert>
+          )}
 
+          {/* Error message */}
+          {error && (
+            <Alert severity="error" sx={{ borderRadius: 2.5, fontWeight: 500 }}>
+              {error}
+            </Alert>
+          )}
+
+          {/* Password field */}
           <TextField
             label="Mật khẩu mới"
-            type={show ? "text" : "password"}
+            type={showPassword ? "text" : "password"}
             value={newPassword}
             onChange={(e) => setNewPassword(e.target.value)}
-            placeholder="Nhập mật khẩu mới"
+            placeholder="Nhập mật khẩu mới (tối thiểu 6 ký tự)"
+            disabled={isSubmitting || !!success}
             fullWidth
             InputProps={{
               endAdornment: (
                 <InputAdornment position="end">
-                  <IconButton onClick={() => setShow(!show)}>
-                    {show ? <VisibilityOff /> : <Visibility />}
+                  <IconButton 
+                    onClick={() => setShowPassword(!showPassword)}
+                    edge="end"
+                  >
+                    {showPassword ? <VisibilityOff /> : <Visibility />}
                   </IconButton>
                 </InputAdornment>
               ),
             }}
           />
 
+          {/* Confirm password field (optional) */}
+          <TextField
+            label="Xác nhận mật khẩu"
+            type={showConfirm ? "text" : "password"}
+            value={confirmPassword}
+            onChange={(e) => setConfirmPassword(e.target.value)}
+            placeholder="Nhập lại mật khẩu mới"
+            disabled={isSubmitting || !!success}
+            fullWidth
+            InputProps={{
+              endAdornment: (
+                <InputAdornment position="end">
+                  <IconButton 
+                    onClick={() => setShowConfirm(!showConfirm)}
+                    edge="end"
+                  >
+                    {showConfirm ? <VisibilityOff /> : <Visibility />}
+                  </IconButton>
+                </InputAdornment>
+              ),
+            }}
+          />
+
+          {/* Submit button */}
           <Button
             type="submit"
             variant="contained"
             size="large"
-            disabled={isSubmitting}
+            disabled={isSubmitting || !!success}
             sx={{
               borderRadius: 2.5,
               py: 1.5,
+              fontWeight: 700,
               background:
                 "linear-gradient(135deg, rgb(102,126,234), rgb(118,75,162))",
             }}
@@ -140,6 +223,8 @@ export default function ResetPassword() {
                 <ButtonLoader inline size={35} />
                 <span>Đang đặt lại...</span>
               </Stack>
+            ) : success ? (
+              "✅ Thành công"
             ) : (
               "Xác nhận"
             )}
