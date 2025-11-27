@@ -205,11 +205,14 @@ export default function Readers() {
 
       // ✅ Xử lý response từ backend
       // Backend trả về: { ok: true, data: { payment: {...}, paymentLink: {...} } }
-      const responseData = res.data || res;
+      // hoặc { data: { payment: {...}, paymentLink: {...} } }
+      const responseData = res.data?.data || res.data || res;
       
       // Lấy thông tin thanh toán
       const payment = responseData.payment;
       const paymentLink = responseData.paymentLink;
+      
+      console.log("💾 Extracted data:", { payment, paymentLink });
       
       if (!payment || !payment.paymentId) {
         throw new Error("Không nhận được thông tin thanh toán từ server");
