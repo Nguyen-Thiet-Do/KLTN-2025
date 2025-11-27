@@ -9,7 +9,10 @@ const {
   pickupLoanSlipService,
   cancelLoanSlipService,
   removeLoanDetailService,
-  cancelReservationService
+  cancelReservationService,
+  calculateDamageOnly,
+  computeReturnFines,
+  handleLostBookAndCharge
 } = require('../service/adminLoanSlip.service');
 
 exports.getAllLoanSlips = async (req, res) => {
@@ -279,4 +282,130 @@ exports.cancelReservation = async (req, res) => {
     });
   }
 };
+
+/**
+ * POST /api/loans/admin/violations/damage/calc
+ * Body: { conditionBorrow, conditionReturn, coverPrice }
+ * Trả về: { damageFine }
+ */
+exports.calculateDamageOnly = async (req, res) => {
+  try {
+    const payload = req.body || {};
+    const out = await calculateDamageOnly(payload);
+    return res.json({ success: true, data: out });
+  } catch (err) {
+    const code = err.status || 500;
+    return res.status(code).json({
+      success: false,
+      message: 'Lỗi tính tiền hư hỏng',
+      error: err.message,
+      details: err.details
+    });
+  }
+};
+
+/**
+ * POST /api/loans/admin/violations/return/calc
+ * Body: {
+ *   loanDetailId?, dueDate?, returnDate, conditionBorrow?, conditionReturn?, coverPrice?, isLost?
+ * }
+ * Trả về: { overdueFine, damageFine, lostFine, totalFine }
+ */
+exports.computeReturnFines = async (req, res) => {
+  try {
+    const payload = req.body || {};
+    // nếu frontend không gửi returnDate thì lỗi
+    if (!payload.returnDate && !payload.loanDetailId) {
+      // loanDetailId có thể mang thông tin dueDate; nếu không có cả hai => thiếu dữ kiện
+      return res.status(400).json({
+        success: false,
+        message: 'Thiếu returnDate hoặc loanDetailId để tính tiền trả trễ'
+      });
+    }
+
+    const out = await computeReturnFines(payload);
+    return res.json({ success: true, data: out });
+  } catch (err) {
+    const code = err.status || 500;
+    return res.status(code).json({
+      success: false,
+      message: 'Lỗi tính tiền trả trễ / hư hỏng',
+      error: err.message,
+      details: err.details
+    });
+  }
+};
+
+/**
+ * POST /api/loans/admin/violations/lost
+ * Body: { loanDetailId, returnDate?, librarianId? }
+ *
+ * Ghi chú:
+ * - Service xử lý chính nằm trong adminLoanSlip.service.js (vị trí bạn đã upload: /mnt/data/adminLoanSlip.service.js)
+ * - Controller này cố gắng lấy librarianId từ: req.user.librarianId || req.user.accountId || req.body.librarianId
+ */
+exports.handleLostBookAndCharge = async (req, res) => {
+  try {
+    const payload = req.body || {};
+    const loanDetailId = payload.loanDetailId || null;
+    if (!loanDetailId) {
+      return res.status(400).json({ success: false, message: 'Thiếu loanDetailId trong request body' });
+    }
+
+    // Lấy librarianId một cách robust từ nhiều nguồn
+    const fromReqUser = req.user ?? {};
+    const librarianIdCandidate =
+      // explicit librarianId on req.user
+      (fromReqUser.librarianId !== undefined && fromReqUser.librarianId !== null) ? fromReqUser.librarianId :
+        // maybe stored as accountId for some auth middlewares
+        (fromReqUser.accountId !== undefined && fromReqUser.accountId !== null) ? fromReqUser.accountId :
+          // fallback to profile inside req.user
+          (fromReqUser.profile && (fromReqUser.profile.librarianId ?? null)) ?
+            fromReqUser.profile.librarianId :
+            // fallback: body
+            (payload.librarianId !== undefined && payload.librarianId !== null) ? payload.librarianId :
+              null;
+
+    const librarianId = (librarianIdCandidate !== null && librarianIdCandidate !== undefined)
+      ? Number(librarianIdCandidate)
+      : null;
+
+    if (!librarianId) {
+      // không tìm thấy -> trả lỗi rõ ràng để client biết
+      return res.status(400).json({
+        success: false,
+        message: 'Thiếu librarianId (truyền qua body hoặc qua auth token). Vui lòng đăng nhập bằng tài khoản thủ thư.'
+      });
+    }
+
+    // Debug log để kiểm tra server có nhận đúng giá trị không
+    console.log('[controller.handleLostBookAndCharge] call with', {
+      loanDetailId: Number(loanDetailId),
+      librarianId,
+      returnDate: payload.returnDate ?? null,
+      calledBy: req.user ? (req.user.email || req.user.accountId || 'unknown') : 'anonymous'
+    });
+
+    // gọi service chính (đảm bảo service export tên handleLostBookAndCharge tồn tại)
+    const out = await handleLostBookAndCharge({
+      loanDetailId: Number(loanDetailId),
+      librarianId: Number(librarianId),
+      returnDate: payload.returnDate
+    });
+
+    return res.json({ success: true, data: out });
+  } catch (err) {
+    const code = err.status || 500;
+    // in log chi tiết lỗi để dễ debug (nhưng không leak quá nhiều thông tin ra client)
+    console.error('[controller.handleLostBookAndCharge] error:', err);
+    return res.status(code).json({
+      success: false,
+      message: 'Lỗi xử lý mất sách',
+      error: err.message,
+      details: err.details ?? null
+    });
+  }
+};
+
+
 module.exports = exports;
