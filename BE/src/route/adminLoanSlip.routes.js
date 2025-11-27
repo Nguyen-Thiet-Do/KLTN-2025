@@ -1,4 +1,3 @@
-// src/route/adminLoanSlip.routes.js
 const router = require('express').Router();
 const { requireAuth, requireRole } = require('../middleware/auth');
 const controller = require('../controller/adminLoanSlip.controller');
@@ -26,20 +25,45 @@ router.post('/slips/:loanSlipId/return', requireAuth, requireRole([1, 2]), contr
 
 // ---------------------------
 // NEW: PICKUP - xác nhận độc giả đến lấy
-// POST /api/loans/admin/slips/:loanSlipId/pickup
-// Body: { librarianId, pickupDate?, dueDate?, items?, preserveLoanDate? }
 router.post('/slips/:loanSlipId/pickup', requireAuth, requireRole([1, 2]), controller.pickupLoanSlip);
 
 // ---------------------------
 // NEW: XÓA 1 LOAN DETAIL
-// DELETE /api/loans/admin/slips/:loanSlipId/details/:loanDetailId
-// Body: { librarianId, reason? }
 router.delete('/slips/:loanSlipId/details/:loanDetailId', requireAuth, requireRole([1, 2]), controller.removeLoanDetail);
 
 // ---------------------------
 // NEW: HỦY TOÀN BỘ PHIẾU
-// DELETE /api/loans/admin/slips/:loanSlipId
-// Body: { librarianId, reason? }
 router.delete('/slips/:loanSlipId', requireAuth, requireRole([1, 2]), controller.cancelLoanSlip);
+
+// ===================================================================
+// ========================= VI PHẠM - NEW ===========================
+// ===================================================================
+
+// 1) TÍNH TIỀN HƯ HỎNG
+// POST /api/loans/admin/violations/damage/calc
+router.post(
+    '/violations/damage/calc',
+    requireAuth,
+    requireRole([1, 2]),
+    controller.calculateDamageOnly
+);
+
+// 2) TÍNH TIỀN TRẢ TRỄ + HƯ HỎNG + MẤT (nếu có)
+// POST /api/loans/admin/violations/return/calc
+router.post(
+    '/violations/return/calc',
+    requireAuth,
+    requireRole([1, 2]),
+    controller.computeReturnFines
+);
+
+// 3) XỬ LÝ MẤT SÁCH (auto trừ thẻ / tạo QR PayOS)
+// POST /api/loans/admin/violations/lost
+router.post(
+    '/violations/lost',
+    requireAuth,
+    requireRole([1, 2]),
+    controller.handleLostBookAndCharge
+);
 
 module.exports = router;

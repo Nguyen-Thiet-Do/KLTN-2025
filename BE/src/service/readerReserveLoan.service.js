@@ -117,6 +117,135 @@ async function getReaderBorrowSnapshot(readerId, t) {
     activeCount,
   };
 }
+/**
+ * Helper kiểm tra quota mượn sách theo loại thẻ của độc giả.
+ *
+ * - Luôn dùng snapshot: pendingApprovalCount + waitingForPickupCount + borrowingCount
+ * - Nếu extraRequested > 0: kiểm tra tổng hiện tại + số đăng ký thêm
+ * - Nếu extraRequested = 0: chỉ kiểm tra tổng hiện tại không vượt maxBorrowLimit
+ * - Nếu checkOverdueAndViolation = true: chặn khi còn sách trễ hạn / vi phạm chưa xử lý
+ */
+async function ensureReaderBorrowQuota({
+  readerId,
+  cardType,
+  transaction: t,
+  extraRequested = 0,
+  checkOverdueAndViolation = false,
+  context = ''
+}) {
+  if (!cardType) {
+    const e = new Error('Không tìm thấy loại thẻ độc giả');
+    e.status = 500;
+    throw e;
+  }
+
+  const maxBorrowLimit = Number(cardType.maxBorrowLimit) || 0;
+  if (maxBorrowLimit <= 0) {
+    const e = new Error('Bạn cần có thẻ thư viện để mượn sách');
+    e.status = 403;
+    throw e;
+  }
+
+  // Lấy snapshot hiện tại
+  const snap = await getReaderBorrowSnapshot(readerId, t);
+
+  const currentTotal =
+    (snap.pendingApprovalCount || 0) +
+    (snap.waitingForPickupCount || 0) +
+    (snap.borrowingCount || 0);
+
+  const requested = Number(extraRequested) || 0;
+  const remaining = maxBorrowLimit - currentTotal;
+
+  const blockingReasons = [];
+
+  if (checkOverdueAndViolation) {
+    if (snap.overdueCount > 0) {
+      blockingReasons.push(`Có ${snap.overdueCount} quyển trễ hạn chưa trả`);
+    }
+    if (snap.unresolvedViolationCount > 0) {
+      blockingReasons.push(`Có ${snap.unresolvedViolationCount} vi phạm/chứng từ phạt chưa giải quyết`);
+    }
+  }
+
+  // Nếu chặn do trễ hạn / vi phạm
+  if (blockingReasons.length) {
+    const e = new Error('Độc giả chưa đủ điều kiện mượn');
+    e.status = 409;
+    e.details = {
+      message: 'Độc giả chưa đủ điều kiện mượn',
+      context,
+      breakdown: {
+        maxBorrowLimit,
+        pendingApprovalCount: snap.pendingApprovalCount,
+        waitingForPickupCount: snap.waitingForPickupCount,
+        borrowingCount: snap.borrowingCount,
+        overdueCount: snap.overdueCount,
+        unresolvedViolationCount: snap.unresolvedViolationCount,
+        quota: {
+          max: maxBorrowLimit,
+          using: currentTotal,
+          remaining: Math.max(0, remaining),
+          requested
+        }
+      },
+      reasons: blockingReasons
+    };
+    throw e;
+  }
+
+  // Nếu có đăng ký thêm
+  if (requested > 0) {
+    if (remaining <= 0 || requested > remaining) {
+      const e = new Error('Vượt quá hạn mức mượn');
+      e.status = 409;
+      e.details = {
+        message: 'Vượt quá hạn mức mượn',
+        context,
+        breakdown: {
+          maxBorrowLimit,
+          pendingApprovalCount: snap.pendingApprovalCount,
+          waitingForPickupCount: snap.waitingForPickupCount,
+          borrowingCount: snap.borrowingCount,
+          overdueCount: snap.overdueCount,
+          unresolvedViolationCount: snap.unresolvedViolationCount,
+          quota: {
+            max: maxBorrowLimit,
+            using: currentTotal,
+            remaining: Math.max(0, remaining),
+            requested
+          }
+        },
+        hint: `Bạn chỉ có thể mượn thêm tối đa ${Math.max(0, remaining)} tài liệu.`
+      };
+      throw e;
+    }
+  } else {
+    // Không đăng ký thêm, chỉ check tổng hiện tại
+    if (currentTotal > maxBorrowLimit) {
+      const e = new Error('Vượt quá số sách tối đa cho phép theo loại thẻ');
+      e.status = 409;
+      e.details = {
+        message: 'Vượt quá số sách tối đa cho phép',
+        context,
+        breakdown: {
+          maxBorrowLimit,
+          pendingApprovalCount: snap.pendingApprovalCount,
+          waitingForPickupCount: snap.waitingForPickupCount,
+          borrowingCount: snap.borrowingCount,
+          overdueCount: snap.overdueCount,
+          unresolvedViolationCount: snap.unresolvedViolationCount,
+          totalUsing: currentTotal
+        }
+      };
+      throw e;
+    }
+  }
+
+  // Không lỗi thì trả về cho ai cần dùng tiếp
+  return { snap, maxBorrowLimit, currentTotal, remaining };
+}
+
 
 /**
  * Đặt mượn trước (Reader)
@@ -128,6 +257,14 @@ async function getReaderBorrowSnapshot(readerId, t) {
  */
 async function reserveLoanForReaderService(user, payload) {
   const t = await sequelize.transaction();
+
+  // Biến lưu quota để dùng cho response & email sau khi commit
+  let quotaSnap = null;
+  let quotaRemaining = 0;
+  let quotaCurrentTotal = 0;
+  let quotaMaxBorrowLimit = 0;
+  let requestedTotal = 0;
+
   try {
     if (!user || user.roleId !== 3) {
       const e = new Error('Chỉ độc giả mới được đặt mượn trước');
@@ -135,7 +272,7 @@ async function reserveLoanForReaderService(user, payload) {
       throw e;
     }
 
-    // Map account -> reader (FIX: remove memberCardId, DB không có)
+    // Map account -> reader
     const reader = await Reader.findOne({
       where: { accountId: user.accountId, deleted: false },
       attributes: ['readerId', 'fullName', 'accountId'],
@@ -176,6 +313,8 @@ async function reserveLoanForReaderService(user, payload) {
       e.statusCode = 400;
       throw e;
     }
+
+    requestedTotal = items.length;
 
     // LẤY THẺ QUA readerId
     const memberCard = await MemberCard.findOne({
@@ -224,52 +363,24 @@ async function reserveLoanForReaderService(user, payload) {
       throw e;
     }
 
-    // Snapshot quota
-    const snap = await getReaderBorrowSnapshot(reader.readerId, t);
-    const remaining = maxBorrowLimit - snap.activeCount;
-    const requestedTotal = items.length;
+    // ================== SNAPSHOT + QUOTA (DÙNG HELPER) ==================
+    // Rule mới: (pending + waiting + borrowing) + requestedTotal <= maxBorrowLimit
+    const quotaInfo = await ensureReaderBorrowQuota({
+      readerId: reader.readerId,
+      cardType,
+      transaction: t,
+      extraRequested: requestedTotal,
+      checkOverdueAndViolation: true, // đặt mượn cũng phải sạch nợ
+      context: 'reserveLoanForReaderService'
+    });
 
-    const blockingReasons = [];
-    if (snap.overdueCount > 0) blockingReasons.push(`Có ${snap.overdueCount} quyển trễ hạn chưa trả`);
-    if (snap.unresolvedViolationCount > 0) blockingReasons.push(`Có ${snap.unresolvedViolationCount} vi phạm/chứng từ phạt chưa giải quyết`);
+    quotaSnap = quotaInfo.snap;
+    quotaRemaining = quotaInfo.remaining;         // max - currentTotal
+    quotaCurrentTotal = quotaInfo.currentTotal;   // tổng hiện tại (pending + waiting + borrowing)
+    quotaMaxBorrowLimit = quotaInfo.maxBorrowLimit;
+    // ====================================================================
 
-    if (blockingReasons.length) {
-      const e = new Error('Độc giả chưa đủ điều kiện mượn');
-      e.status = 409;
-      e.details = {
-        message: 'Độc giả chưa đủ điều kiện mượn',
-        breakdown: {
-          pendingApprovalCount: snap.pendingApprovalCount,
-          waitingForPickupCount: snap.waitingForPickupCount,
-          borrowingCount: snap.borrowingCount,
-          overdueCount: snap.overdueCount,
-          unresolvedViolationCount: snap.unresolvedViolationCount,
-          quota: { max: maxBorrowLimit, using: snap.activeCount, remaining: Math.max(0, remaining), requested: requestedTotal }
-        },
-        reasons: blockingReasons
-      };
-      throw e;
-    }
-
-    if (remaining <= 0 || requestedTotal > remaining) {
-      const e = new Error('Vượt quá hạn mượn');
-      e.status = 409;
-      e.details = {
-        message: 'Vượt quá hạn mượn',
-        breakdown: {
-          pendingApprovalCount: snap.pendingApprovalCount,
-          waitingForPickupCount: snap.waitingForPickupCount,
-          borrowingCount: snap.borrowingCount,
-          overdueCount: snap.overdueCount,
-          unresolvedViolationCount: snap.unresolvedViolationCount,
-          quota: { max: maxBorrowLimit, using: snap.activeCount, remaining: Math.max(0, remaining), requested: requestedTotal }
-        },
-        hint: `Bạn chỉ có thể mượn thêm tối đa ${Math.max(0, remaining)} tài liệu.`
-      };
-      throw e;
-    }
-
-    // Check từng tài liệu
+    // Check từng tài liệu (đủ bản AVAILABLE trừ pending holds)
     const detailPreview = [];
     for (const it of items) {
       const detail = await getDocumentDetailWithDeposit(it.documentId);
@@ -329,27 +440,26 @@ async function reserveLoanForReaderService(user, payload) {
       },
       { transaction: t }
     );
+
+    // Tạo LoanDetail với note = REQUEST_DOCUMENT_ID=...
     for (const it of detailPreview) {
       await LoanDetail.create(
         {
           loanSlipId: slip.loanSlipId,
           documentCopyId: null,
           returnDate: null,
-          status: "PENDING",
+          status: 'PENDING',
           fineAmount: 0,
           renewalCount: 0,
-
-          // SỬA Ở ĐÂY
           note: `REQUEST_DOCUMENT_ID=${it.documentId}`,
         },
         { transaction: t }
       );
     }
 
-
     await t.commit();
 
-    // TẠO BẢN GHI NOTIFICATION trong DB (tóm tắt cho độc giả)
+    // TẠO BẢN GHI NOTIFICATION trong DB
     let createdNotification = null;
     try {
       const notifTitle = `Đặt mượn thành công — Phiếu #${slip.loanSlipId}`;
@@ -367,20 +477,21 @@ async function reserveLoanForReaderService(user, payload) {
       });
     } catch (err) {
       console.error('❌ Failed to create Notification record:', err.message || err);
-      // Không throw — không làm hỏng luồng chính
+      // không throw, tránh làm hỏng luồng chính
     }
-// Emit socket để FE tăng số thông báo
-try {
-  if (createdNotification && createdNotification.notificationID) {
-    emitToUser(reader.readerId, "notification:new", {
-      notificationID: createdNotification.notificationID,
-      title: createdNotification.title,
-      content: createdNotification.content,
-    });
-  }
-} catch (err) {
-  console.error("❌ Socket emit failed:", err);
-}
+
+    // Emit socket để FE tăng số thông báo
+    try {
+      if (createdNotification && createdNotification.notificationID) {
+        emitToUser(reader.readerId, "notification:new", {
+          notificationID: createdNotification.notificationID,
+          title: createdNotification.title,
+          content: createdNotification.content,
+        });
+      }
+    } catch (err) {
+      console.error("❌ Socket emit failed:", err);
+    }
 
     // Gửi email — background
     setImmediate(async () => {
@@ -408,12 +519,19 @@ try {
         }
 
         const mailItems = detailPreview.map(d => ({ documentId: d.documentId, title: d.title }));
+
+        // remainingAfterReserve = maxBorrowLimit - (currentTotal + requestedTotal)
+        const remainingAfterReserveMail = Math.max(
+          0,
+          quotaMaxBorrowLimit - (quotaCurrentTotal + requestedTotal)
+        );
+
         const mailData = {
           fullName: reader.fullName || '',
           slipId: slip.loanSlipId,
           items: mailItems,
           requestedTotal: detailPreview.length,
-          remainingAfterReserve: Math.max(0, (maxBorrowLimit - snap.activeCount) - detailPreview.length),
+          remainingAfterReserve: remainingAfterReserveMail,
           supportEmail: process.env.SUPPORT_EMAIL || 'support@booktechv2.net',
           supportPhone: process.env.SUPPORT_PHONE || '0123-456-789',
           year: new Date().getFullYear()
@@ -438,6 +556,9 @@ try {
       }
     });
 
+    // remainingAfterReserve cho response = remaining - requestedTotal
+    const remainingAfterReserve = quotaRemaining - requestedTotal;
+
     return {
       slip: {
         loanSlipId: slip.loanSlipId,
@@ -446,9 +567,9 @@ try {
       },
       items: detailPreview,
       summary: {
-        currentlyBorrowing: snap.borrowingCount,
+        currentlyBorrowing: quotaSnap ? quotaSnap.borrowingCount : 0,
         requestedTotal,
-        remainingAfterReserve: remaining - requestedTotal,
+        remainingAfterReserve,
       },
       message: 'Đặt mượn thành công. Phiếu đang chờ thủ thư duyệt.'
     };
@@ -460,5 +581,6 @@ try {
     throw e;
   }
 }
+
 
 module.exports = { reserveLoanForReaderService, getReaderBorrowSnapshot };
