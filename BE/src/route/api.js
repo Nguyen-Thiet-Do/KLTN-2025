@@ -425,70 +425,122 @@ routeApi.get('/', (req, res) => {
   ]
 },
 
-      {
-        group: 'Profile',
-        icon: '👤',
-        routes: [
-          {
-            method: 'GET',
-            path: '/api/profile/me',
-            description: 'Lấy thông tin cá nhân của độc giả hiện tại (bao gồm cả thông tin tài khoản đi kèm)',
-            auth: true,
-            role: 'Reader (roleId = 3)',
-            response: {
-              success: 'boolean',
-              reader: {
-                // Trường từ Reader
-                readerId: 'number',
-                accountId: 'number',
-                roleId: 'number',
-                fullName: 'string',
-                dateOfBirth: 'date (YYYY-MM-DD)',
-                gender: 'string | null',
-                cccd: 'string | null',
-                address: 'string | null',
-                totolBorrow: 'number',
-                note: 'string | null',
-                deleted: 'boolean',
-                created_at: 'datetime',
-                updated_at: 'datetime',
+   {
+  group: 'Profile',
+  icon: '👤',
+  routes: [
+    {
+      method: 'GET',
+      path: '/api/profile/me',
+      description: 'Lấy thông tin cá nhân của độc giả hiện tại (bao gồm cả thông tin tài khoản đi kèm)',
+      auth: true,
+      role: 'Reader (roleId = 3)',
+      response: {
+        success: 'boolean',
+        reader: {
+          readerId: 'number',
+          accountId: 'number',
+          roleId: 'number',
+          fullName: 'string',
+          dateOfBirth: 'date (YYYY-MM-DD)',
+          gender: 'string | null',
+          cccd: 'string | null',
+          address: 'string | null',
+          totalBorrow: 'number',
+          note: 'string | null',
+          deleted: 'boolean',
+          created_at: 'datetime',
+          updated_at: 'datetime',
 
-                // Trường tiện dùng (lấy từ Account, đã ẩn mật khẩu và token)
-                email: 'string',
-                phoneNumber: 'string | null',
-                status: 'active | locked | inactive',
-                roleId_account: 'number',
-                created_at_account: 'datetime',
-                updated_at_account: 'datetime',
+          email: 'string',
+          phoneNumber: 'string | null',
+          status: 'active | locked | inactive',
+          roleId_account: 'number',
+          created_at_account: 'datetime',
+          updated_at_account: 'datetime',
 
-                // Nhánh đầy đủ của Account (tùy dùng)
-                account: 'object | null'
-              }
-            }
-          },
-          {
-            method: 'PUT',
-            path: '/api/profile/me',
-            description: 'Cập nhật thông tin cá nhân của độc giả (chỉ cập nhật bảng Readers, không cập nhật tài khoản)',
-            auth: true,
-            role: 'Reader (roleId = 3)',
-            body: {
-              fullName: 'string (tùy chọn)',
-              gender: 'string (tùy chọn)',
-              dateOfBirth: 'date (tùy chọn, dạng YYYY-MM-DD)',
-              address: 'string (tùy chọn)',
-              cccd: 'string (tùy chọn)',
-              note: 'string (tùy chọn)'
-              // ❌ Không nhận phoneNumber, email, status... (thuộc Account)
-            },
-            response: {
-              success: 'boolean',
-              message: 'string',
-              reader: 'object (cấu trúc giống GET /api/profile/me)'
-            }
-          }
-        ]
+          account: 'object | null',
+          memberCard: 'object | null',
+          loanCounts: '{ pending, waitingPickup, borrowing, activeTotal }',
+          returnedCount: 'number'
+        }
+      }
+    },
+
+    {
+      method: 'PUT',
+      path: '/api/profile/me',
+      description: 'Cập nhật thông tin cá nhân của độc giả (chỉ cập nhật bảng Readers, không cập nhật tài khoản)',
+      auth: true,
+      role: 'Reader (roleId = 3)',
+      body: {
+        fullName: 'string (optional)',
+        gender: 'string (optional)',
+        dateOfBirth: 'date (optional, YYYY-MM-DD)',
+        address: 'string (optional)',
+        cccd: 'string (optional)',
+        note: 'string (optional)'
       },
+      response: {
+        success: 'boolean',
+        message: 'string',
+        reader: 'object (cấu trúc giống GET /api/profile/me)'
+      }
+    },
+
+    {
+      method: 'PUT',
+      path: '/api/profile/account',
+      description: 'Cập nhật thông tin tài khoản (email, phoneNumber, password)',
+      auth: true,
+      role: 'Reader (roleId = 3)',
+      body: {
+        email: 'string (optional)',
+        phoneNumber: 'string (optional)',
+        password: 'string (optional - mật khẩu mới)'
+      },
+      response: {
+        success: 'boolean',
+        message: 'string',
+        account: {
+          accountId: 'number',
+          email: 'string',
+          phoneNumber: 'string | null',
+          roleId: 'number',
+          status: 'string',
+          created_at: 'datetime',
+          updated_at: 'datetime'
+        }
+      }
+    },
+
+    {
+      method: 'PUT',
+      path: '/api/profile/full',
+      description: 'Cập nhật đầy đủ thông tin độc giả + tài khoản (Reader + Account) cùng lúc',
+      auth: true,
+      role: 'Reader (roleId = 3)',
+      body: {
+        fullName: 'string (optional)',
+        gender: 'string (optional)',
+        dateOfBirth: 'date (optional)',
+        address: 'string (optional)',
+        cccd: 'string (optional)',
+        note: 'string (optional)',
+
+        email: 'string (optional)',
+        phoneNumber: 'string (optional)',
+        password: 'string (optional)'
+      },
+      response: {
+        success: 'boolean',
+        message: 'string',
+        profile: 'object (cấu trúc giống GET /api/profile/me — đầy đủ Reader + Account + MemberCard + loanCounts)'
+      }
+    }
+  ]
+}
+,
 
       {
         group: 'Documents of Reader',
