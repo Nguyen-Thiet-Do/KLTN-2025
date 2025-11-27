@@ -1,4 +1,3 @@
-// src/service/profileService.js
 const { Reader, Account, MemberCard, CardType, LoanSlip } = require("../model");
 const { Op } = require("sequelize");
 const bcrypt = require("bcrypt");
@@ -11,22 +10,13 @@ const getReaderByAccountId = async (accountId) => {
     const reader = await Reader.findOne({
       where: { accountId, deleted: false },
       include: [
-        {
-          model: Account,
-          required: true,
-        },
+        { model: Account, required: true },
         {
           model: MemberCard,
           as: "memberCard",
           required: false,
           where: { deleted: false },
-          include: [
-            {
-              model: CardType,
-              as: "cardType",
-              required: false,
-            },
-          ],
+          include: [{ model: CardType, as: "cardType", required: false }],
         },
       ],
     });
@@ -44,39 +34,26 @@ const getReaderByAccountId = async (accountId) => {
       returnedCount,
     ] = await Promise.all([
       LoanSlip.count({
-        where: {
-          readerId: r.readerId,
-          deleted: false,
-          status: "PENDING",
-        },
+        where: { readerId: r.readerId, deleted: false, status: "PENDING" },
       }).catch(() => 0),
 
       LoanSlip.count({
-        where: {
-          readerId: r.readerId,
-          deleted: false,
-          status: "WAITING_FOR_PICKUP",
-        },
+        where: { readerId: r.readerId, deleted: false, status: "WAITING_FOR_PICKUP" },
       }).catch(() => 0),
 
       LoanSlip.count({
-        where: {
-          readerId: r.readerId,
-          deleted: false,
-          status: BORROWING_STATUSES,
-        },
+        where: { readerId: r.readerId, deleted: false, status: BORROWING_STATUSES },
       }).catch(() => 0),
 
       LoanSlip.count({
-        where: {
-          readerId: r.readerId,
-          deleted: false,
-          status: "RETURNED",
-        },
+        where: { readerId: r.readerId, deleted: false, status: "RETURNED" },
       }).catch(() => 0),
     ]);
 
-    const activeTotal = Number(pendingCount) + Number(waitingPickupCount) + Number(borrowingCount);
+    const activeTotal =
+      Number(pendingCount) +
+      Number(waitingPickupCount) +
+      Number(borrowingCount);
 
     return {
       readerId: r.readerId,
@@ -119,10 +96,17 @@ const getReaderByAccountId = async (accountId) => {
 };
 
 /**
- * CẬP NHẬT THÔNG TIN ĐỘC GIẢ (chỉ bảng Readers)
+ * CẬP NHẬT THÔNG TIN ĐỘC GIẢ
  */
 const updateReaderByAccountId = async (accountId, data) => {
-  const ALLOWED_FIELDS = ["fullName", "gender", "dateOfBirth", "address", "cccd", "note"];
+  const ALLOWED_FIELDS = [
+    "fullName",
+    "gender",
+    "dateOfBirth",
+    "address",
+    "cccd",
+    "note",
+  ];
 
   try {
     const reader = await Reader.findOne({
@@ -133,16 +117,12 @@ const updateReaderByAccountId = async (accountId, data) => {
 
     const patch = {};
     for (const key of ALLOWED_FIELDS) {
-      if (Object.prototype.hasOwnProperty.call(data, key) && data[key] !== undefined) {
-        patch[key] = data[key];
-      }
+      if (data[key] !== undefined) patch[key] = data[key];
     }
 
-    if (Object.keys(patch).length === 0) {
-      return await getReaderByAccountId(accountId);
+    if (Object.keys(patch).length > 0) {
+      await reader.update(patch);
     }
-
-    await reader.update(patch);
 
     return await getReaderByAccountId(accountId);
   } catch (error) {
@@ -152,39 +132,56 @@ const updateReaderByAccountId = async (accountId, data) => {
 };
 
 /**
- * ✅ CẬP NHẬT THÔNG TIN ACCOUNT (email, phoneNumber, password)
+ * CẬP NHẬT ACCOUNT — BẮT BUỘC NHẬP oldPassword KHI ĐỔI password
  */
 const updateAccountByAccountId = async (accountId, data) => {
-  const ALLOWED_FIELDS = ["email", "phoneNumber", "password"];
-
   try {
-    const account = await Account.findOne({
+    const account = await Account.scope("withSecrets").findOne({
       where: { accountId, deleted: false },
     });
 
-    if (!account) {
-      throw new Error("Tài khoản không tồn tại");
-    }
+    if (!account) throw new Error("Tài khoản không tồn tại");
 
     const patch = {};
 
-    for (const key of ALLOWED_FIELDS) {
-      if (Object.prototype.hasOwnProperty.call(data, key) && data[key] !== undefined) {
-        // Hash password nếu có
-        if (key === "password" && data[key]) {
-  patch["passwordHash"] = await bcrypt.hash(data[key], 10);
-}
-else {
-          patch[key] = data[key];
-        }
+    // Email - KHÔNG CHO PHÉP ĐỔI
+    // if (data.email !== undefined) patch.email = data.email;
+
+    // Phone
+    if (data.phoneNumber !== undefined) patch.phoneNumber = data.phoneNumber;
+
+    // ============================
+    // 🔥 KIỂM TRA ĐỔI MẬT KHẨU
+    // ============================
+    // Hỗ trợ cả "password" và "newPassword" từ frontend
+    const newPassword = data.password || data.newPassword;
+    const oldPassword = data.oldPassword;
+
+    if (oldPassword || newPassword) {
+      // Nếu có một trong hai -> bắt buộc phải có cả hai
+      if (!oldPassword || !newPassword) {
+        throw new Error("Cần nhập đầy đủ mật khẩu cũ và mật khẩu mới");
       }
+
+      // Kiểm tra mật khẩu cũ
+      const isMatch = await bcrypt.compare(oldPassword, account.passwordHash);
+      if (!isMatch) {
+        throw new Error("Mật khẩu cũ không chính xác");
+      }
+
+      // Kiểm tra mật khẩu mới phải khác mật khẩu cũ
+      const isSamePassword = await bcrypt.compare(newPassword, account.passwordHash);
+      if (isSamePassword) {
+        throw new Error("Mật khẩu mới không được trùng với mật khẩu cũ");
+      }
+
+      // Hash và lưu mật khẩu mới
+      patch.passwordHash = await bcrypt.hash(newPassword, 10);
     }
 
-    if (Object.keys(patch).length === 0) {
-      return account;
+    if (Object.keys(patch).length > 0) {
+      await account.update(patch);
     }
-
-    await account.update(patch);
 
     return account;
   } catch (error) {
@@ -194,35 +191,43 @@ else {
 };
 
 /**
- * ✅ CẬP NHẬT TOÀN BỘ (Account + Reader) cùng lúc
+ * CẬP NHẬT TOÀN BỘ (Account + Reader)
  */
 const updateFullProfileByAccountId = async (accountId, data) => {
   try {
-    const accountFields = ["email", "phoneNumber", "password"];
-    const readerFields = ["fullName", "gender", "dateOfBirth", "address", "cccd", "note"];
-
     const accountData = {};
     const readerData = {};
 
-    Object.keys(data).forEach(key => {
-      if (accountFields.includes(key) && data[key] !== undefined) {
+    // Hỗ trợ cả "password" và "newPassword"
+    const accountFields = ["email", "phoneNumber", "oldPassword", "password", "newPassword"];
+    const readerFields = [
+      "fullName",
+      "gender",
+      "dateOfBirth",
+      "address",
+      "cccd",
+      "note",
+    ];
+
+    Object.keys(data).forEach((key) => {
+      if (accountFields.includes(key)) {
         accountData[key] = data[key];
-      } else if (readerFields.includes(key) && data[key] !== undefined) {
+      } else if (readerFields.includes(key)) {
         readerData[key] = data[key];
       }
     });
 
-    // Cập nhật Account (nếu có)
+    // Cập nhật Account trước (nếu có thay đổi)
     if (Object.keys(accountData).length > 0) {
       await updateAccountByAccountId(accountId, accountData);
     }
 
-    // Cập nhật Reader (nếu có)
+    // Cập nhật Reader sau (nếu có thay đổi)
     if (Object.keys(readerData).length > 0) {
       await updateReaderByAccountId(accountId, readerData);
     }
 
-    // Trả về thông tin đầy đủ
+    // Trả về thông tin đầy đủ sau khi cập nhật
     return await getReaderByAccountId(accountId);
   } catch (error) {
     console.error("❌ Lỗi updateFullProfileByAccountId:", error);
@@ -233,6 +238,6 @@ const updateFullProfileByAccountId = async (accountId, data) => {
 module.exports = {
   getReaderByAccountId,
   updateReaderByAccountId,
-  updateAccountByAccountId, // ✅ THÊM
-  updateFullProfileByAccountId, // ✅ THÊM
+  updateAccountByAccountId,
+  updateFullProfileByAccountId,
 };
