@@ -179,15 +179,18 @@ export default function ProfilePage() {
               >
                 {user?.fullName || "Người dùng"}
               </Typography>
-              <Chip
-                label="Thành viên"
-                sx={{
-                  backgroundColor: "rgba(255,255,255,0.2)",
-                  color: "white",
-                  fontWeight: 600,
-                  backdropFilter: "blur(10px)",
-                }}
-              />
+           <Chip
+  label={user?.memberCard ? "Thành viên" : "Chưa là thành viên"}
+  sx={{
+    backgroundColor: user?.memberCard
+      ? "rgba(255,255,255,0.25)"
+      : "rgba(0,0,0,0.25)",
+    color: "white",
+    fontWeight: 600,
+    backdropFilter: "blur(10px)",
+  }}
+/>
+
             </Box>
 
             {/* Info Section */}
