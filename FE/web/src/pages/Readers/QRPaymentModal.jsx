@@ -108,9 +108,10 @@ export default function QRPaymentModal({
       
       console.log("💳 Payment status:", result);
 
-      // ✅ Nếu thanh toán thành công
-      if (result.success && (result.status === "SUCCESS" || result.status === "PAID")) {
-        console.log("🎉 Payment successful! Updating UI...");
+      // ✅ Nếu thanh toán thành công (check nhiều trạng thái có thể)
+      const successStatuses = ["SUCCESS", "PAID", "COMPLETED"];
+      if (result.success && successStatuses.includes(result.status)) {
+        console.log("🎉 Payment successful! Status:", result.status);
         setPaymentStatus("success");
         
         // Dừng interval
