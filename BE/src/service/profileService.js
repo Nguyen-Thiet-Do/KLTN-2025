@@ -172,9 +172,9 @@ const updateAccountByAccountId = async (accountId, data) => {
       if (Object.prototype.hasOwnProperty.call(data, key) && data[key] !== undefined) {
         // Hash password nếu có
         if (key === "password" && data[key]) {
-          const saltRounds = 10;
-          patch[key] = await bcrypt.hash(data[key], saltRounds);
-        } else {
+  patch["passwordHash"] = await bcrypt.hash(data[key], 10);
+}
+else {
           patch[key] = data[key];
         }
       }
