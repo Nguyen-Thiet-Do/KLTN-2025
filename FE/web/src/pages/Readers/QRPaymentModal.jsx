@@ -45,39 +45,68 @@ export default function QRPaymentModal({
 
   // ✅ Gọi API kiểm tra thanh toán
   const checkPaymentStatus = async () => {
-    try {
-      const token = sessionStorage.getItem("accessToken");
-      const response = await fetch(
-        `http://localhost:8080/api/payments/${paymentData.paymentId}/status`,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        }
-      );
-
-      const result = await response.json();
-      
-      console.log("💳 Payment status:", result);
-
-      // ✅ Nếu thanh toán thành công (SUCCESS hoặc PAID)
-      if (result.success && (result.status === "SUCCESS" || result.status === "PAID")) {
-        setPaymentStatus("success");
-        
-        // Dừng interval
-        if (checkInterval) {
-          clearInterval(checkInterval);
-        }
-
-        // Đợi 2 giây để hiện thông báo thành công
-        setTimeout(() => {
-          onPaymentSuccess();
-        }, 2000);
+  try {
+    const token = sessionStorage.getItem("accessToken");
+    
+    // ✅ THÊM ĐOẠN NÀY
+    const getApiBaseUrl = () => {
+      // Vite env
+      if (import.meta.env.VITE_API_URL) {
+        return import.meta.env.VITE_API_URL;
       }
-    } catch (error) {
-      console.error("❌ Lỗi kiểm tra thanh toán:", error);
+      
+      // Fallback Create React App
+      if (process.env.REACT_APP_API_URL) {
+        return process.env.REACT_APP_API_URL;
+      }
+      
+      // Local dev
+      if (window.location.hostname === 'localhost') {
+        return 'http://localhost:8080/api';
+      }
+      
+      // Production
+      return 'https://kltn-2025-ehsx.onrender.com/api';
+    };
+    
+    const API_BASE_URL = getApiBaseUrl();
+    
+    console.log("🔧 API_BASE_URL:", API_BASE_URL);
+    
+    // ✅ SỬA DÒNG NÀY
+    const response = await fetch(
+      `${API_BASE_URL}/payments/${paymentData.paymentId}/status`,  // ← Thay vì hardcode localhost
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      }
+    );
+
+    if (!response.ok) {
+      console.error("❌ API response not OK:", response.status, response.statusText);
+      return;
     }
-  };
+
+    const result = await response.json();
+    
+    console.log("💳 Payment status:", result);
+
+    if (result.success && (result.status === "SUCCESS" || result.status === "PAID")) {
+      setPaymentStatus("success");
+      
+      if (checkInterval) {
+        clearInterval(checkInterval);
+      }
+
+      setTimeout(() => {
+        onPaymentSuccess();
+      }, 2000);
+    }
+  } catch (error) {
+    console.error("❌ Lỗi kiểm tra thanh toán:", error);
+  }
+};
 
   // ✅ Xử lý đóng modal
   const handleClose = () => {
