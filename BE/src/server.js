@@ -4,16 +4,16 @@
 
 // ⚠️ NẠP BIẾN MÔI TRƯỜNG PHẢI ĐƯỢC ĐẶT Ở DÒNG ĐẦU TIÊN
 require('dotenv').config();
-const sendEmail = require("./utils/sendEmail");
+// const sendEmail = require("./utils/sendEmail");
 
-(async () => {
-  try {
-    await sendEmail("dauphaihiepga@gmail.com", "TEST OTP", "<b>OK</b>");
-    console.log("EMAIL SENT");
-  } catch (e) {
-    console.error("EMAIL ERROR:", e);
-  }
-})();
+// (async () => {
+//   try {
+//     await sendEmail("dauphaihiepga@gmail.com", "TEST OTP", "<b>OK</b>");
+//     console.log("EMAIL SENT");
+//   } catch (e) {
+//     console.error("EMAIL ERROR:", e);
+//   }
+// })();
 
 console.log("MAIL_USER = ", process.env.MAIL_USER);
 console.log("MAIL_PASS = ", process.env.MAIL_PASS);
