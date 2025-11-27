@@ -203,21 +203,33 @@ export default function Readers() {
 
       console.log("✅ API response (full):", JSON.stringify(res, null, 2));
 
-      // ✅ Xử lý response từ backend
-      // Backend THỰC TẾ trả về: { ok: true, data: { paymentId, amount, qrCode, checkoutUrl, ... } }
-      // KHÔNG phải: { ok: true, data: { payment: {...}, paymentLink: {...} } }
+      // ✅ Backend response structure:
+      // {
+      //   ok: true,
+      //   data: {
+      //     ok: true,
+      //     paymentId: 392,
+      //     orderCode: "1764270896699",
+      //     amount: 10000,
+      //     payos: {
+      //       checkoutUrl: "https://pay.payos.vn/...",
+      //       qrCode: "00020101021238570010A000000727...",
+      //       paymentLinkId: "9528374d4b6d4b7a92a2619aaa3337d9"
+      //     }
+      //   }
+      // }
       
       const responseData = res.data || res;
       
       console.log("💾 Response data:", JSON.stringify(responseData, null, 2));
       
-      // ✅ Lấy thông tin thanh toán TRỰC TIẾP từ responseData
+      // ✅ Lấy thông tin thanh toán
       const paymentId = responseData.paymentId;
       const amount = responseData.amount;
-      const qrCode = responseData.qrCode;
-      const checkoutUrl = responseData.checkoutUrl;
+      const qrCode = responseData.payos?.qrCode;
+      const checkoutUrl = responseData.payos?.checkoutUrl;
       
-      console.log("💳 Payment info:", { paymentId, amount, qrCode, checkoutUrl });
+      console.log("💳 Payment info:", { paymentId, amount, qrCode: qrCode?.substring(0, 50) + '...', checkoutUrl });
       
       if (!paymentId) {
         throw new Error("Không nhận được paymentId từ server");
