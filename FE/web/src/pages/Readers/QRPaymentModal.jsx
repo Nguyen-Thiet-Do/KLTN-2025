@@ -26,6 +26,19 @@ export default function QRPaymentModal({
   const [paymentStatus, setPaymentStatus] = useState("pending");
   const [checkInterval, setCheckInterval] = useState(null);
 
+  // ✅ Debug payment data
+  useEffect(() => {
+    if (open && paymentData) {
+      console.log("═══════════════════════════════");
+      console.log("📦 PAYMENT DATA:");
+      console.log("   - paymentId:", paymentData.paymentId);
+      console.log("   - qrCode:", paymentData.qrCode);
+      console.log("   - checkoutUrl:", paymentData.checkoutUrl);
+      console.log("   - Full:", paymentData);
+      console.log("═══════════════════════════════");
+    }
+  }, [open, paymentData]);
+
   // ✅ Kiểm tra trạng thái thanh toán định kỳ
   useEffect(() => {
     if (!open || !paymentData?.paymentId) return;
@@ -33,7 +46,6 @@ export default function QRPaymentModal({
     console.log("💳 Payment modal opened with ID:", paymentData.paymentId);
     console.log("🔄 Starting auto-check payment status every 3 seconds...");
 
-    // Kiểm tra mỗi 3 giây
     const interval = setInterval(async () => {
       await checkPaymentStatus();
     }, 3000);
@@ -53,42 +65,22 @@ export default function QRPaymentModal({
     try {
       const token = sessionStorage.getItem("accessToken");
       
-      // ✅ Auto-detect API URL
       const getApiBaseUrl = () => {
-        console.log("🔍 Detecting environment...");
-        console.log("   - hostname:", window.location.hostname);
-        console.log("   - VITE_API_URL:", import.meta.env.VITE_API_URL);
-        
-        // 1. ƯU TIÊN: Check production first
         const isProduction = window.location.hostname !== 'localhost' 
                           && window.location.hostname !== '127.0.0.1';
         
         if (isProduction) {
-          console.log("   ✅ Production detected");
           return 'https://kltn-2025-ehsx.onrender.com/api';
         }
         
-        // 2. Check Vite env variables
         if (import.meta.env.VITE_API_URL) {
-          console.log("   ✅ Using VITE_API_URL");
           return import.meta.env.VITE_API_URL;
         }
         
-        // 3. Fallback Create React App
-        if (process.env.REACT_APP_API_URL) {
-          console.log("   ✅ Using REACT_APP_API_URL");
-          return process.env.REACT_APP_API_URL;
-        }
-        
-        // 4. Fallback localhost
-        console.log("   ✅ Fallback to localhost");
         return 'http://localhost:8080/api';
       };
       
       const API_BASE_URL = getApiBaseUrl();
-      
-      console.log("🔧 Final API_BASE_URL:", API_BASE_URL);
-      console.log("🔍 Checking payment status at:", `${API_BASE_URL}/payments/${paymentData.paymentId}/status`);
       
       const response = await fetch(
         `${API_BASE_URL}/payments/${paymentData.paymentId}/status`,
@@ -100,7 +92,7 @@ export default function QRPaymentModal({
       );
 
       if (!response.ok) {
-        console.error("❌ API response not OK:", response.status, response.statusText);
+        console.error("❌ API response not OK:", response.status);
         return;
       }
 
@@ -108,33 +100,25 @@ export default function QRPaymentModal({
       
       console.log("💳 Payment status:", result);
 
-      // ✅ Nếu thanh toán thành công (check nhiều trạng thái có thể)
+      // ✅ Sync với backend: SUCCESS, PAID, COMPLETED
       const successStatuses = ["SUCCESS", "PAID", "COMPLETED"];
       if (result.success && successStatuses.includes(result.status)) {
         console.log("🎉 Payment successful! Status:", result.status);
         setPaymentStatus("success");
         
-        // Dừng interval
         if (checkInterval) {
           clearInterval(checkInterval);
         }
 
-        // Đợi 2 giây để hiện thông báo thành công
         setTimeout(() => {
           onPaymentSuccess();
         }, 2000);
       }
     } catch (error) {
       console.error("❌ Lỗi kiểm tra thanh toán:", error);
-      console.error("⚠️ Chi tiết:", {
-        message: error.message,
-        name: error.name,
-        stack: error.stack
-      });
     }
   };
 
-  // ✅ Xử lý đóng modal
   const handleClose = () => {
     if (checkInterval) {
       clearInterval(checkInterval);
@@ -143,7 +127,6 @@ export default function QRPaymentModal({
     onClose();
   };
 
-  // ✅ Mở link thanh toán trong tab mới
   const openPaymentLink = () => {
     if (paymentData?.checkoutUrl) {
       window.open(paymentData.checkoutUrl, "_blank");
@@ -177,14 +160,12 @@ export default function QRPaymentModal({
 
       <DialogContent sx={{ mt: 2 }}>
         {paymentStatus === "success" ? (
-          // ✅ Hiển thị thành công
           <Box sx={{ textAlign: "center", py: 4 }}>
             <CheckIcon 
               sx={{ 
                 fontSize: 80, 
                 color: "#38A169",
                 mb: 2,
-                animation: "scaleIn 0.3s ease-in-out"
               }} 
             />
             <Typography variant="h5" fontWeight={700} color="#38A169" gutterBottom>
@@ -195,24 +176,22 @@ export default function QRPaymentModal({
             </Typography>
           </Box>
         ) : (
-          // ✅ Hiển thị QR và thông tin thanh toán
           <Stack spacing={3}>
             <Alert severity="info" sx={{ borderRadius: 2 }}>
               Vui lòng quét mã QR hoặc mở link thanh toán để hoàn tất
             </Alert>
 
-            {/* Hiển thị số tiền */}
             <Box sx={{ textAlign: "center" }}>
               <Typography variant="body2" color="text.secondary">
                 Số tiền thanh toán
               </Typography>
               <Typography variant="h4" fontWeight={700} color="#667EEA">
-                {paymentData.amount?.toLocaleString("vi-VN")} đ
+                {paymentData?.amount?.toLocaleString("vi-VN")} đ
               </Typography>
             </Box>
 
-            {/* QR Code */}
-            {paymentData.qrCodeUrl && (
+            {/* ✅ QR Code - sync với BE */}
+            {paymentData?.qrCode && (
               <Box sx={{ 
                 textAlign: "center",
                 p: 2,
@@ -221,19 +200,26 @@ export default function QRPaymentModal({
                 border: "2px solid #E2E8F0",
               }}>
                 <img 
-                  src={paymentData.qrCodeUrl} 
+                  src={paymentData.qrCode} 
                   alt="QR Payment" 
                   style={{ 
                     maxWidth: "100%", 
                     height: "auto",
                     maxHeight: "300px",
                   }}
+                  onError={(e) => {
+                    console.error("❌ QR Code load failed:", paymentData.qrCode);
+                    e.target.style.display = 'none';
+                  }}
+                  onLoad={() => {
+                    console.log("✅ QR Code loaded successfully");
+                  }}
                 />
               </Box>
             )}
 
-            {/* Checkout Link */}
-            {paymentData.checkoutUrl && (
+            {/* ✅ Checkout Link - sync với BE */}
+            {paymentData?.checkoutUrl && (
               <Button
                 variant="outlined"
                 fullWidth
@@ -254,7 +240,6 @@ export default function QRPaymentModal({
               </Button>
             )}
 
-            {/* Trạng thái kiểm tra */}
             <Box sx={{ 
               display: "flex", 
               alignItems: "center", 
