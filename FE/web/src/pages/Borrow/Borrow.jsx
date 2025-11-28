@@ -62,10 +62,16 @@ const nf = new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 2 });
 
 function formatDate(d) {
   if (!d) return "-";
+
   const s = String(d).slice(0, 19).replace(" ", "T");
   const dt = new Date(s);
-  return isNaN(dt.getTime()) ? String(d) : dt.toLocaleString("vi-VN");
+
+  // Chỉ trả về phần ngày, dạng dd/MM/yyyy
+  return isNaN(dt.getTime())
+    ? String(d).slice(0, 10)           // fallback: cắt 10 ký tự đầu "yyyy-mm-dd"
+    : dt.toLocaleDateString("vi-VN");  // ví dụ: 14/02/2025
 }
+
 
 function chipForSlipStatus(status) {
   switch (status) {
@@ -232,7 +238,7 @@ function Row({
             </>
           )}
 
-          {String(row.status).toUpperCase() === "BORROWING" && (
+          {["BORROWING", "OVERDUE"].includes(String(row.status).toUpperCase()) && (
             <Button
               size="small"
               variant="outlined"
@@ -242,6 +248,7 @@ function Row({
               Trả toàn bộ
             </Button>
           )}
+
         </TableCell>
       </TableRow>
 
@@ -386,12 +393,15 @@ function Row({
                           </TableCell>
 
                           <TableCell align="right">
-                            {String(d.status) === "BORROWED" && (
-                              <Button size="small" variant="outlined" onClick={() => onSingleReturn?.(row, d)}>
+                            {["BORROWED", "OVERDUE"].includes(String(d.status).toUpperCase()) && (
+                              <Button
+                                size="small"
+                                variant="outlined"
+                                onClick={() => onSingleReturn?.(row, d)}
+                              >
                                 Trả
                               </Button>
                             )}
-
                             {row.status === "WAITING_FOR_PICKUP" && (
                               <Button size="small" variant="outlined" color="error" onClick={() => onDeleteDetail?.(row, d)}>
                                 Xóa
@@ -500,7 +510,7 @@ export default function Borrow() {
         page,
         limit,
         status: apiStatus,
-        sortBy: "loanDate",
+        sortBy: "created_at",
         sortDir: "DESC",
       });
 
