@@ -241,14 +241,14 @@ async function checkExistingDocuments(readerId, documentIds, transaction) {
     where: {
       readerId,
       deleted: false,
-      status: ['PENDING', 'WAITING_FOR_PICKUP', 'BORROWING']
+      status: { [Op.in]: ['PENDING', 'WAITING_FOR_PICKUP', 'BORROWING'] } // ✅
     },
     attributes: ['loanSlipId', 'status'],
     include: [{
       model: LoanDetail,
-      as: 'loanDetails',
+      as: 'details',   // ✅ ĐÚNG alias với model/index.js
       where: {
-        status: ['PENDING', 'WAITING_FOR_PICKUP', 'BORROWED']
+        status: { [Op.in]: ['PENDING', 'WAITING_FOR_PICKUP', 'BORROWED'] } // ✅
       },
       attributes: ['loanDetailId', 'documentCopyId', 'note', 'status'],
       required: true
@@ -260,28 +260,24 @@ async function checkExistingDocuments(readerId, documentIds, transaction) {
     return { duplicates };
   }
 
-  // Map status text
   const statusTextMap = {
-    'PENDING': 'đang chờ duyệt',
-    'WAITING_FOR_PICKUP': 'đang chờ bạn đến lấy',
-    'BORROWED': 'đang mượn'
+    PENDING: 'đang chờ duyệt',
+    WAITING_FOR_PICKUP: 'đang chờ bạn đến lấy',
+    BORROWED: 'đang mượn'
   };
 
   const slipStatusTextMap = {
-    'PENDING': 'đang chờ duyệt',
-    'WAITING_FOR_PICKUP': 'đang chờ đến lấy',
-    'BORROWING': 'đang mượn'
+    PENDING: 'đang chờ duyệt',
+    WAITING_FOR_PICKUP: 'đang chờ đến lấy',
+    BORROWING: 'đang mượn'
   };
 
-  // Tạo Set documentIds để check
   const checkDocIds = new Set(documentIds.map(id => Number(id)));
 
-  // Với mỗi phiếu, check từng detail
   for (const slip of activeSlips) {
-    for (const detail of slip.loanDetails || []) {
+    for (const detail of slip.details || []) {   // ✅ dùng đúng alias 'details'
       let docId = null;
 
-      // Nếu có documentCopyId -> lấy documentId từ DocumentCopy
       if (detail.documentCopyId) {
         const copy = await DocumentCopy.findByPk(detail.documentCopyId, {
           attributes: ['documentId'],
@@ -290,15 +286,12 @@ async function checkExistingDocuments(readerId, documentIds, transaction) {
         if (copy) docId = copy.documentId;
       }
 
-      // Nếu chưa có docId, parse từ note (REQUEST_DOCUMENT_ID=...)
       if (!docId && detail.note) {
         const match = detail.note.match(/REQUEST_DOCUMENT_ID=(\d+)/);
         if (match) docId = Number(match[1]);
       }
 
-      // Nếu docId nằm trong danh sách cần check
       if (docId && checkDocIds.has(docId)) {
-        // Lấy title
         let title = `Tài liệu #${docId}`;
         try {
           const doc = await getDocumentDetailWithDeposit(docId);
@@ -322,6 +315,7 @@ async function checkExistingDocuments(readerId, documentIds, transaction) {
 
   return { duplicates };
 }
+
 
 /**
  * Đặt mượn trước (Reader)
