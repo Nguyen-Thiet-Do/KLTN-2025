@@ -238,21 +238,20 @@ const [viewingReader, setViewingReader] = useState(null);
       if (!paymentId) {
         throw new Error("Không nhận được paymentId từ server");
       }
+// ✅ Chuẩn bị dữ liệu cho modal
+const paymentInfo = {
+  paymentId: paymentId,
+  qrCode: qrCode || null,        // ✅ ĐỔI TÊN
+  checkoutUrl: checkoutUrl || null,
+  amount: amount || 10000
+};
 
-      // ✅ Chuẩn bị dữ liệu cho modal
-      const paymentInfo = {
-        paymentId: paymentId,
-        qrCodeUrl: qrCode || null,
-        checkoutUrl: checkoutUrl || null,
-        amount: amount || 10000
-      };
+console.log("🎯 Final payment info for modal:", paymentInfo);
 
-      console.log("🎯 Final payment info for modal:", paymentInfo);
-
-      // Validate có thông tin thanh toán
-      if (!paymentInfo.qrCodeUrl && !paymentInfo.checkoutUrl) {
-        throw new Error("Không có thông tin thanh toán (QR hoặc link). Vui lòng kiểm tra cấu hình PayOS.");
-      }
+// Validate có thông tin thanh toán
+if (!paymentInfo.qrCode && !paymentInfo.checkoutUrl) {  // ✅ ĐỔI TÊN
+  throw new Error("Không có thông tin thanh toán (QR hoặc link). Vui lòng kiểm tra cấu hình PayOS.");
+}
 
       // ✅ Mở modal hiển thị QR
       setCurrentPaymentData(paymentInfo);
