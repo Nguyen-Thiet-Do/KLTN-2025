@@ -8,26 +8,105 @@ export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+// ✅ HÀM FETCH USER DATA TỪ API
+  const fetchUserData = async (token) => {
+    try {
+      const getApiBaseUrl = () => {
+        const isProduction = window.location.hostname !== 'localhost' 
+                          && window.location.hostname !== '127.0.0.1';
+        
+        if (isProduction) {
+          return 'https://kltn-2025-ehsx.onrender.com/api';
+        }
+        
+        return 'http://localhost:8080/api';
+      };
+      
+      const API_BASE_URL = getApiBaseUrl();
 
+      // Gọi API lấy thông tin user hiện tại
+      const response = await fetch(`${API_BASE_URL}/auth/me`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to fetch user data');
+      }
+
+      const result = await response.json();
+      
+      if (result.success) {
+        const { account, profile } = result.data;
+        
+        // Merge account + profile
+        const userData = {
+          accountId: account.accountId,
+          roleId: account.roleId,
+          email: account.email,
+          phoneNumber: account.phoneNumber,
+          ...profile,
+          memberCard: profile.memberCard || null,
+          cardType: profile.memberCard?.cardType || null
+        };
+
+        console.log('✅ Fetched fresh user data:', userData);
+        
+        // Cập nhật sessionStorage
+        sessionStorage.setItem('account', JSON.stringify(account));
+        sessionStorage.setItem('profile', JSON.stringify(profile));
+        
+        return userData;
+      }
+      
+      return null;
+    } catch (err) {
+      console.error('Error fetching user data:', err);
+      throw err;
+    }
+  };
   // Kiểm tra token khi app load
+  // ✅ Kiểm tra token khi app load
   useEffect(() => {
     const initAuth = async () => {
       try {
         const token = sessionStorage.getItem('accessToken');
-        const storedAccount = sessionStorage.getItem('account');
-        const storedProfile = sessionStorage.getItem('profile');
 
-        if (token && storedAccount) {
-          const accountData = JSON.parse(storedAccount);
-          const profileData = storedProfile ? JSON.parse(storedProfile) : {};
-
-          // Merge account và profile
-          const userData = {
-            ...accountData,
-            ...profileData
-          };
-
-          setUser(userData);
+        if (token) {
+          console.log('🔄 Token found, fetching fresh user data from API...');
+          
+          try {
+            // ✅ FETCH LẠI USER DATA TỪ SERVER
+            const userData = await fetchUserData(token);
+            
+            if (userData) {
+              setUser(userData);
+            } else {
+              sessionStorage.clear();
+            }
+          } catch (fetchErr) {
+            console.error('❌ Failed to fetch user data, using cached data:', fetchErr);
+            
+            // Fallback: Dùng data từ sessionStorage nếu API fail
+            const storedAccount = sessionStorage.getItem('account');
+            const storedProfile = sessionStorage.getItem('profile');
+            
+            if (storedAccount) {
+              const accountData = JSON.parse(storedAccount);
+              const profileData = storedProfile ? JSON.parse(storedProfile) : {};
+              
+              const userData = {
+                ...accountData,
+                ...profileData
+              };
+              
+              setUser(userData);
+            } else {
+              sessionStorage.clear();
+            }
+          }
         }
       } catch (err) {
         console.error('Error initializing auth:', err);
@@ -112,21 +191,21 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  const updateUserProfile = (updatedData) => {
-    const newUserData = { ...user, ...updatedData };
-    setUser(newUserData);
+ const updateUserProfile = (updatedData) => {
+  const newUserData = { ...user, ...updatedData };
+  setUser(newUserData);
 
-    // Update profile nếu dữ liệu là từ profile
-    const profileKeys = ['avatar', 'phone', 'address', 'department', 'position'];
-    const accountData = {};
+  const profileKeys = ['avatar', 'phone', 'address', 'department', 'position'];
+  const profileData = {};  // ✅ Thêm dòng này
+  const accountData = {};
 
-    Object.keys(updatedData).forEach(key => {
-      if (profileKeys.includes(key)) {
-        profileData[key] = updatedData[key];
-      } else {
-        accountData[key] = updatedData[key];
-      }
-    });
+  Object.keys(updatedData).forEach(key => {
+    if (profileKeys.includes(key)) {
+      profileData[key] = updatedData[key];
+    } else {
+      accountData[key] = updatedData[key];
+    }
+  });
 
     if (Object.keys(profileData).length > 0) {
       const existingProfile = JSON.parse(sessionStorage.getItem('profile') || '{}');
@@ -188,6 +267,28 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
+ // ✅ HÀM REFRESH USER
+  const refreshUser = async () => {
+    try {
+      const token = sessionStorage.getItem('accessToken');
+      if (!token) {
+        throw new Error('No token found');
+      }
+
+      console.log('🔄 Refreshing user data from API...');
+      
+      const userData = await fetchUserData(token);
+      
+      if (userData) {
+        setUser(userData);
+        console.log('✅ User data refreshed successfully');
+      }
+    } catch (err) {
+      console.error('Error refreshing user:', err);
+      throw err;
+    }
+  };
+
   const value = {
     user,
     loading,
@@ -197,6 +298,7 @@ export const AuthProvider = ({ children }) => {
     isAuthenticated: !!user,
     updateUserProfile,
     updateUserContext,
+    refreshUser, // ✅ Thêm dòng này
   };
 
   return (
