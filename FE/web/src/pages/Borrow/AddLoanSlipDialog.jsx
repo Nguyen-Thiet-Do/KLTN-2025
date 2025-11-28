@@ -457,21 +457,43 @@ export default function AddLoanSlipDialog({ open, onClose, onCreated }) {
                                             />
                                         </TableCell>
 
-                                        <TableCell sx={{ minWidth: 220 }}>
+                                        <TableCell sx={{ minWidth: 220, maxWidth: 300 }}>
                                             {it.copyDoc ? (
                                                 <Stack direction="row" spacing={1} alignItems="center">
                                                     {it.copyDoc.coverPhoto ? (
                                                         <img
                                                             src={it.copyDoc.coverPhoto}
                                                             alt={it.copyDoc.title}
-                                                            style={{ width: 36, height: 48, objectFit: "cover", borderRadius: 4 }}
+                                                            style={{ width: 36, height: 48, objectFit: "cover", borderRadius: 4, flexShrink: 0 }}
                                                         />
                                                     ) : (
-                                                        <Box sx={{ width: 36, height: 48, bgcolor: "grey.200", borderRadius: 1 }} />
+                                                        <Box sx={{ width: 36, height: 48, bgcolor: "grey.200", borderRadius: 1, flexShrink: 0 }} />
                                                     )}
-                                                    <Box sx={{ overflow: "hidden" }}>
-                                                        <Typography variant="body2" fontWeight={700} noWrap>{it.copyDoc.title || "-"}</Typography>
-                                                        <Typography variant="caption" color="text.secondary" noWrap>BarCode: {it.copyDoc.barCode || "-"}</Typography>
+                                                    <Box sx={{ overflow: "hidden", minWidth: 0, flex: 1 }}>
+                                                        <Typography
+                                                            variant="body2"
+                                                            fontWeight={700}
+                                                            sx={{
+                                                                overflow: "hidden",
+                                                                textOverflow: "ellipsis",
+                                                                whiteSpace: "nowrap",
+                                                                display: "block"
+                                                            }}
+                                                        >
+                                                            {it.copyDoc.title || "-"}
+                                                        </Typography>
+                                                        <Typography
+                                                            variant="caption"
+                                                            color="text.secondary"
+                                                            sx={{
+                                                                overflow: "hidden",
+                                                                textOverflow: "ellipsis",
+                                                                whiteSpace: "nowrap",
+                                                                display: "block"
+                                                            }}
+                                                        >
+                                                            BarCode: {it.copyDoc.barCode || "-"}
+                                                        </Typography>
                                                     </Box>
                                                 </Stack>
                                             ) : (

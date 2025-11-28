@@ -599,13 +599,13 @@ export default function ReturnSingleDialog({
                 <Button onClick={() => onClose?.()} disabled={loading}>
                     Huỷ
                 </Button>
-                <Button
+                {/* <Button
                     variant="outlined"
                     onClick={handlePreview}
                     disabled={loading || !loanDetail}
                 >
                     Tính phí (preview)
-                </Button>
+                </Button> */}
                 <Button
                     variant="contained"
                     onClick={handleConfirm}

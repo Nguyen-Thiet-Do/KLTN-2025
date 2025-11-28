@@ -239,3 +239,24 @@ export async function confirmBulkReturnAfterPayment(payload) {
   const res = await api.post(`/loans/admin/slips/${payload.loanSlipId}/return/confirm`, payload);
   return res?.data ?? null;
 }
+
+
+/**
+ * TẠO PAYMENT PAYOS CHO VI PHẠM CHƯA THANH TOÁN CỦA 1 PHIẾU
+ * POST /api/loans/admin/violations/slips/:loanSlipId/pay
+ * body: { librarianId }
+ */
+export async function createViolationPaymentForSlip(
+  loanSlipId,
+  { librarianId } = {}
+) {
+  if (!loanSlipId) throw new Error("loanSlipId is required");
+  if (!librarianId) throw new Error("Thiếu librarianId.");
+
+  const res = await api.post(
+    `/loans/admin/violations/slips/${loanSlipId}/pay`,
+    { librarianId }
+  );
+
+  return res?.data ?? null;
+}

@@ -36,10 +36,13 @@ import {
   Refresh as RefreshIcon,
   Search as SearchIcon,
 } from "@mui/icons-material";
+import QRCode from "react-qr-code";
+
 import {
   fetchLoanSlips,
   getDocumentDetail,
   cancelReservation,
+  createViolationPaymentForSlip,
 } from "../../services/loanSlips";
 import AddLoanSlipDialog from "../Borrow/AddLoanSlipDialog";
 import ApproveReservationDialog from "./ApproveReservationDialog";
@@ -62,16 +65,13 @@ const nf = new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 2 });
 
 function formatDate(d) {
   if (!d) return "-";
-
   const s = String(d).slice(0, 19).replace(" ", "T");
   const dt = new Date(s);
-
-  // Chỉ trả về phần ngày, dạng dd/MM/yyyy
+  // chỉ hiển thị ngày: dd/MM/yyyy
   return isNaN(dt.getTime())
-    ? String(d).slice(0, 10)           // fallback: cắt 10 ký tự đầu "yyyy-mm-dd"
-    : dt.toLocaleDateString("vi-VN");  // ví dụ: 14/02/2025
+    ? String(d).slice(0, 10)
+    : dt.toLocaleDateString("vi-VN");
 }
-
 
 function chipForSlipStatus(status) {
   switch (status) {
@@ -98,6 +98,8 @@ function chipForDetailStatus(status) {
       return <Chip size="small" color="primary" label="Đang mượn" sx={{ fontWeight: 600 }} />;
     case "RETURNED":
       return <Chip size="small" color="success" label="Đã trả" sx={{ fontWeight: 600 }} />;
+    case "OVERDUE":
+      return <Chip size="small" color="error" label="Quá hạn" sx={{ fontWeight: 600 }} />;
     default:
       return <Chip size="small" label={status || "-"} sx={{ fontWeight: 600 }} />;
   }
@@ -116,7 +118,7 @@ function Money({ value }) {
 
 /**
  * Row component
- * thêm props: onPickup, onDeleteDetail
+ * thêm props: onPickup, onDeleteDetail, isReturnedTab, onViewViolations
  */
 function Row({
   row,
@@ -127,9 +129,58 @@ function Row({
   onCancel,
   onPickup,
   onDeleteDetail,
+  isReturnedTab,
+  onViewViolations,
 }) {
   const [open, setOpen] = useState(false);
-  const librarianName = row?.Librarian?.fullName || (row?.librarianId ? `#${row.librarianId}` : "-");
+  const librarianName =
+    row?.Librarian?.fullName || (row?.librarianId ? `#${row.librarianId}` : "-");
+
+  // Gom tất cả Violation từ các LoanDetail của phiếu
+  const allViolations = [];
+  for (const d of row.details || []) {
+    const vs = d.Violations || d.violations;
+    if (Array.isArray(vs)) {
+      allViolations.push(...vs);
+    }
+  }
+
+  const hasViolations = allViolations.length > 0;
+  const hasUnresolvedViolations = allViolations.some(
+    (v) => String(v.paymentStatus || "").toUpperCase() !== "PAID"
+  );
+
+  function renderViolationStatusChip() {
+    if (!hasViolations) {
+      return (
+        <Chip
+          size="small"
+          label="Không có"
+          sx={{ fontWeight: 600 }}
+        />
+      );
+    }
+
+    if (hasUnresolvedViolations) {
+      return (
+        <Chip
+          size="small"
+          color="warning"
+          label="Chưa xử lý"
+          sx={{ fontWeight: 600 }}
+        />
+      );
+    }
+
+    return (
+      <Chip
+        size="small"
+        color="success"
+        label="Đã xử lý"
+        sx={{ fontWeight: 600 }}
+      />
+    );
+  }
 
   return (
     <>
@@ -146,7 +197,11 @@ function Row({
         </TableCell>
 
         <TableCell>
-          <Typography variant="body2" fontWeight={600} sx={{ fontFamily: "monospace", fontSize: 13 }}>
+          <Typography
+            variant="body2"
+            fontWeight={600}
+            sx={{ fontFamily: "monospace", fontSize: 13 }}
+          >
             #{row.loanSlipId}
           </Typography>
         </TableCell>
@@ -188,6 +243,11 @@ function Row({
         </TableCell>
 
         <TableCell>{chipForSlipStatus(row.status)}</TableCell>
+
+        {/* Trạng thái vi phạm (chỉ áp dụng tab ĐÃ TRẢ) */}
+        <TableCell>
+          {isReturnedTab ? renderViolationStatusChip() : "-"}
+        </TableCell>
 
         <TableCell align="center">
           <Chip
@@ -249,11 +309,22 @@ function Row({
             </Button>
           )}
 
+          {isReturnedTab && hasViolations && (
+            <Button
+              size="small"
+              variant="outlined"
+              sx={{ ml: 1 }}
+              onClick={() => onViewViolations?.(row)}
+            >
+              Xem vi phạm
+            </Button>
+          )}
         </TableCell>
       </TableRow>
 
       <TableRow>
-        <TableCell colSpan={9} sx={{ p: 0, border: 0 }}>
+        {/* colSpan = số cột header = 10 */}
+        <TableCell colSpan={10} sx={{ p: 0, border: 0 }}>
           <Collapse in={open} timeout="auto" unmountOnExit>
             <Box sx={{ px: 2, py: 1.5, bgcolor: "rgba(0,0,0,0.02)" }}>
               <Stack
@@ -319,7 +390,8 @@ function Row({
                     </TableRow>
                   ) : (
                     row.details.map((d) => {
-                      const requestedId = row.status === "PENDING" ? parseRequestedDocumentId(d.note) : null;
+                      const requestedId =
+                        row.status === "PENDING" ? parseRequestedDocumentId(d.note) : null;
                       const copy = d.DocumentCopy;
                       const doc = copy?.Document;
                       const documentId = requestedId ?? doc?.documentId ?? null;
@@ -346,7 +418,12 @@ function Row({
                           </TableCell>
 
                           <TableCell>
-                            <Typography variant="body2" fontWeight={600} noWrap sx={{ maxWidth: 200 }}>
+                            <Typography
+                              variant="body2"
+                              fontWeight={600}
+                              noWrap
+                              sx={{ maxWidth: 200 }}
+                            >
                               {title}
                             </Typography>
                           </TableCell>
@@ -357,7 +434,13 @@ function Row({
                                 src={cover}
                                 alt={title}
                                 loading="lazy"
-                                style={{ width: 36, height: 48, objectFit: "cover", borderRadius: 4, display: "block" }}
+                                style={{
+                                  width: 36,
+                                  height: 48,
+                                  objectFit: "cover",
+                                  borderRadius: 4,
+                                  display: "block",
+                                }}
                               />
                             ) : (
                               "-"
@@ -383,7 +466,12 @@ function Row({
                           </TableCell>
 
                           <TableCell align="center">
-                            <Chip label={d.renewalCount ?? 0} size="small" color="primary" sx={{ fontWeight: 600 }} />
+                            <Chip
+                              label={d.renewalCount ?? 0}
+                              size="small"
+                              color="primary"
+                              sx={{ fontWeight: 600 }}
+                            />
                           </TableCell>
 
                           <TableCell>
@@ -393,17 +481,25 @@ function Row({
                           </TableCell>
 
                           <TableCell align="right">
-                            {["BORROWED", "OVERDUE"].includes(String(d.status).toUpperCase()) && (
+                            {["BORROWED", "OVERDUE"].includes(
+                              String(d.status).toUpperCase()
+                            ) && (
+                                <Button
+                                  size="small"
+                                  variant="outlined"
+                                  onClick={() => onSingleReturn?.(row, d)}
+                                >
+                                  Trả
+                                </Button>
+                              )}
+
+                            {row.status === "WAITING_FOR_PICKUP" && (
                               <Button
                                 size="small"
                                 variant="outlined"
-                                onClick={() => onSingleReturn?.(row, d)}
+                                color="error"
+                                onClick={() => onDeleteDetail?.(row, d)}
                               >
-                                Trả
-                              </Button>
-                            )}
-                            {row.status === "WAITING_FOR_PICKUP" && (
-                              <Button size="small" variant="outlined" color="error" onClick={() => onDeleteDetail?.(row, d)}>
                                 Xóa
                               </Button>
                             )}
@@ -488,6 +584,15 @@ export default function Borrow() {
   const [selectedDetailToDelete, setSelectedDetailToDelete] = useState(null);
   const [selectedSlipForDelete, setSelectedSlipForDelete] = useState(null);
 
+  // Violation dialog (xem vi phạm của phiếu đã trả)
+  const [openViolationDialog, setOpenViolationDialog] = useState(false);
+  const [selectedSlipForViolations, setSelectedSlipForViolations] = useState(null);
+
+  // Thanh toán vi phạm
+  const [violationPaying, setViolationPaying] = useState(false);
+  const [violationPayment, setViolationPayment] = useState(null);
+  const [violationPayError, setViolationPayError] = useState("");
+
   const [tab, setTab] = useState("PENDING");
   const [page, setPage] = useState(1);
   const [limit] = useState(10);
@@ -510,7 +615,7 @@ export default function Borrow() {
         page,
         limit,
         status: apiStatus,
-        sortBy: "created_at",
+        sortBy: "created_at", // sắp xếp theo createAt mới nhất
         sortDir: "DESC",
       });
 
@@ -620,7 +725,9 @@ export default function Borrow() {
   function handleOpenPickup(slip) {
     const libId = resolveLibrarianId();
     if (!libId) {
-      alert("Không xác định thủ thư. Tài khoản của bạn chưa được cấu hình là thủ thư. Vui lòng liên hệ quản trị viên.");
+      alert(
+        "Không xác định thủ thư. Tài khoản của bạn chưa được cấu hình là thủ thư. Vui lòng liên hệ quản trị viên."
+      );
       return;
     }
     setSelectedSlipForPickup(slip);
@@ -635,7 +742,9 @@ export default function Borrow() {
   function handleOpenCancelSlip(slip) {
     const libId = resolveLibrarianId();
     if (!libId) {
-      alert("Không xác định thủ thư. Tài khoản của bạn chưa được cấu hình là thủ thư. Vui lòng liên hệ quản trị viên.");
+      alert(
+        "Không xác định thủ thư. Tài khoản của bạn chưa được cấu hình là thủ thư. Vui lòng liên hệ quản trị viên."
+      );
       return;
     }
     setSelectedSlipForCancelSlip(slip);
@@ -650,7 +759,9 @@ export default function Borrow() {
   function handleOpenDeleteDetail(slip, detail) {
     const libId = resolveLibrarianId();
     if (!libId) {
-      alert("Không xác định thủ thư. Tài khoản của bạn chưa được cấu hình là thủ thư. Vui lòng liên hệ quản trị viên.");
+      alert(
+        "Không xác định thủ thư. Tài khoản của bạn chưa được cấu hình là thủ thư. Vui lòng liên hệ quản trị viên."
+      );
       return;
     }
     setSelectedSlipForDelete(slip);
@@ -663,7 +774,59 @@ export default function Borrow() {
     setSelectedDetailToDelete(null);
   }
 
-  // Lấy librarianId đã resolve để truyền vào dialog/hàm service
+  function handleOpenViolationDialog(slip) {
+    setSelectedSlipForViolations(slip);
+    setViolationPayment(null);
+    setViolationPayError("");
+    setOpenViolationDialog(true);
+  }
+  function handleCloseViolationDialog() {
+    setOpenViolationDialog(false);
+    setSelectedSlipForViolations(null);
+    setViolationPayment(null);
+    setViolationPayError("");
+  }
+
+  async function handlePayViolations() {
+    if (!selectedSlipForViolations) return;
+    const resolvedLibrarianId = resolveLibrarianId();
+    if (!resolvedLibrarianId) {
+      alert("Không xác định thủ thư. Vui lòng đăng nhập lại hoặc liên hệ admin.");
+      return;
+    }
+
+    setViolationPaying(true);
+    setViolationPayError("");
+    setViolationPayment(null);
+
+    try {
+      const res = await createViolationPaymentForSlip(
+        selectedSlipForViolations.loanSlipId,
+        { librarianId: resolvedLibrarianId }
+      );
+
+      if (!res?.success) {
+        setViolationPayError(res?.message || "Tạo thanh toán vi phạm thất bại");
+        return;
+      }
+
+      if (!res.needPayment) {
+        await load();
+        alert(res.message || "Các vi phạm của phiếu đã được thanh toán đủ.");
+        handleCloseViolationDialog();
+        return;
+      }
+
+      setViolationPayment(res.payment || null);
+    } catch (err) {
+      console.error("createViolationPaymentForSlip error", err);
+      setViolationPayError(err?.message || "Lỗi khi tạo thanh toán vi phạm");
+    } finally {
+      setViolationPaying(false);
+    }
+  }
+
+  // Lấy librarianId đã resolve để truyền vào dialog/hàm service khác
   const resolvedLibrarianId = resolveLibrarianId();
 
   return (
@@ -746,7 +909,10 @@ export default function Borrow() {
                     fontWeight: 600,
                     height: 40,
                     textTransform: "none",
-                    "&:hover": { borderColor: "#5A67D8", backgroundColor: "rgba(102,126,234,0.04)" },
+                    "&:hover": {
+                      borderColor: "#5A67D8",
+                      backgroundColor: "rgba(102,126,234,0.04)",
+                    },
                   }}
                 >
                   Làm mới
@@ -756,7 +922,11 @@ export default function Borrow() {
 
             <Divider />
 
-            <Stack direction={{ xs: "column", md: "row" }} spacing={2} alignItems="center">
+            <Stack
+              direction={{ xs: "column", md: "row" }}
+              spacing={2}
+              alignItems="center"
+            >
               <TextField
                 placeholder="Tìm theo tên độc giả hoặc ID"
                 value={searchQuery}
@@ -826,7 +996,10 @@ export default function Borrow() {
                     color: "#E53E3E",
                     fontWeight: 600,
                     minWidth: { xs: "100%", md: "auto" },
-                    "&:hover": { borderColor: "#C53030", backgroundColor: "rgba(229,62,62,0.04)" },
+                    "&:hover": {
+                      borderColor: "#C53030",
+                      backgroundColor: "rgba(229,62,62,0.04)",
+                    },
                   }}
                 >
                   Xóa bộ lọc
@@ -837,10 +1010,20 @@ export default function Borrow() {
         </CardContent>
       </Card>
 
-      <Card sx={{ borderRadius: 3, boxShadow: "0 8px 32px rgba(0,0,0,0.1)", overflow: "hidden" }}>
+      <Card
+        sx={{
+          borderRadius: 3,
+          boxShadow: "0 8px 32px rgba(0,0,0,0.1)",
+          overflow: "hidden",
+        }}
+      >
         {loading && (
           <LinearProgress
-            sx={{ "& .MuiLinearProgress-bar": { background: "linear-gradient(135deg, #667EEA 0%, #764BA2 100%)" } }}
+            sx={{
+              "& .MuiLinearProgress-bar": {
+                background: "linear-gradient(135deg, #667EEA 0%, #764BA2 100%)",
+              },
+            }}
           />
         )}
 
@@ -855,17 +1038,26 @@ export default function Borrow() {
                 <TableCell sx={{ fontWeight: 700, color: "#2D3748" }}>Ngày tạo</TableCell>
                 <TableCell sx={{ fontWeight: 700, color: "#2D3748" }}>Hạn trả</TableCell>
                 <TableCell sx={{ fontWeight: 700, color: "#2D3748" }}>Trạng thái</TableCell>
-                <TableCell align="center" sx={{ fontWeight: 700, color: "#2D3748" }}>Số đầu mục</TableCell>
-                <TableCell align="right" sx={{ fontWeight: 700, color: "#2D3748" }}>Thao tác</TableCell>
+                <TableCell sx={{ fontWeight: 700, color: "#2D3748" }}>
+                  Trạng thái VP
+                </TableCell>
+                <TableCell align="center" sx={{ fontWeight: 700, color: "#2D3748" }}>
+                  Số đầu mục
+                </TableCell>
+                <TableCell align="right" sx={{ fontWeight: 700, color: "#2D3748" }}>
+                  Thao tác
+                </TableCell>
               </TableRow>
             </TableHead>
 
             <TableBody>
               {displayRows.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={9} align="center" sx={{ py: 6 }}>
+                  <TableCell colSpan={10} align="center" sx={{ py: 6 }}>
                     <Typography variant="body1" color="text.secondary">
-                      {rows.length === 0 ? "Không có dữ liệu" : "Không tìm thấy kết quả phù hợp"}
+                      {rows.length === 0
+                        ? "Không có dữ liệu"
+                        : "Không tìm thấy kết quả phù hợp"}
                     </Typography>
                   </TableCell>
                 </TableRow>
@@ -875,16 +1067,22 @@ export default function Borrow() {
                     key={r.loanSlipId}
                     row={r}
                     titleCache={titleCache}
-                    onApprove={(slip) => { setSelectedSlip(slip); setOpenApprove(true); }}
+                    onApprove={(slip) => {
+                      setSelectedSlip(slip);
+                      setOpenApprove(true);
+                    }}
                     onCancel={(slip) => {
                       // phân biệt: nếu đang PENDING => cancelReservation; nếu WAITING_FOR_PICKUP => cancelLoanSlip
-                      if (String(slip.status).toUpperCase() === "PENDING") handleOpenCancel(slip);
+                      if (String(slip.status).toUpperCase() === "PENDING")
+                        handleOpenCancel(slip);
                       else handleOpenCancelSlip(slip);
                     }}
                     onPickup={(slip) => handleOpenPickup(slip)}
                     onSingleReturn={(slip, detail) => handleOpenSingleReturn(slip, detail)}
                     onBulkReturn={(slip) => handleOpenBulkReturn(slip)}
                     onDeleteDetail={(slip, detail) => handleOpenDeleteDetail(slip, detail)}
+                    isReturnedTab={tab === "RETURNED"}
+                    onViewViolations={handleOpenViolationDialog}
                   />
                 ))
               )}
@@ -893,9 +1091,17 @@ export default function Borrow() {
         </TableContainer>
 
         {totalPages > 1 && (
-          <Box sx={{ p: 1.5, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <Box
+            sx={{
+              p: 1.5,
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+            }}
+          >
             <Typography variant="body2" color="text.secondary">
-              Tổng: {rows.length} phiếu • Hiển thị: {displayRows.length} • Trang {page}/{totalPages}
+              Tổng: {rows.length} phiếu • Hiển thị: {displayRows.length} • Trang {page}/
+              {totalPages}
             </Typography>
 
             <Pagination
@@ -920,14 +1126,24 @@ export default function Borrow() {
       <AddLoanSlipDialog
         open={openCreate}
         onClose={() => setOpenCreate(false)}
-        onCreated={() => { setOpenCreate(false); load(); }}
+        onCreated={() => {
+          setOpenCreate(false);
+          load();
+        }}
       />
 
       <ApproveReservationDialog
         open={openApprove}
-        onClose={() => { setOpenApprove(false); setSelectedSlip(null); }}
+        onClose={() => {
+          setOpenApprove(false);
+          setSelectedSlip(null);
+        }}
         slip={selectedSlip}
-        onApproved={() => { setOpenApprove(false); setSelectedSlip(null); load(); }}
+        onApproved={() => {
+          setOpenApprove(false);
+          setSelectedSlip(null);
+          load();
+        }}
       />
 
       <ReturnSingleDialog
@@ -969,7 +1185,10 @@ export default function Borrow() {
         onClose={() => handleClosePickup()}
         slip={selectedSlipForPickup}
         librarianId={resolvedLibrarianId}
-        onPicked={() => { handleClosePickup(); load(); }}
+        onPicked={() => {
+          handleClosePickup();
+          load();
+        }}
       />
 
       {/* Cancel full slip (WAITING_FOR_PICKUP) */}
@@ -978,7 +1197,10 @@ export default function Borrow() {
         onClose={() => handleCloseCancelSlip()}
         slip={selectedSlipForCancelSlip}
         librarianId={resolvedLibrarianId}
-        onCancelled={() => { handleCloseCancelSlip(); load(); }}
+        onCancelled={() => {
+          handleCloseCancelSlip();
+          load();
+        }}
       />
 
       {/* Delete single detail (from waiting slip) */}
@@ -988,7 +1210,21 @@ export default function Borrow() {
         slip={selectedSlipForDelete}
         detail={selectedDetailToDelete}
         librarianId={resolvedLibrarianId}
-        onDeleted={() => { handleCloseDeleteDetail(); load(); }}
+        onDeleted={() => {
+          handleCloseDeleteDetail();
+          load();
+        }}
+      />
+
+      {/* Dialog xem chi tiết vi phạm + thanh toán QR */}
+      <ViolationDetailDialog
+        open={openViolationDialog}
+        onClose={handleCloseViolationDialog}
+        slip={selectedSlipForViolations}
+        onPay={handlePayViolations}
+        paying={violationPaying}
+        payment={violationPayment}
+        payError={violationPayError}
       />
     </Box>
   );
@@ -1056,7 +1292,9 @@ function CancelReservationDialog({ open, onClose, slip, librarianId, onCancelled
       </DialogContent>
 
       <DialogActions sx={{ px: 3, pb: 2 }}>
-        <Button onClick={onClose} disabled={submitting}>Đóng</Button>
+        <Button onClick={onClose} disabled={submitting}>
+          Đóng
+        </Button>
         <Button
           variant="contained"
           color="error"
@@ -1065,6 +1303,208 @@ function CancelReservationDialog({ open, onClose, slip, librarianId, onCancelled
         >
           {submitting ? "Đang xử lý..." : "Xác nhận hủy"}
         </Button>
+      </DialogActions>
+    </Dialog>
+  );
+}
+
+/**
+ * Dialog hiển thị chi tiết vi phạm của 1 phiếu + tạo QR thanh toán
+ */
+function ViolationDetailDialog({ open, onClose, slip, onPay, paying, payment, payError }) {
+  const slipId = slip?.loanSlipId ?? null;
+
+  // Gom tất cả violation theo từng chi tiết
+  const rows = [];
+  (slip?.details || []).forEach((d) => {
+    const violations = d.Violations || d.violations || [];
+    const copy = d.DocumentCopy;
+    const doc = copy?.Document;
+
+    violations.forEach((v) => {
+      rows.push({
+        loanDetailId: d.loanDetailId,
+        documentTitle: doc?.title || "-",
+        barCode: copy?.barCode || "-",
+        type: v.type,
+        severity: v.severity,
+        description: v.violationDescription,
+        fineAmount: v.fineAmount,
+        paymentStatus: v.paymentStatus,
+        createdAt: v.created_at || v.createdAt,
+      });
+    });
+  });
+
+  const hasData = rows.length > 0;
+  const hasUnpaid = rows.some(
+    (r) => String(r.paymentStatus || "").toUpperCase() !== "PAID"
+  );
+
+  return (
+    <Dialog open={Boolean(open)} onClose={onClose} fullWidth maxWidth="md">
+      <DialogTitle>Vi phạm của phiếu #{slipId ?? ""}</DialogTitle>
+
+      <DialogContent dividers>
+        {!hasData ? (
+          <Typography variant="body2" color="text.secondary">
+            Phiếu này không có vi phạm nào.
+          </Typography>
+        ) : (
+          <>
+            <Table size="small">
+              <TableHead>
+                <TableRow>
+                  <TableCell>#Detail</TableCell>
+                  <TableCell>Tài liệu</TableCell>
+                  <TableCell>Mã vạch</TableCell>
+                  <TableCell>Loại</TableCell>
+                  <TableCell>Mức độ</TableCell>
+                  <TableCell>Mô tả</TableCell>
+                  <TableCell>Tiền phạt</TableCell>
+                  <TableCell>Thanh toán</TableCell>
+                  <TableCell>Ngày tạo</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {rows.map((r, idx) => (
+                  <TableRow key={`${r.loanDetailId}-${idx}`} hover>
+                    <TableCell>
+                      <Typography variant="body2" fontFamily="monospace">
+                        {r.loanDetailId}
+                      </Typography>
+                    </TableCell>
+                    <TableCell>
+                      <Typography
+                        variant="body2"
+                        fontWeight={600}
+                        noWrap
+                        sx={{ maxWidth: 200 }}
+                      >
+                        {r.documentTitle}
+                      </Typography>
+                    </TableCell>
+                    <TableCell>
+                      <Typography variant="body2" fontFamily="monospace">
+                        {r.barCode}
+                      </Typography>
+                    </TableCell>
+                    <TableCell>
+                      <Chip size="small" label={r.type || "-"} sx={{ fontWeight: 600 }} />
+                    </TableCell>
+                    <TableCell>
+                      <Chip size="small" label={r.severity || "-"} sx={{ fontWeight: 600 }} />
+                    </TableCell>
+                    <TableCell>
+                      <Typography variant="caption" color="text.secondary">
+                        {r.description || "-"}
+                      </Typography>
+                    </TableCell>
+                    <TableCell>
+                      <Typography variant="body2" fontWeight={600}>
+                        <Money value={r.fineAmount} />
+                      </Typography>
+                    </TableCell>
+                    <TableCell>
+                      {String(r.paymentStatus || "").toUpperCase() === "PAID" ? (
+                        <Chip
+                          size="small"
+                          color="success"
+                          label="Đã thanh toán"
+                          sx={{ fontWeight: 600 }}
+                        />
+                      ) : (
+                        <Chip
+                          size="small"
+                          color="warning"
+                          label="Chưa thanh toán"
+                          sx={{ fontWeight: 600 }}
+                        />
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <Typography variant="body2">{formatDate(r.createdAt)}</Typography>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+
+            {/* Thanh toán vi phạm */}
+            {hasUnpaid && (
+              <Box sx={{ mt: 2 }}>
+                <Typography variant="subtitle2" sx={{ mb: 1 }}>
+                  Thanh toán các vi phạm chưa thanh toán
+                </Typography>
+
+                {payError && (
+                  <Typography
+                    variant="body2"
+                    color="error"
+                    sx={{ mb: 1 }}
+                  >
+                    {payError}
+                  </Typography>
+                )}
+
+                {payment && payment.checkoutUrl ? (
+                  <Stack
+                    direction={{ xs: "column", md: "row" }}
+                    spacing={2}
+                    alignItems={{ xs: "flex-start", md: "center" }}
+                    sx={{ mt: 1 }}
+                  >
+                    <Box
+                      sx={{
+                        p: 2,
+                        bgcolor: "white",
+                        borderRadius: 2,
+                        border: "1px solid rgba(0,0,0,0.08)",
+                      }}
+                    >
+                      <QRCode
+                        value={payment.checkoutUrl}
+                        size={160}
+                        style={{ display: "block" }}
+                      />
+                    </Box>
+
+                    <Box>
+                      <Typography variant="body2" sx={{ mb: 1 }}>
+                        Số tiền cần thanh toán:{" "}
+                        <strong>
+                          <Money value={payment.amount} />
+                        </strong>
+                      </Typography>
+                      <Button
+                        variant="contained"
+                        href={payment.checkoutUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        sx={{ textTransform: "none", mr: 1, mb: { xs: 1, md: 0 } }}
+                      >
+                        Mở trang thanh toán
+                      </Button>
+                    </Box>
+                  </Stack>
+                ) : (
+                  <Button
+                    variant="contained"
+                    disabled={paying}
+                    onClick={onPay}
+                    sx={{ mt: 1, textTransform: "none" }}
+                  >
+                    {paying ? "Đang tạo QR..." : "Tạo QR thanh toán vi phạm"}
+                  </Button>
+                )}
+              </Box>
+            )}
+          </>
+        )}
+      </DialogContent>
+
+      <DialogActions>
+        <Button onClick={onClose}>Đóng</Button>
       </DialogActions>
     </Dialog>
   );
