@@ -289,11 +289,11 @@ export default function Librarians() {
                 <TableRow sx={{ backgroundColor: "rgba(102,126,234,0.08)" }}>
                   <TableCell sx={{ fontWeight: 700 }}>Mã thủ thư</TableCell>
                   <TableCell sx={{ fontWeight: 700 }}>Họ tên</TableCell>
-                  <TableCell sx={{ fontWeight: 700 }}>Giới tính</TableCell>
+                  {/* <TableCell sx={{ fontWeight: 700 }}>Giới tính</TableCell>
                   <TableCell sx={{ fontWeight: 700 }}>Ngày sinh</TableCell>
                   <TableCell sx={{ fontWeight: 700 }}>Số điện thoại</TableCell>
                   <TableCell sx={{ fontWeight: 700 }}>CCCD</TableCell>
-                  <TableCell sx={{ fontWeight: 700 }}>Địa chỉ</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>Địa chỉ</TableCell> */}
                   <TableCell sx={{ fontWeight: 700 }}>Email</TableCell>
                   <TableCell sx={{ fontWeight: 700, textAlign: "center" }}>Hành động</TableCell>
                 </TableRow>
@@ -320,7 +320,7 @@ export default function Librarians() {
                       />
                     </TableCell>
                     <TableCell>{lib.fullName}</TableCell>
-                    <TableCell>
+                    {/* <TableCell>
                       <Chip label={getGenderDisplay(lib.gender)} size="small" variant="outlined" />
                     </TableCell>
                     <TableCell>
@@ -328,7 +328,7 @@ export default function Librarians() {
                     </TableCell>
                     <TableCell>{lib.phoneNumber || "-"}</TableCell>
                     <TableCell>{lib.cccd || "-"}</TableCell>
-                    <TableCell>{lib.address || "-"}</TableCell>
+                    <TableCell>{lib.address || "-"}</TableCell> */}
                     <TableCell>{lib.email || "-"}</TableCell>
 
                     {/* Hành động */}

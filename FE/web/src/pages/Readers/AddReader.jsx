@@ -49,6 +49,25 @@ export default function AddReader({ onSuccess, onCancel, open = true }) {
     e.preventDefault();
     setLoading(true);
     setError(null);
+const phone = form.phoneNumber.trim();
+const cccd = form.cccd.trim();
+
+if (phone && !/^[0-9]{10}$/.test(phone)) {
+  setLoading(false);
+  const msg = "Số điện thoại phải có đúng 10 số.";
+  setError(msg);
+  enqueueSnackbar(msg, { variant: "error" });
+  return;
+}
+
+if (cccd && !/^[0-9]{12}$/.test(cccd)) {
+  setLoading(false);
+  const msg = "Số CCCD phải có đúng 12 số.";
+  setError(msg);
+  enqueueSnackbar(msg, { variant: "error" });
+  return;
+}
+
 
     try {
       const token = sessionStorage.getItem("accessToken");

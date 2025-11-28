@@ -63,42 +63,74 @@ export default function EditLibrarian({ librarian, onSuccess, onCancel, open = t
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  const handleChange = (e) => {
-    setForm((prev) => ({ ...prev, [e.target.name]: e.target.value }));
+const handleChange = (e) => {
+    const { name, value } = e.target;
+    
+    // Chỉ cho phép nhập số cho phoneNumber và cccd
+    if (name === "phoneNumber" || name === "cccd") {
+      // Loại bỏ tất cả ký tự không phải số
+      const numericValue = value.replace(/\D/g, "");
+      setForm((prev) => ({ ...prev, [name]: numericValue }));
+    } else {
+      setForm((prev) => ({ ...prev, [name]: value }));
+    }
+    
     if (error) setError(null);
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    try {
-      setLoading(true);
-      setError(null);
-      const token = sessionStorage.getItem("accessToken");
-      const payload = {
-        ...form,
-        gender: form.gender === "1" ? 1 : 0,
-        basicSalary: form.basicSalary ? parseFloat(form.basicSalary) : null,
-        salaryCoefficient: form.salaryCoefficient ? parseFloat(form.salaryCoefficient) : null,
-        dateOfBirth: form.dateOfBirth || null,
-      };
-
-      const res = await updateLibrarian(librarian.librarianId, payload, token);
-
-      if (res?.success) {
-        enqueueSnackbar("✅ Cập nhật thông tin thủ thư thành công!", { variant: "success" });
-        onSuccess?.();
-      } else {
-        enqueueSnackbar(res?.message || "Không thể cập nhật thủ thư.", { variant: "error" });
-        setError(res?.message || "Không thể cập nhật thủ thư.");
-      }
-    } catch (err) {
-      const msg = err?.response?.data?.message || err?.message || "Lỗi khi cập nhật.";
-      enqueueSnackbar(`❌ ${msg}`, { variant: "error" });
-      setError(msg);
-    } finally {
-      setLoading(false);
+  const validateForm = () => {
+    // Validate số điện thoại (phải có đúng 10 chữ số)
+    if (form.phoneNumber && !/^\d{10}$/.test(form.phoneNumber)) {
+      setError("Số điện thoại phải gồm đúng 10 chữ số");
+      return false;
     }
+
+    // Validate số CCCD (phải có đúng 12 chữ số)
+    if (form.cccd && !/^\d{12}$/.test(form.cccd)) {
+      setError("Số CCCD phải gồm đúng 12 chữ số");
+      return false;
+    }
+
+    return true;
   };
+
+  const handleSubmit = async (e) => {
+  e.preventDefault();
+  
+  // Validate form trước khi submit
+  if (!validateForm()) {
+    return;
+  }
+  
+  try {
+    setLoading(true);
+    setError(null);
+    const token = sessionStorage.getItem("accessToken");
+    const payload = {
+      ...form,
+      gender: form.gender === "1" ? 1 : 0,
+      basicSalary: form.basicSalary ? parseFloat(form.basicSalary) : null,
+      salaryCoefficient: form.salaryCoefficient ? parseFloat(form.salaryCoefficient) : null,
+      dateOfBirth: form.dateOfBirth || null,
+    };
+
+    const res = await updateLibrarian(librarian.librarianId, payload, token);
+
+    if (res?.success) {
+      enqueueSnackbar("✅ Cập nhật thông tin thủ thư thành công!", { variant: "success" });
+      onSuccess?.();
+    } else {
+      enqueueSnackbar(res?.message || "Không thể cập nhật thủ thư.", { variant: "error" });
+      setError(res?.message || "Không thể cập nhật thủ thư.");
+    }
+  } catch (err) {
+    const msg = err?.response?.data?.message || err?.message || "Lỗi khi cập nhật.";
+    enqueueSnackbar(`❌ ${msg}`, { variant: "error" });
+    setError(msg);
+  } finally {
+    setLoading(false);
+  }
+};
 
   const handleClose = () => {
     if (!loading) onCancel?.();

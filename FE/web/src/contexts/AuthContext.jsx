@@ -72,6 +72,7 @@ export const AuthProvider = ({ children }) => {
         accountId: account.accountId,
         roleId: account.roleId,
         email: account.email,
+          phoneNumber: account.phoneNumber,
         ...profile,   // chứa readerId, fullName,...
         memberCard: profile.memberCard || null,  // thêm thông tin thẻ thành viên
         cardType: profile.memberCard?.cardType || null  // thêm loại thẻ

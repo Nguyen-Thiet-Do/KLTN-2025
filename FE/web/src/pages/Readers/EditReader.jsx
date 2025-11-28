@@ -84,6 +84,25 @@ export default function EditReader({ open = true, reader = {}, onSuccess, onCanc
       enqueueSnackbar(msg, { variant: "warning" });
       return;
     }
+const phone = form.phoneNumber.trim();
+  const cccd = form.cccd.trim();
+
+  if (phone && !/^[0-9]{10}$/.test(phone)) {
+    setLoading(false);
+    const msg = "Số điện thoại phải có đúng 10 số.";
+    setError(msg);
+    enqueueSnackbar(msg, { variant: "error" });
+    return;
+  }
+
+  // Validate CCCD (must be 12 digits)
+  if (cccd && !/^[0-9]{12}$/.test(cccd)) {
+    setLoading(false);
+    const msg = "Số CCCD phải có đúng 12 số.";
+    setError(msg);
+    enqueueSnackbar(msg, { variant: "error" });
+    return;
+  }
 
     setLoading(true);
     setError(null);
@@ -239,17 +258,26 @@ export default function EditReader({ open = true, reader = {}, onSuccess, onCanc
                   gap: 3,
                 }}
               >
-                <TextField
-                  name="email"
-                  type="email"
-                  label="Email đăng nhập"
-                  value={form.email}
-                  onChange={handleChange}
-                  required
-                  disabled={loading}
-                  placeholder="Nhập email đăng nhập"
-                  sx={fieldSx}
-                />
+                   <TextField
+                      name="email"
+                      type="email"
+                      label="Email đăng nhập"
+                      value={form.email}
+                      disabled
+                      placeholder="Nhập email"
+                      sx={{
+                        ...fieldSx,
+                        "& .MuiOutlinedInput-root": {
+                          borderRadius: 2,
+                          backgroundColor: "#f5f5f5",
+                          "&:hover fieldset": { borderColor: "#ccc" },
+                          "&.Mui-disabled": {
+                            backgroundColor: "#f5f5f5",
+                          },
+                        },
+                      }}
+                      helperText="Email không thể thay đổi"
+                    />
                 {/* <TextField
                   name="password"
                   type="password"
