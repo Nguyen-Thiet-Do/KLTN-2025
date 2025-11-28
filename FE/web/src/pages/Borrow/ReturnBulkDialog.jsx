@@ -624,13 +624,13 @@ export default function ReturnBulkDialog({ open, onClose, slip, onReturned }) {
         </Button>
 
         {/* Nút này giờ chỉ là tùy chọn, không bắt buộc dùng nữa */}
-        <Button
+        {/* <Button
           variant="outlined"
           onClick={handlePreview}
           disabled={loading || !items.length}
         >
           Tính phí (preview)
-        </Button>
+        </Button> */}
 
         <Button
           variant="contained"
