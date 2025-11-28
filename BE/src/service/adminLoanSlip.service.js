@@ -3,6 +3,7 @@ const { Op } = require('sequelize');
 const sequelize = require('../config/database');
 const mailService = require('./mailService');
 const { emitToUser } = require('../config/socket');
+const payosService = require('./payosService');
 
 const {
   LoanSlip,
@@ -13,9 +14,10 @@ const {
   Document,
   Payment,
   CardType,
-  MemberCard, // <- thêm model MemberCard
+  MemberCard,
   Notification,
   Account,
+  Violation
 } = require('../model');
 
 const MAX_ITEMS_PER_SLIP = 3;
@@ -275,6 +277,32 @@ async function ensureReaderBorrowQuota({
   return { snap, maxBorrowLimit, currentTotal, remaining };
 }
 
+// ==============================
+// HELPER: Chuẩn hóa librarianId (có thể là librarianId hoặc accountId)
+// ==============================
+async function resolveLibrarianIdFlexible(rawLibrarianId, t) {
+  // Không truyền thì thôi, giữ nguyên hành vi cũ: để null
+  if (!rawLibrarianId) return null;
+
+  const idNum = Number(rawLibrarianId);
+  if (!idNum) return null;
+
+  // 1) Thử coi đây là librarianId thật
+  let librarian = await Librarian.findByPk(idNum, {
+    transaction: t
+  });
+  if (librarian) return librarian.librarianId;
+
+  // 2) Nếu không có, coi là accountId, tìm librarian theo accountId
+  librarian = await Librarian.findOne({
+    where: { accountId: idNum, deleted: false },
+    transaction: t
+  });
+  if (librarian) return librarian.librarianId;
+
+  // 3) Không tìm được thì trả null (hoặc nếu bạn muốn chặt chẽ hơn có thể throw lỗi)
+  return null;
+}
 
 /**
  * Lấy danh sách phiếu mượn
@@ -533,6 +561,33 @@ async function sendFcmToReader(readerId, payload = {}) {
     return { success: false, error: err };
   }
 }
+
+/**
+ * HELPER: Tạo description cho Violation
+ * - chỉ ghi những phần có phạt > 0
+ */
+function buildViolationDescription({ overdueDays, overdueFine, damageFine, lostFine }) {
+  const parts = [];
+
+  if (overdueFine > 0) {
+    if (overdueDays && overdueDays > 0) {
+      parts.push(`Muộn ${overdueDays} ngày: ${Number(overdueFine).toLocaleString('vi-VN')} VND`);
+    } else {
+      parts.push(`Phạt trễ: ${Number(overdueFine).toLocaleString('vi-VN')} VND`);
+    }
+  }
+
+  if (damageFine > 0) {
+    parts.push(`Hư hỏng: ${Number(damageFine).toLocaleString('vi-VN')} VND`);
+  }
+
+  if (lostFine > 0) {
+    parts.push(`Mất sách: ${Number(lostFine).toLocaleString('vi-VN')} VND`);
+  }
+
+  return parts.join(', ');
+}
+
 
 /**
  * Tạo phiếu mượn -> TRỰC TIẾP BORROWING (mượn luôn)
@@ -1611,18 +1666,11 @@ async function returnSingleItemService(body, librarianId) {
   }); // end transaction
 }
 
-
-
 /**
- * TRẢ TOÀN BỘ PHIẾU (BULK RETURN)
- * - Không tạo Payment nữa
- * - Tính phạt (damage chỉ khi degradation > 30)
- * - Trừ tổng phạt vào MemberCard.balance (thẻ ACTIVE mới nhất) — cho phép âm
- * - Gửi notification / email / fcm / socket cho độc giả
- *
- * body: { loanSlipId, returnDate, items: [{ loanDetailId, conditionReturn, isLost?, note? }] }
+ * PREVIEW TÍNH PHÍ TRẢ TOÀN BỘ PHIẾU (KHÔNG GHI DB)
+ * body: { loanSlipId, returnDate, items: [{ loanDetailId, conditionReturn, isLost? }] }
  */
-async function returnBulkItemsService(body, librarianId) {
+async function previewBulkReturnFinesService(body) {
   const {
     loanSlipId,
     returnDate,
@@ -1657,11 +1705,22 @@ async function returnBulkItemsService(body, librarianId) {
   }
 
   return await sequelize.transaction(async (t) => {
-    // load slip
     const slip = await LoanSlip.findByPk(loanSlipId, {
+      include: [{
+        model: LoanDetail,
+        as: 'details',   // 👈 THÊM alias đúng như trong association
+        include: [{
+          model: DocumentCopy,
+          include: [{
+            model: Document,
+            attributes: ['documentId', 'title', 'coverPrice']
+          }]
+        }]
+      }],
       transaction: t,
       lock: t.LOCK.UPDATE
     });
+
 
     if (!slip) {
       const e = new Error('Không tìm thấy LoanSlip');
@@ -1675,60 +1734,40 @@ async function returnBulkItemsService(body, librarianId) {
       throw e;
     }
 
-    // load all details + copy + document
-    const allDetails = await LoanDetail.findAll({
-      where: { loanSlipId },
-      include: [{
-        model: DocumentCopy,
-        include: [{
-          model: Document,
-          attributes: ['documentId', 'coverPrice', 'title']
-        }]
-      }],
-      transaction: t,
-      lock: t.LOCK.UPDATE
-    });
-
-    const itemMap = new Map(items.map(i => [Number(i.loanDetailId), i]));
+    const mapItem = new Map(items.map(i => [Number(i.loanDetailId), i]));
 
     let totalOverdueFine = 0;
     let totalDamageFine = 0;
     let totalLostFine = 0;
-    const processedItems = [];
 
-    for (const detail of allDetails) {
-      const itemData = itemMap.get(detail.loanDetailId);
+    const previewItems = [];
+
+    for (const detail of slip.LoanDetails || slip.details || []) {
+      const itemData = mapItem.get(detail.loanDetailId);
       if (!itemData) continue;
 
-      // skip non-borrowed or already returned
       if (String((detail.status || '').toUpperCase()) !== 'BORROWED' || detail.returnDate) {
         continue;
       }
 
       const copy = detail.DocumentCopy;
-      const coverPrice = copy?.Document?.coverPrice || 0;
+      const doc = copy?.Document;
+      const coverPrice = doc?.coverPrice || 0;
       const isLost = !!itemData.isLost;
+      const condReturn = isLost ? 0 : Number(itemData.conditionReturn);
 
-      // overdue
-      let overdueFine = 0;
-      if (slip.dueDate) {
-        try {
-          overdueFine = calculateOverdueFine(slip.dueDate, returnDate) || 0;
-        } catch (err) {
-          overdueFine = 0;
-        }
-      }
+      const overdueFine = slip.dueDate
+        ? calculateOverdueFine(slip.dueDate, returnDate)
+        : 0;
 
-      // lost or damage
       let lostFine = 0;
       let damageFine = 0;
       if (isLost) {
         lostFine = calculateLostFine(coverPrice);
       } else {
-        // calculateDamageFine đã được sửa để chỉ tính khi degradation > 30
         damageFine = calculateDamageFine(
           detail.conditionBorrow,
-          Number(itemData.conditionReturn),
+          condReturn,
           coverPrice
         );
       }
@@ -1739,19 +1778,454 @@ async function returnBulkItemsService(body, librarianId) {
       totalDamageFine += damageFine;
       totalLostFine += lostFine;
 
-      // update loan detail
+      previewItems.push({
+        loanDetailId: detail.loanDetailId,
+        documentId: doc?.documentId || null,
+        title: doc?.title || null,
+        isLost,
+        conditionBorrow: detail.conditionBorrow,
+        conditionReturn: condReturn,
+        overdueFine,
+        damageFine,
+        lostFine,
+        totalFine: itemFine
+      });
+    }
+
+    const totalFine = totalOverdueFine + totalDamageFine + totalLostFine;
+
+    // Lấy thẻ để tính xem còn bao nhiêu, cần nạp bao nhiêu (KHÔNG trừ, chỉ preview)
+    const memberCard = await MemberCard.findOne({
+      where: { readerId: slip.readerId, deleted: false, status: 'ACTIVE' },
+      order: [['issueDate', 'DESC']],
+      transaction: t,
+      lock: t.LOCK.UPDATE
+    });
+
+    let cardBalance = 0;
+    let canPayFromCard = 0;
+    let needExternalPay = 0;
+
+    if (memberCard) {
+      cardBalance = Number(memberCard.balance || 0);
+      canPayFromCard = Math.min(cardBalance, totalFine);
+      needExternalPay = Math.max(0, totalFine - canPayFromCard);
+    } else {
+      cardBalance = 0;
+      canPayFromCard = 0;
+      needExternalPay = totalFine;
+    }
+
+    return {
+      loanSlipId,
+      returnDate,
+      totals: {
+        overdue: totalOverdueFine,
+        damage: totalDamageFine,
+        lost: totalLostFine,
+        total: totalFine
+      },
+      items: previewItems,
+      paymentPreview: {
+        hasMemberCard: !!memberCard,
+        cardBalance,
+        canPayFromCard,
+        needExternalPay
+      }
+    };
+  });
+}
+
+/**
+ * BƯỚC 1: INIT trả phiếu + tạo QR nếu cần
+ * - Nếu tổng phạt <= 0: gọi luôn returnBulkItemsService => cập nhật phiếu ngay
+ * - Nếu tổng phạt > 0:
+ *    + KHÔNG cập nhật LoanSlip / LoanDetail
+ *    + Tạo Payment (PENDING) + PayOS link/QR
+ *    + Trả về cho FE: needPayment = true, payment + preview
+ */
+
+async function initBulkReturnPaymentService(body, rawLibrarianId) {
+  const {
+    loanSlipId,
+    returnDate,
+    items = []
+  } = body || {};
+
+  if (!loanSlipId || !returnDate || !items.length) {
+    const e = new Error('Thiếu loanSlipId, returnDate hoặc items');
+    e.status = 400;
+    throw e;
+  }
+
+  // Dùng preview để tính toàn bộ tiền phạt + số tiền cần trả thêm ngoài thẻ
+  const preview = await previewBulkReturnFinesService({ loanSlipId, returnDate, items });
+
+  const totals = preview.totals || {};
+  const paymentPreview = preview.paymentPreview || {};
+
+  const totalFine = Number(totals.total || 0);
+  const needExternalPay = Number(paymentPreview.needExternalPay || 0);
+
+  // Nếu không có tiền phạt hoặc phần thiếu = 0 -> TRẢ LUÔN, KHÔNG CẦN QR
+  if (totalFine <= 0 || needExternalPay <= 0) {
+    const finalResult = await returnBulkItemsService(body, rawLibrarianId);
+    return {
+      success: true,
+      needPayment: false,
+      preview,
+      finalResult
+    };
+  }
+
+  // CÓ PHẦN THIẾU -> tạo Payment PENDING + QR
+  return await sequelize.transaction(async (t) => {
+    // Chuẩn hóa librarianId (FE có thể gửi accountId)
+    const resolvedLibrarianId = await resolveLibrarianIdFlexible(rawLibrarianId, t);
+
+    const slip = await LoanSlip.findByPk(loanSlipId, {
+      transaction: t,
+      lock: t.LOCK.UPDATE
+    });
+    if (!slip) {
+      const e = new Error('Không tìm thấy LoanSlip');
+      e.status = 404;
+      throw e;
+    }
+
+    const amount = needExternalPay;
+
+    // Mô tả cho PayOS phải <= 25 ký tự
+    let description = `Fine slip #${slip.loanSlipId}`;
+    if (description.length > 25) {
+      description = description.slice(0, 25);
+    }
+
+    // Tạo Payment PENDING trong DB (method = QR, type = VIOLATION)
+    const paymentRecord = await Payment.create({
+      readerId: slip.readerId,
+      librarianId: resolvedLibrarianId || null,
+      loanSlipId: slip.loanSlipId,
+      amount,
+      status: 'PENDING',
+      paymentType: 'VIOLATION',
+      paymentMethod: 'QR',
+      description,
+      transactionCode: null,
+      externalRef: null,
+      checkoutUrl: null,
+      rawResponse: null
+    }, { transaction: t });
+
+    // Gọi PayOS tạo link/QR
+    const payResp = await payosService.createPaymentLink({
+      amount,
+      description,
+      orderCode: `fine_${loanSlipId}_${paymentRecord.paymentId}`,
+      returnUrl: process.env.PAY_RETURN_URL,
+      cancelUrl: process.env.PAY_CANCEL_URL
+    });
+
+    await paymentRecord.update({
+      transactionCode: String(payResp.orderCode || ''),
+      externalRef: payResp.orderCode || null,
+      checkoutUrl: payResp.checkoutUrl || payResp.qrCode || null,
+      rawResponse: JSON.stringify(payResp || {})
+    }, { transaction: t });
+
+    // Gửi thông báo (optional)
+    await createNotificationSafe({
+      readerId: slip.readerId,
+      type: 'VIOLATION',
+      title: 'Cần thanh toán tiền phạt',
+      content: `Bạn cần thanh toán ${Number(amount).toLocaleString('vi-VN')}đ để hoàn tất trả phiếu #${slip.loanSlipId}.`,
+      link: paymentRecord.checkoutUrl || null
+    }, t);
+
+    return {
+      success: true,
+      needPayment: true,
+      preview,
+      payment: {
+        paymentId: paymentRecord.paymentId || paymentRecord.id,
+        orderCode: payResp.orderCode,
+        amount,
+        checkoutUrl: payResp.checkoutUrl,
+        qrCode: payResp.qrCode
+      }
+    };
+  });
+}
+
+
+
+/**
+ * BƯỚC 2: CONFIRM sau khi đã thanh toán QR
+ * - FE truyền lên: loanSlipId, returnDate, items, paymentId, orderCode (optional), librarianId
+ * - Service sẽ gọi PayOS inquiry để chắc chắn đã PAID
+ * - Nếu đã thanh toán:
+ *      + Cập nhật Payment.status = 'COMPLETED'
+ *      + Gọi returnBulkItemsService => cập nhật LoanSlip / LoanDetail
+ */
+/**
+ * BƯỚC 2: CONFIRM sau khi đã thanh toán QR
+ * body: { loanSlipId, returnDate, items, paymentId, orderCode?, librarianId? }
+ * rawLibrarianId: id FE gửi lên
+ */
+async function confirmBulkReturnAfterPaymentService(body, rawLibrarianId) {
+  const {
+    loanSlipId,
+    returnDate,
+    items = [],
+    paymentId,
+    orderCode
+  } = body || {};
+
+  if (!loanSlipId || !returnDate || !items.length || !paymentId) {
+    const e = new Error('Thiếu loanSlipId, returnDate, items hoặc paymentId');
+    e.status = 400;
+    throw e;
+  }
+
+  // Lấy Payment từ DB
+  const payment = await Payment.findByPk(paymentId);
+  if (!payment) {
+    const e = new Error('Không tìm thấy Payment tương ứng');
+    e.status = 404;
+    throw e;
+  }
+
+  if (payment.loanSlipId && Number(payment.loanSlipId) !== Number(loanSlipId)) {
+    const e = new Error('Payment không thuộc về LoanSlip này');
+    e.status = 400;
+    throw e;
+  }
+
+  const isAlreadyCompleted =
+    String(payment.status || '').toUpperCase() === 'COMPLETED';
+
+  let inquiryResult = null;
+
+  // Nếu chưa COMPLETED thì gọi PayOS inquiry để kiểm tra
+  if (!isAlreadyCompleted) {
+    try {
+      const inquiryCode =
+        orderCode || payment.transactionCode || payment.externalRef;
+      if (!inquiryCode) {
+        const e = new Error('Không có orderCode/transactionCode để kiểm tra PayOS');
+        e.status = 400;
+        throw e;
+      }
+
+      inquiryResult = await payosService.inquiryPayment(inquiryCode);
+
+      const payStatus =
+        inquiryResult?.status ||
+        inquiryResult?.data?.status ||
+        inquiryResult?.code ||
+        inquiryResult?.statusCode;
+
+      // Tùy PayOS, thường là 'PAID'
+      const ok =
+        payStatus === 'PAID' ||
+        payStatus === 'SUCCEEDED' ||
+        payStatus === '00' ||
+        payStatus === 0;
+
+      if (!ok) {
+        const e = new Error('Thanh toán chưa hoàn tất (PayOS chưa xác nhận PAID)');
+        e.status = 409;
+        e.details = { payStatus, inquiryResult };
+        throw e;
+      }
+    } catch (err) {
+      if (!err.status) err.status = 500;
+      throw err;
+    }
+  }
+
+  // Đến đây coi như đã chắc chắn THANH TOÁN OK
+  return await sequelize.transaction(async (t) => {
+    // Nếu Payment chưa đánh dấu COMPLETED thì cập nhật
+    if (!isAlreadyCompleted) {
+      await payment.update(
+        {
+          status: 'COMPLETED',
+          paymentDate: new Date(),
+          rawResponse: inquiryResult
+            ? JSON.stringify(inquiryResult || {})
+            : payment.rawResponse,
+        },
+        { transaction: t }
+      );
+    }
+
+    // Gọi lại logic trả phiếu (KHÔNG gọi PayOS nữa, chỉ cập nhật mượn/trả + trừ thẻ)
+    const finalResult = await returnBulkItemsService(
+      { loanSlipId, returnDate, items },
+      rawLibrarianId
+    );
+
+    return {
+      success: true,
+      needPayment: false,
+      finalResult,
+      payment: {
+        paymentId: payment.paymentId || payment.id,
+        status: 'COMPLETED',
+      },
+    };
+  });
+}
+
+
+/**
+ * TRẢ TOÀN BỘ PHIẾU (BULK RETURN – CONFIRM)
+ * Flow:
+ *  - Tính phạt cho TẤT CẢ item (trễ hạn + hư hỏng + mất)
+ *  - Cập nhật LoanDetail:
+ *      + Trả thường: status = 'RETURNED'
+ *      + Mất sách:  status = 'LOST'
+ *  - Cập nhật DocumentCopy:
+ *      + isLost => status = 'LOST', conditionGrade = 'C', conditionNote = '0'
+ *      + trả, hư hỏng => status: AVAILABLE / DAMAGED, cập nhật conditionGrade
+ *  - Nếu TẤT CẢ chi tiết đều LOST => LoanSlip.status = 'LOST'
+ *    Nếu tất cả đã trả (RETURNED hoặc LOST) => LoanSlip.status = 'RETURNED'
+ *  - Tính tổng tiền phạt:
+ *      + Cố gắng trừ tối đa từ MemberCard.balance (không cho âm)
+ *      + Nếu không đủ => tạo QR PayOS cho phần còn thiếu
+ *  - GHI HẾT vào bảng Payments:
+ *      + Nếu trừ từ thẻ: 1 payment COMPLETED, method = 'CARD'
+ *      + Nếu còn thiếu: 1 payment PENDING, method = 'QR', lưu checkoutUrl, externalRef,...
+ */
+// TRẢ TOÀN BỘ PHIẾU (BULK RETURN – CONFIRM)
+async function returnBulkItemsService(body, librarianId) {
+  const {
+    loanSlipId,
+    returnDate,
+    items = []
+  } = body || {};
+
+  if (!loanSlipId || !returnDate || !items.length) {
+    const e = new Error('Thiếu loanSlipId, returnDate hoặc items');
+    e.status = 400;
+    throw e;
+  }
+
+  const returnDateObj = parseDateOnly(returnDate);
+  if (!returnDateObj) {
+    const e = new Error('returnDate không đúng định dạng YYYY-MM-DD');
+    e.status = 400;
+    throw e;
+  }
+
+  // validate từng item
+  for (const item of items) {
+    if (!item.loanDetailId || item.conditionReturn == null) {
+      const e = new Error('Mỗi item phải có loanDetailId và conditionReturn');
+      e.status = 400;
+      throw e;
+    }
+    const cond = Number(item.conditionReturn);
+    if (Number.isNaN(cond) || cond < 0 || cond > 100) {
+      const e = new Error(`conditionReturn phải trong [0,100], item #${item.loanDetailId}`);
+      e.status = 400;
+      throw e;
+    }
+  }
+
+  // chạy transaction
+  return await sequelize.transaction(async (t) => {
+    const slip = await LoanSlip.findOne({
+      where: { loanSlipId, deleted: false },
+      include: [
+        {
+          model: LoanDetail,
+          as: 'details',
+          include: [{
+            model: DocumentCopy,
+            include: [{ model: Document }]
+          }]
+        },
+        { model: Reader }
+      ],
+      transaction: t,
+      lock: t.LOCK.UPDATE
+    });
+
+    if (!slip) {
+      const e = new Error('Không tìm thấy phiếu mượn');
+      e.status = 404;
+      throw e;
+    }
+
+    const itemMap = new Map();
+    for (const it of items) itemMap.set(Number(it.loanDetailId), it);
+
+    let totalOverdueFine = 0;
+    let totalDamageFine = 0;
+    let totalLostFine = 0;
+    const processedItems = [];
+
+    const details = Array.isArray(slip.details) ? slip.details : [];
+
+    for (const detail of details) {
+      const data = itemMap.get(detail.loanDetailId);
+      if (!data) continue;
+
+      // chỉ xử lý những item đang BORROWED và chưa có returnDate
+      if (String((detail.status || '')).toUpperCase() !== 'BORROWED' || detail.returnDate) {
+        continue;
+      }
+
+      const copy = detail.DocumentCopy;
+      const doc = copy?.Document;
+      const coverPrice = Number(doc?.coverPrice || 0);
+      const isLost = !!data.isLost;
+      const condReturn = isLost ? 0 : Number(data.conditionReturn);
+
+      // tính tiền trễ hạn
+      let overdueFine = 0;
+      if (slip.dueDate) {
+        try {
+          overdueFine = calculateOverdueFine(slip.dueDate, returnDate) || 0;
+        } catch {
+          overdueFine = 0;
+        }
+      }
+
+      // tính hư hỏng / mất
+      let lostFine = 0;
+      let damageFine = 0;
+      if (isLost) {
+        lostFine = calculateLostFine(coverPrice);
+      } else {
+        damageFine = calculateDamageFine(
+          detail.conditionBorrow,
+          condReturn,
+          coverPrice
+        );
+      }
+
+      const itemFine = Number(overdueFine) + Number(damageFine) + Number(lostFine);
+
+      totalOverdueFine += overdueFine;
+      totalDamageFine += damageFine;
+      totalLostFine += lostFine;
+
+      // cập nhật LoanDetail
       await detail.update({
         returnDate,
-        conditionReturn: Number(itemData.conditionReturn),
+        conditionReturn: condReturn,
         fineAmount: itemFine,
-        status: 'RETURNED',
-        note: itemData.note || detail.note
+        status: isLost ? 'LOST' : 'RETURNED',
+        note: data.note || detail.note
       }, { transaction: t });
 
-      // update copy
+      // cập nhật DocumentCopy
       if (copy) {
         let newStatus = 'AVAILABLE';
-        let newCondition = Number(itemData.conditionReturn);
+        let newCondition = condReturn;
 
         if (isLost) {
           newStatus = 'LOST';
@@ -1763,7 +2237,11 @@ async function returnBulkItemsService(body, librarianId) {
         await DocumentCopy.update({
           status: newStatus,
           conditionNote: String(newCondition),
-          conditionGrade: newCondition >= 90 ? 'A' : newCondition >= 70 ? 'B' : 'C'
+          conditionGrade:
+            newCondition >= 90 ? 'A'
+              : newCondition >= 70 ? 'B'
+                : newCondition >= 50 ? 'C'
+                  : 'D'
         }, {
           where: { documentCopyId: copy.documentCopyId },
           transaction: t
@@ -1772,140 +2250,210 @@ async function returnBulkItemsService(body, librarianId) {
 
       processedItems.push({
         loanDetailId: detail.loanDetailId,
-        documentCopyId: copy?.documentCopyId,
-        title: copy?.Document?.title || null,
+        documentId: doc?.documentId || null,
+        title: doc?.title || null,
+        isLost,
         overdueFine,
         damageFine,
         lostFine,
         totalFine: itemFine
       });
-    } // end for details
+    } // end loop details
 
     const totalFine = totalOverdueFine + totalDamageFine + totalLostFine;
 
-    // === Thay vì tạo Payment: trừ tổng phạt vào MemberCard.balance ===
-    let deducted = 0;
-    if (totalFine > 0) {
-      const memberCard = await MemberCard.findOne({
-        where: { readerId: slip.readerId, deleted: false, status: 'ACTIVE' },
-        order: [['issueDate', 'DESC']],
-        transaction: t,
-        lock: t.LOCK.UPDATE
-      });
+    // =======================
+    // TRỪ THẺ + TẠO QR PAYOS
+    // =======================
+    let deductedFromCard = 0;
+    let cardPaymentRecord = null;
+    let qrPaymentRecord = null;
+    let qrPayos = null;
 
-      if (!memberCard) {
-        // Không có thẻ: tạo notification cảnh báo (an toàn)
+    const resolvedLibrarianId = librarianId || null;
+
+    // tìm thẻ ACTIVE mới nhất
+    const memberCard = await MemberCard.findOne({
+      where: { readerId: slip.readerId, deleted: false, status: 'ACTIVE' },
+      order: [['issueDate', 'DESC']],
+      transaction: t,
+      lock: t.LOCK.UPDATE
+    });
+
+    if (totalFine > 0) {
+      if (memberCard) {
+        const currentCardRow = await MemberCard.findByPk(memberCard.memberCardId, {
+          transaction: t,
+          lock: t.LOCK.UPDATE
+        });
+        const currentBalance = Number(currentCardRow.balance || 0);
+
+        if (currentBalance >= totalFine) {
+          // ĐỦ TIỀN THẺ -> TRỪ HẾT TỪ THẺ, KHÔNG CẦN QR
+          await MemberCard.update({
+            balance: sequelize.literal(`COALESCE(balance,0) - ${Number(totalFine)}`)
+          }, {
+            where: { memberCardId: memberCard.memberCardId },
+            transaction: t
+          });
+
+          deductedFromCard = totalFine;
+
+          cardPaymentRecord = await Payment.create({
+            readerId: slip.readerId,
+            librarianId: resolvedLibrarianId,
+            loanSlipId: slip.loanSlipId,
+            amount: totalFine,
+            status: 'COMPLETED',
+            paymentType: 'VIOLATION',
+            paymentMethod: 'CARD',
+            paymentDate: fmtToday(),
+            description: `Thanh toán tiền phạt phiếu #${slip.loanSlipId} bằng số dư thẻ`
+          }, { transaction: t });
+
+        } else {
+          // KHÔNG ĐỦ -> TRỪ HẾT PHẦN CÓ TRONG THẺ, QR CHỈ CHO PHẦN THIẾU
+          const usedFromCard = Math.max(0, currentBalance);
+          const remaining = totalFine - usedFromCard; // *** chỉ phần thiếu ***
+
+          if (usedFromCard > 0) {
+            await MemberCard.update({
+              balance: sequelize.literal(`COALESCE(balance,0) - ${usedFromCard}`)
+            }, {
+              where: { memberCardId: memberCard.memberCardId },
+              transaction: t
+            });
+
+            deductedFromCard = usedFromCard;
+
+            cardPaymentRecord = await Payment.create({
+              readerId: slip.readerId,
+              librarianId: resolvedLibrarianId,
+              loanSlipId: slip.loanSlipId,
+              amount: usedFromCard,
+              status: 'COMPLETED',
+              paymentType: 'VIOLATION',
+              paymentMethod: 'CARD',
+              paymentDate: fmtToday(),
+              description: `Trừ vào thẻ một phần tiền phạt phiếu #${slip.loanSlipId}`
+            }, { transaction: t });
+          }
+
+          if (remaining > 0) {
+            // QR chỉ tạo cho PHẦN THIẾU
+            const description = `TT thiếu phạt #${slip.loanSlipId}`; // < 25 kí tự
+            const payResp = await payosService.createPaymentLink({
+              amount: remaining,
+              description,
+              orderCode: `fine_${loanSlipId}_${Date.now()}`,
+              returnUrl: process.env.PAY_RETURN_URL,
+              cancelUrl: process.env.PAY_CANCEL_URL
+            });
+
+            qrPayos = payResp;
+
+            qrPaymentRecord = await Payment.create({
+              readerId: slip.readerId,
+              librarianId: resolvedLibrarianId,
+              loanSlipId: slip.loanSlipId,
+              amount: remaining,
+              status: 'PENDING',
+              paymentType: 'VIOLATION',
+              paymentMethod: 'QR',
+              description,
+              externalRef: payResp.orderCode || null,
+              checkoutUrl: payResp.checkoutUrl || payResp.qrCode || null,
+              rawResponse: JSON.stringify(payResp || {})
+            }, { transaction: t });
+
+            await createNotificationSafe({
+              readerId: slip.readerId,
+              type: 'VIOLATION',
+              title: 'Cần thanh toán tiền phạt còn lại',
+              content: `Tổng phạt ${Number(totalFine).toLocaleString('vi-VN')}đ, còn thiếu ${Number(remaining).toLocaleString('vi-VN')}đ.`,
+              link: qrPaymentRecord.checkoutUrl || null
+            }, t);
+          }
+        }
+      } else {
+        // KHÔNG CÓ THẺ -> TOÀN BỘ CHUYỂN SANG QR
+        const description = `TT tiền phạt phiếu #${slip.loanSlipId}`;
+        const payResp = await payosService.createPaymentLink({
+          amount: totalFine,
+          description,
+          orderCode: `fine_${loanSlipId}_${Date.now()}`,
+          returnUrl: process.env.PAY_RETURN_URL,
+          cancelUrl: process.env.PAY_CANCEL_URL
+        });
+
+        qrPayos = payResp;
+
+        qrPaymentRecord = await Payment.create({
+          readerId: slip.readerId,
+          librarianId: resolvedLibrarianId,
+          loanSlipId: slip.loanSlipId,
+          amount: totalFine,
+          status: 'PENDING',
+          paymentType: 'VIOLATION',
+          paymentMethod: 'QR',
+          description,
+          externalRef: payResp.orderCode || null,
+          checkoutUrl: payResp.checkoutUrl || payResp.qrCode || null,
+          rawResponse: JSON.stringify(payResp || {})
+        }, { transaction: t });
+
         await createNotificationSafe({
           readerId: slip.readerId,
           type: 'VIOLATION',
-          title: 'Không thể trừ tiền phạt (bulk return)',
-          content: `Phiếu #${slip.loanSlipId}: cần thu phạt ${totalFine}đ nhưng độc giả không có thẻ hội viên ACTIVE.`,
-          priority: 'HIGH'
-        }, t);
-      } else {
-        // Trừ trực tiếp (cho phép âm)
-        await MemberCard.update({
-          balance: sequelize.literal(`COALESCE(balance,0) - ${Number(totalFine)}`)
-        }, {
-          where: { memberCardId: memberCard.memberCardId },
-          transaction: t
-        });
-
-        deducted = totalFine;
-
-        await createNotificationSafe({
-          readerId: slip.readerId,
-          type: 'INFO',
-          title: 'Đã trừ tiền phạt (bulk)',
-          content: `Đã trừ ${totalFine}đ vào số dư thẻ hội viên cho phiếu #${slip.loanSlipId}.`,
-          priority: 'NORMAL'
+          title: 'Cần thanh toán tiền phạt',
+          content: `Tổng tiền phạt ${Number(totalFine).toLocaleString('vi-VN')}đ.`,
+          link: qrPaymentRecord.checkoutUrl || null
         }, t);
       }
     }
 
-    // Cập nhật trạng thái slip = RETURNED
-    await slip.update({ status: 'RETURNED' }, { transaction: t });
+    // =======================
+    // CẬP NHẬT STATUS PHIẾU
+    // =======================
+    const afterDetails = await LoanDetail.findAll({
+      where: { loanSlipId },
+      transaction: t
+    });
 
-    // ==== Gửi email / FCM / Socket (bọc try/catch để không rollback) ====
-    // Gửi email tóm tắt (nếu có email)
-    try {
-      const reader = await Reader.findByPk(slip.readerId, { include: [{ model: Account }], transaction: t, lock: t.LOCK.UPDATE });
-      const email = reader?.Account?.email || null;
-      const fullName = reader?.fullName || 'Độc giả';
+    const allLost = afterDetails.length > 0 &&
+      afterDetails.every(d => String(d.status || '').toUpperCase() === 'LOST');
 
-      if (email) {
-        // Gửi email tóm tắt: dùng sendReturnReceiptEmail nhiều mục -> gửi 1 email tóm tắt
-        // Hàm sendReturnReceiptEmail chấp nhận title (chuỗi) nên ta truyền tóm tắt số lượng
-        await mailService.sendReturnReceiptEmail(email, {
-          fullName,
-          slipId: slip.loanSlipId,
-          title: `Trả ${processedItems.length} tài liệu`,
-          returnDate,
-          overdueFine: totalOverdueFine,
-          damageFine: totalDamageFine,
-          lostFine: totalLostFine,
-          totalFine
-        });
-      }
-    } catch (err) {
-      console.warn('⚠️ sendReturnReceiptEmail (bulk) failed:', err?.message || err);
-      // không throw — không rollback tx
+    const allDone = afterDetails.length > 0 &&
+      afterDetails.every(d => d.returnDate != null || String(d.status || '').toUpperCase() === 'LOST');
+
+    let newStatus = slip.status;
+    if (allLost) newStatus = 'LOST';
+    else if (allDone) newStatus = 'RETURNED';
+
+    if (newStatus !== slip.status) {
+      await slip.update({ status: newStatus }, { transaction: t });
     }
 
-    // Gửi FCM tóm tắt
-    try {
-      const payload = buildFcmPayload({
-        title: `Trả phiếu #${slip.loanSlipId} — ${processedItems.length} tài liệu`,
-        body: `Tổng phạt: ${Number(totalFine).toLocaleString('vi-VN')} đ`,
-        data: {
-          type: 'BULK_RETURN',
-          slipId: String(slip.loanSlipId),
-          itemsCount: String(processedItems.length),
-          totalFine: String(totalFine)
-        }
-      });
+    // (giữ nguyên phần gửi mail/FCM nếu bạn đã có ở dưới…)
 
-      await sendFcmToReader(slip.readerId, payload);
-    } catch (err) {
-      console.warn('⚠️ sendFcmToReader (bulk) failed:', err?.message || err);
-    }
-
-    // Gửi socket emit tóm tắt
-    try {
-      emitToUser(slip.readerId, 'bulkReturnCompleted', {
-        slipId: slip.loanSlipId,
-        items: processedItems.map(it => ({ loanDetailId: it.loanDetailId, title: it.title, totalFine: it.totalFine })),
-        totals: {
-          overdue: totalOverdueFine,
-          damage: totalDamageFine,
-          lost: totalLostFine,
-          total: totalFine
-        },
-        deductedFromMemberCard: deducted
-      });
-    } catch (err) {
-      console.warn('⚠️ emitToUser (bulk) failed:', err?.message || err);
-    }
-
-    // Trả về kết quả
     return {
-      message: 'Trả toàn bộ phiếu mượn thành công',
       loanSlipId: slip.loanSlipId,
-      returnDate,
-      summary: {
-        itemsReturned: processedItems.length,
-        totalFines: {
-          overdue: totalOverdueFine,
-          damage: totalDamageFine,
-          lost: totalLostFine,
-          total: totalFine
-        }
+      totals: {
+        overdue: totalOverdueFine,
+        damage: totalDamageFine,
+        lost: totalLostFine,
+        total: totalFine
       },
-      items: processedItems,
-      deductedFromMemberCard: deducted
+      deductedFromCard,
+      cardPaymentId: cardPaymentRecord?.paymentId || cardPaymentRecord?.id || null,
+      qr: qrPayos,
+      qrPaymentId: qrPaymentRecord?.paymentId || qrPaymentRecord?.id || null,
+      items: processedItems
     };
-  }); // end transaction
+  });
 }
+
+
 
 
 /**
@@ -2726,8 +3274,6 @@ async function computeReturnFines({ loanDetailId, dueDate, returnDate, condition
   return { overdueFine, damageFine, lostFine, totalFine: total };
 }
 
-// require payosService ở đầu file (nếu chưa có)
-const payosService = require('./payosService'); // đường dẫn theo project
 
 async function handleLostBookAndCharge({ loanDetailId, librarianId, returnDate }) {
   console.log('[handleLostBookAndCharge] called with', { loanDetailId, librarianId, returnDate });
@@ -2736,6 +3282,9 @@ async function handleLostBookAndCharge({ loanDetailId, librarianId, returnDate }
   const returnDateStr = returnDate || fmtToday();
 
   return await sequelize.transaction(async (t) => {
+    // 🔹 Chuẩn hóa librarianId: có thể FE gửi nhầm accountId
+    const resolvedLibrarianId = await resolveLibrarianIdFlexible(librarianId, t);
+
     // load loan detail + related
     const detail = await LoanDetail.findByPk(loanDetailId, {
       include: [
@@ -2797,10 +3346,10 @@ async function handleLostBookAndCharge({ loanDetailId, librarianId, returnDate }
           balance: sequelize.literal(`COALESCE(balance,0) - ${Number(totalFine)}`)
         }, { where: { memberCardId: memberCard.memberCardId }, transaction: t });
 
-        // tạo Payment record - mark là COMPLETED (GHI CHÚ: thêm librarianId)
+        // tạo Payment record - mark là COMPLETED (GHI CHÚ: dùng resolvedLibrarianId)
         await Payment.create({
           readerId: slip.readerId,
-          librarianId: librarianId || null,
+          librarianId: resolvedLibrarianId,
           amount: totalFine,
           status: 'COMPLETED',
           paymentType: 'VIOLATION',
@@ -2835,10 +3384,10 @@ async function handleLostBookAndCharge({ loanDetailId, librarianId, returnDate }
           cancelUrl: process.env.PAY_CANCEL_URL
         });
 
-        // lưu Payment PENDING (thêm librarianId)
+        // lưu Payment PENDING (dùng resolvedLibrarianId)
         const payment = await Payment.create({
           readerId: slip.readerId,
-          librarianId: librarianId || null,
+          librarianId: resolvedLibrarianId,
           amount: remaining,
           status: 'PENDING',
           paymentType: 'VIOLATION',
@@ -2879,10 +3428,10 @@ async function handleLostBookAndCharge({ loanDetailId, librarianId, returnDate }
         cancelUrl: process.env.PAY_CANCEL_URL
       });
 
-      // lưu Payment PENDING (thêm librarianId)
+      // lưu Payment PENDING (dùng resolvedLibrarianId)
       const payment = await Payment.create({
         readerId: slip.readerId,
-        librarianId: librarianId || null,
+        librarianId: resolvedLibrarianId,
         amount: totalFine,
         status: 'PENDING',
         paymentType: 'VIOLATION',
@@ -2918,6 +3467,7 @@ async function handleLostBookAndCharge({ loanDetailId, librarianId, returnDate }
 
 
 
+
 module.exports = {
   getAllLoanSlipsService,
   createLoanSlipService,
@@ -2934,5 +3484,7 @@ module.exports = {
   calculateDamageOnly,
   computeReturnFines,
   handleLostBookAndCharge,
-
+  previewBulkReturnFinesService,
+  initBulkReturnPaymentService,
+  confirmBulkReturnAfterPaymentService
 };

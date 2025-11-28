@@ -20,9 +20,33 @@ router.get('/documents/:documentId/copies', requireAuth, requireRole([1, 2]), co
 // TRẢ TỪNG QUYỂN
 router.post('/items/return', requireAuth, requireRole([1, 2]), controller.returnSingleItem);
 
+// PREVIEW TIỀN PHẠT KHI TRẢ TOÀN BỘ PHIẾU
+// FE gọi API này trước, hiển thị tổng tiền phạt + chi tiết, rồi user ấn "Xác nhận"
+router.post(
+    '/slips/:loanSlipId/return/preview',
+    requireAuth,
+    requireRole([1, 2]),
+    controller.previewBulkReturnFines
+);
 // TRẢ TOÀN BỘ PHIẾU
 router.post('/slips/:loanSlipId/return', requireAuth, requireRole([1, 2]), controller.returnBulkItems);
 
+
+// 🔹 NEW: BƯỚC 1 – INIT trả phiếu + tạo QR nếu cần
+router.post(
+    '/slips/:loanSlipId/return/init',
+    requireAuth,
+    requireRole([1, 2]),
+    controller.initBulkReturnPayment
+);
+
+// 🔹 NEW: BƯỚC 2 – CONFIRM sau khi đã thanh toán QR
+router.post(
+    '/slips/:loanSlipId/return/confirm',
+    requireAuth,
+    requireRole([1, 2]),
+    controller.confirmBulkReturnAfterPayment
+);
 // ---------------------------
 // NEW: PICKUP - xác nhận độc giả đến lấy
 router.post('/slips/:loanSlipId/pickup', requireAuth, requireRole([1, 2]), controller.pickupLoanSlip);
