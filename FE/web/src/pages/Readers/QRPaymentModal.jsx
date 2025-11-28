@@ -16,6 +16,7 @@ import {
   QrCode2 as QrIcon,
   OpenInNew as OpenIcon,
 } from "@mui/icons-material";
+import { QRCodeSVG } from "qrcode.react";
 
 export default function QRPaymentModal({ 
   open, 
@@ -26,7 +27,6 @@ export default function QRPaymentModal({
   const [paymentStatus, setPaymentStatus] = useState("pending");
   const [checkInterval, setCheckInterval] = useState(null);
 
-  // ✅ Debug payment data
   useEffect(() => {
     if (open && paymentData) {
       console.log("═══════════════════════════════");
@@ -39,7 +39,6 @@ export default function QRPaymentModal({
     }
   }, [open, paymentData]);
 
-  // ✅ Kiểm tra trạng thái thanh toán định kỳ
   useEffect(() => {
     if (!open || !paymentData?.paymentId) return;
 
@@ -60,7 +59,6 @@ export default function QRPaymentModal({
     };
   }, [open, paymentData]);
 
-  // ✅ Gọi API kiểm tra thanh toán
   const checkPaymentStatus = async () => {
     try {
       const token = sessionStorage.getItem("accessToken");
@@ -100,7 +98,6 @@ export default function QRPaymentModal({
       
       console.log("💳 Payment status:", result);
 
-      // ✅ Sync với backend: SUCCESS, PAID, COMPLETED
       const successStatuses = ["SUCCESS", "PAID", "COMPLETED"];
       if (result.success && successStatuses.includes(result.status)) {
         console.log("🎉 Payment successful! Status:", result.status);
@@ -190,35 +187,31 @@ export default function QRPaymentModal({
               </Typography>
             </Box>
 
-            {/* ✅ QR Code - sync với BE */}
+            {/* ✅ Generate QR Code từ chuỗi EMVCo */}
             {paymentData?.qrCode && (
               <Box sx={{ 
                 textAlign: "center",
-                p: 2,
+                p: 3,
                 backgroundColor: "white",
                 borderRadius: 2,
                 border: "2px solid #E2E8F0",
+                display: "flex",
+                justifyContent: "center",
+                alignItems: "center",
               }}>
-                <img 
-                  src={paymentData.qrCode} 
-                  alt="QR Payment" 
-                  style={{ 
-                    maxWidth: "100%", 
-                    height: "auto",
-                    maxHeight: "300px",
-                  }}
-                  onError={(e) => {
-                    console.error("❌ QR Code load failed:", paymentData.qrCode);
-                    e.target.style.display = 'none';
-                  }}
-                  onLoad={() => {
-                    console.log("✅ QR Code loaded successfully");
+                <QRCodeSVG 
+                  value={paymentData.qrCode}
+                  size={280}
+                  level="H"
+                  includeMargin={true}
+                  style={{
+                    border: "8px solid white",
+                    borderRadius: "8px",
                   }}
                 />
               </Box>
             )}
 
-            {/* ✅ Checkout Link - sync với BE */}
             {paymentData?.checkoutUrl && (
               <Button
                 variant="outlined"
