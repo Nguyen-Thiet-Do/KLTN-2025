@@ -2149,6 +2149,40 @@ async function returnBulkItemsService(body, rawLibrarianId) {
     return Number(v || 0).toLocaleString("vi-VN");
   }
 
+  // ==========================
+  // THÊM 3 HÀM TÍNH TIỀN PHẠT
+  // ==========================
+
+  // Tính tiền phạt trả trễ (anh chỉnh DAILY_FINE theo rule thực tế của anh)
+  function calcOverdueFine(dueDate, returnDateStr) {
+    const daysLate = calcDaysLate(dueDate, returnDateStr);
+    if (daysLate <= 0) return 0;
+
+    const DAILY_FINE = 2000; // ví dụ 2.000đ / ngày, anh đổi nếu cần
+    return daysLate * DAILY_FINE;
+  }
+
+  // Tính tiền phạt hư hỏng dựa trên phần trăm giảm chất lượng * giá bìa
+  function calcDamageFine(condBorrow, condReturn, coverPrice) {
+    const from = Number(condBorrow ?? 100);
+    const to = Number(condReturn ?? from);
+    const price = Number(coverPrice || 0);
+
+    if (!price || to >= from) return 0;
+
+    const damagePercent = (from - to) / 100; // ví dụ: mượn 100, trả 80 → hư 20% giá trị
+    return Math.round(price * damagePercent);
+  }
+
+  // Tính tiền phạt mất sách (ví dụ: phải bù phần chênh giữa giá bìa và tiền cọc)
+  function calcLostFine(coverPrice, depositAmount) {
+    const cover = Number(coverPrice || 0);
+    const deposit = Number(depositAmount || 0);
+
+    const fine = cover - deposit;
+    return fine > 0 ? fine : 0;
+  }
+
   return await sequelize.transaction(async (t) => {
     const resolvedLibrarianId = await resolveLibrarianIdFlexible(rawLibrarianId, t);
 
@@ -2221,7 +2255,7 @@ async function returnBulkItemsService(body, rawLibrarianId) {
       const condBorrow = Number(detail.conditionBorrow ?? 100);
       const condReturn = isLost ? 0 : Number(conditionReturn ?? condBorrow);
 
-      // Tính phạt theo rule hiện tại
+      // TÍNH TIỀN PHẠT BẰNG 3 HÀM MỚI ĐỊNH NGHĨA
       const overdueFine = calcOverdueFine(detail.dueDate || slip.dueDate, returnDate);
       const damageFine = isLost ? 0 : calcDamageFine(condBorrow, condReturn, coverPrice);
       const lostFine = isLost ? calcLostFine(coverPrice, depositAmount) : 0;
@@ -2289,7 +2323,7 @@ async function returnBulkItemsService(body, rawLibrarianId) {
     const totalFine = totalOverdueFine + totalDamageFine + totalLostFine;
 
     // =======================
-    // MỚI: TẠO BẢN GHI VIOLATIONS
+    // TẠO BẢN GHI VIOLATIONS
     // =======================
     if (totalFine > 0 && processedItems.length > 0 && resolvedLibrarianId) {
       for (const it of processedItems) {
@@ -2345,7 +2379,7 @@ async function returnBulkItemsService(body, rawLibrarianId) {
           severity,
           violationDescription,
           fineAmount: itemTotalFine,
-          paymentStatus: "UNPAID", // tạm thời: luôn để UNPAID, sau có thể update thành PAID khi Payment hoàn tất
+          paymentStatus: "UNPAID",
           librarianId: resolvedLibrarianId,
           note: null
         }, { transaction: t });
@@ -2353,7 +2387,8 @@ async function returnBulkItemsService(body, rawLibrarianId) {
     }
 
     // =======================
-    // TRỪ TIỀN THẺ + TẠO PAYMENT (giữ nguyên logic cũ của bạn)
+    // TRỪ TIỀN THẺ + TẠO PAYMENT
+    // (logic cũ của anh, em giữ nguyên)
     // =======================
     let deductedFromCard = 0;
     let cardPaymentRecord = null;
@@ -2376,7 +2411,7 @@ async function returnBulkItemsService(body, rawLibrarianId) {
         const currentBalance = Number(currentCardRow.balance || 0);
 
         if (currentBalance >= totalFine) {
-          // đủ tiền trong thẻ
+          // THẺ ĐỦ TIỀN: không tạo QR
           await MemberCard.update({
             balance: sequelize.literal(`COALESCE(balance,0) - ${Number(totalFine)}`)
           }, {
@@ -2399,7 +2434,7 @@ async function returnBulkItemsService(body, rawLibrarianId) {
           }, { transaction: t });
 
         } else {
-          // không đủ: trừ hết phần trong thẻ, còn lại tạo QR
+          // KHÔNG ĐỦ TIỀN: trừ hết phần trong thẻ, còn lại tạo QR
           const usedFromCard = Math.max(0, currentBalance);
           const remaining = totalFine - usedFromCard;
 
@@ -2522,6 +2557,7 @@ async function returnBulkItemsService(body, rawLibrarianId) {
     };
   });
 }
+
 
 
 
