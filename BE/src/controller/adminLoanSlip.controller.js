@@ -12,7 +12,10 @@ const {
   cancelReservationService,
   calculateDamageOnly,
   computeReturnFines,
-  handleLostBookAndCharge
+  handleLostBookAndCharge,
+  previewBulkReturnFinesService,
+  initBulkReturnPaymentService,
+  confirmBulkReturnAfterPaymentService
 } = require('../service/adminLoanSlip.service');
 
 exports.getAllLoanSlips = async (req, res) => {
@@ -403,6 +406,112 @@ exports.handleLostBookAndCharge = async (req, res) => {
       message: 'Lỗi xử lý mất sách',
       error: err.message,
       details: err.details ?? null
+    });
+  }
+};
+/**
+ * PREVIEW: tính phí trả toàn bộ phiếu (trễ hạn + hư hỏng + mất)
+ * POST /api/loans/admin/slips/:loanSlipId/return/preview
+ * Body: {
+ *   returnDate: 'YYYY-MM-DD',
+ *   items: [
+ *     { loanDetailId, conditionReturn, isLost? }
+ *   ]
+ * }
+ */
+exports.previewBulkReturnFines = async (req, res) => {
+  try {
+    const { loanSlipId } = req.params;
+    const { returnDate, items } = req.body || {};
+
+    if (!loanSlipId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Thiếu loanSlipId trên URL'
+      });
+    }
+
+    if (!returnDate) {
+      return res.status(400).json({
+        success: false,
+        message: 'Thiếu returnDate trong body'
+      });
+    }
+
+    if (!Array.isArray(items) || !items.length) {
+      return res.status(400).json({
+        success: false,
+        message: 'Danh sách items trống hoặc không hợp lệ'
+      });
+    }
+
+    const result = await previewBulkReturnFinesService({
+      loanSlipId: Number(loanSlipId),
+      returnDate,
+      items
+    });
+
+    // service trả về { loanSlipId, returnDate, totals, items, paymentPreview }
+    return res.json({ success: true, ...result });
+  } catch (err) {
+    const code = err.status || err.statusCode || 500;
+    return res.status(code).json({
+      success: false,
+      message: 'Lỗi preview tiền phạt khi trả phiếu',
+      error: err.message,
+      details: err.details
+    });
+  }
+};
+
+// BƯỚC 1: init trả phiếu + tạo QR nếu cần
+exports.initBulkReturnPayment = async (req, res) => {
+  try {
+    const { loanSlipId } = req.params;
+    const librarianId = req.body.librarianId;
+    if (!librarianId) {
+      return res.status(400).json({ success: false, message: 'Thiếu librarianId trong request body' });
+    }
+
+    const result = await initBulkReturnPaymentService(
+      { loanSlipId: Number(loanSlipId), ...req.body },
+      librarianId
+    );
+
+    return res.json({ success: true, ...result });
+  } catch (err) {
+    const code = err.status || err.statusCode || 500;
+    return res.status(code).json({
+      success: false,
+      message: 'Lỗi khởi tạo trả phiếu (tính phạt / tạo QR)',
+      error: err.message,
+      details: err.details
+    });
+  }
+};
+
+// BƯỚC 2: xác nhận sau khi thanh toán thành công
+exports.confirmBulkReturnAfterPayment = async (req, res) => {
+  try {
+    const { loanSlipId } = req.params;
+    const librarianId = req.body.librarianId;
+    if (!librarianId) {
+      return res.status(400).json({ success: false, message: 'Thiếu librarianId trong request body' });
+    }
+
+    const result = await confirmBulkReturnAfterPaymentService(
+      { loanSlipId: Number(loanSlipId), ...req.body },
+      librarianId
+    );
+
+    return res.json({ success: true, ...result });
+  } catch (err) {
+    const code = err.status || err.statusCode || 500;
+    return res.status(code).json({
+      success: false,
+      message: 'Lỗi xác nhận trả phiếu sau khi thanh toán',
+      error: err.message,
+      details: err.details
     });
   }
 };

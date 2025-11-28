@@ -77,6 +77,6 @@ const updateFullProfile = async (req, res) => {
 module.exports = {
   getCurrentReader,
   updateCurrentReader,
-  updateCurrentAccount,      // ✅ THÊM DÒNG NÀY
-  updateFullProfile,         // ✅ THÊM DÒNG NÀY
+  updateCurrentAccount,     
+  updateFullProfile,         
 };
