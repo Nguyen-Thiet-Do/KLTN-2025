@@ -48,7 +48,11 @@ router.get('/profile',
   requireAuth,
   authController.getProfile
 );
-
+// GET /api/auth/me - Lấy thông tin user hiện tại
+router.get('/me',
+  requireAuth,  // Middleware xác thực JWT
+  authController.getProfile  // Dùng lại controller getProfile có sẵn
+);
 // Example: Admin only route
 router.get('/admin',
   requireAuth,
