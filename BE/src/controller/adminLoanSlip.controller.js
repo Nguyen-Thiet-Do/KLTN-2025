@@ -15,7 +15,8 @@ const {
   handleLostBookAndCharge,
   previewBulkReturnFinesService,
   initBulkReturnPaymentService,
-  confirmBulkReturnAfterPaymentService
+  confirmBulkReturnAfterPaymentService,
+  createViolationPaymentForSlipService
 } = require('../service/adminLoanSlip.service');
 
 exports.getAllLoanSlips = async (req, res) => {
@@ -512,6 +513,43 @@ exports.confirmBulkReturnAfterPayment = async (req, res) => {
       message: 'Lỗi xác nhận trả phiếu sau khi thanh toán',
       error: err.message,
       details: err.details
+    });
+  }
+};
+/**
+ * Tạo PayOS payment cho các vi phạm chưa thanh toán của 1 phiếu
+ * POST /api/loans/admin/violations/slips/:loanSlipId/pay
+ * Body: { librarianId: number }
+ */
+exports.createViolationPaymentForSlip = async (req, res) => {
+  try {
+    const { loanSlipId } = req.params;
+    const librarianId = Number(req.body.librarianId);
+
+    if (!loanSlipId) {
+      return res
+        .status(400)
+        .json({ success: false, message: 'Thiếu loanSlipId trên URL' });
+    }
+    if (!librarianId) {
+      return res
+        .status(400)
+        .json({ success: false, message: 'Thiếu librarianId trong body' });
+    }
+
+    const result = await createViolationPaymentForSlipService(
+      Number(loanSlipId),
+      librarianId
+    );
+
+    return res.json({ success: true, ...result });
+  } catch (err) {
+    const code = err.status || err.statusCode || 500;
+    return res.status(code).json({
+      success: false,
+      message: 'Lỗi tạo thanh toán vi phạm cho phiếu',
+      error: err.message,
+      details: err.details,
     });
   }
 };

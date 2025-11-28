@@ -90,4 +90,14 @@ router.post(
     controller.handleLostBookAndCharge
 );
 
+// 4) TẠO PAYOS PAYMENT CHO VI PHẠM CHƯA THANH TOÁN CỦA PHIẾU
+// POST /api/loans/admin/violations/slips/:loanSlipId/pay
+router.post(
+  '/violations/slips/:loanSlipId/pay',
+  requireAuth,
+  requireRole([1, 2]),
+  controller.createViolationPaymentForSlip
+);
+
+
 module.exports = router;
