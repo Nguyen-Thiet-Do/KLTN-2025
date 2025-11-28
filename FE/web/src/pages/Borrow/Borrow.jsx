@@ -40,9 +40,6 @@ import {
   fetchLoanSlips,
   getDocumentDetail,
   cancelReservation,
-  pickupLoanSlip,
-  deleteLoanDetail,
-  cancelLoanSlip,
 } from "../../services/loanSlips";
 import AddLoanSlipDialog from "../Borrow/AddLoanSlipDialog";
 import ApproveReservationDialog from "./ApproveReservationDialog";

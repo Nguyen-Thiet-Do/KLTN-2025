@@ -34,7 +34,7 @@ import {
   getLibrarians,
   deleteLibrarian,
   resetLibrarianPassword,
-  restoreLibrarian, // ✅ thêm API khôi phục
+  restoreLibrarian,
 } from "../../services/librarianService";
 import AddLibrarian from "./AddLibrarian";
 import EditLibrarian from "./EditLibrarian";
@@ -106,7 +106,7 @@ export default function Librarians() {
       const token = sessionStorage.getItem("accessToken");
       const res = await deleteLibrarian(id, token);
       if (res.success) {
-        alert("✅ Đã xóa  thủ thư thành công!");
+        alert("✅ Đã xóa thủ thư thành công!");
         fetchData();
       } else alert(res.message || "Không thể xóa thủ thư.");
     } catch (err) {
@@ -290,7 +290,6 @@ export default function Librarians() {
                   <TableCell sx={{ fontWeight: 700 }}>Số điện thoại</TableCell>
                   <TableCell sx={{ fontWeight: 700 }}>CCCD</TableCell>
                   <TableCell sx={{ fontWeight: 700 }}>Địa chỉ</TableCell>
-                  <TableCell sx={{ fontWeight: 700 }}>Lương cơ bản</TableCell>
                   <TableCell sx={{ fontWeight: 700 }}>Email</TableCell>
                   <TableCell sx={{ fontWeight: 700, textAlign: "center" }}>Hành động</TableCell>
                 </TableRow>
@@ -326,9 +325,6 @@ export default function Librarians() {
                     <TableCell>{lib.phoneNumber || "-"}</TableCell>
                     <TableCell>{lib.cccd || "-"}</TableCell>
                     <TableCell>{lib.address || "-"}</TableCell>
-                    <TableCell>
-                      {lib.basicSalary ? lib.basicSalary.toLocaleString("vi-VN") + " ₫" : "-"}
-                    </TableCell>
                     <TableCell>{lib.email || "-"}</TableCell>
 
                     {/* Nút hành động */}

@@ -75,7 +75,9 @@ export default function Login() {
     if (apiError) setApiError('');
   };
 
-   const handleSubmit = async (e) => {
+  // handleSubmit function - CHỈ PHẦN CẦN SỬA
+  // handleSubmit function - CHỈ PHẦN CẦN SỬA
+  const handleSubmit = async (e) => {
     e.preventDefault();
     if (!validateForm()) return;
 
@@ -83,24 +85,55 @@ export default function Login() {
     setApiError('');
 
     try {
-     const account = await login(formData.email, formData.password);
+      // loginResponse chứa: account, profile, accessToken, refreshToken, userData
+      const loginResponse = await login(formData.email, formData.password);
 
-// ✔ LẤY READER ID CHUẨN
-const readerId =
-  account.profileType === "reader"
-    ? account.profile.readerId
-    : null;
+      const { account, profile, userData } = loginResponse;
 
-// ✔ LƯU VÀO SESSION
-sessionStorage.setItem("readerId", String(readerId));
-sessionStorage.setItem("roleId", String(account.account.roleId));
-sessionStorage.setItem("accountId", String(account.account.accountId));
+      // ✅ LẤY THÔNG TIN CƠ BẢN
+      const readerId = profile?.readerId || null;
+      const roleId = account.roleId;
+      const accountId = account.accountId;
 
+      // ✅ LƯU THÔNG TIN CƠ BẢN
+      sessionStorage.setItem("readerId", String(readerId));
+      sessionStorage.setItem("roleId", String(roleId));
+      sessionStorage.setItem("accountId", String(accountId));
 
-   
+      // ✅ LƯU THÔNG TIN CARD (nếu có)
+      if (profile?.memberCard) {
+        sessionStorage.setItem("memberCard", JSON.stringify(profile.memberCard));
 
+        // Lưu thêm các thông tin quan trọng của card để truy cập nhanh
+        sessionStorage.setItem("cardNumber", profile.memberCard.cardNumber);
+        sessionStorage.setItem("cardBalance", profile.memberCard.balance);
+        sessionStorage.setItem("cardStatus", profile.memberCard.status);
+        sessionStorage.setItem("cardTypeId", String(profile.memberCard.cardTypeId));
+
+        // Lưu thông tin loại thẻ
+        if (profile.memberCard.cardType) {
+          sessionStorage.setItem("cardType", JSON.stringify(profile.memberCard.cardType));
+          sessionStorage.setItem("cardTypeName", profile.memberCard.cardType.typeName);
+          sessionStorage.setItem("maxBorrowLimit", String(profile.memberCard.cardType.maxBorrowLimit));
+        }
+      }
+
+      // ✅ LƯU THÔNG TIN MƯỢN SÁCH (nếu có)
+      if (profile?.loanCounts) {
+        sessionStorage.setItem("loanCounts", JSON.stringify(profile.loanCounts));
+      }
+
+      if (profile?.returnedCount !== undefined) {
+        sessionStorage.setItem("returnedCount", String(profile.returnedCount));
+      }
+
+      if (profile?.totolBorrow !== undefined) {
+        sessionStorage.setItem("totolBorrow", String(profile.totolBorrow));
+      }
+
+      // Điều hướng
       const routes = { 1: '/admin', 2: '/librarian', 3: '/' };
-      navigate(routes[account.account.roleId] || '/', { replace: true });
+      navigate(routes[roleId] || '/', { replace: true });
 
     } catch (error) {
       setApiError(error.message || 'Đăng nhập thất bại.');

@@ -19,11 +19,11 @@ import {
   CardContent,
 } from "@mui/material";
 import { Close } from "@mui/icons-material";
-import { useSnackbar } from "notistack"; // ✅ thêm dòng này
+import { useSnackbar } from "notistack";
 import { createLibrarian } from "../../services/librarianService";
 
 export default function AddLibrarian({ onSuccess, onCancel, open = true }) {
-  const { enqueueSnackbar } = useSnackbar(); // ✅ hook snackbar
+  const { enqueueSnackbar } = useSnackbar();
 
   const [form, setForm] = useState({
     // Account info
@@ -36,8 +36,8 @@ export default function AddLibrarian({ onSuccess, onCancel, open = true }) {
     phoneNumber: "",
     cccd: "",
     address: "",
-    basicSalary: "",
-    salaryCoefficient: "",
+    basicSalary: "", // Vẫn giữ để gửi data
+    salaryCoefficient: "", // Vẫn giữ để gửi data
     note: "",
   });
 
@@ -58,16 +58,16 @@ export default function AddLibrarian({ onSuccess, onCancel, open = true }) {
       const res = await createLibrarian(token, form);
 
       if (res.success) {
-        enqueueSnackbar("✅ Thêm thủ thư mới thành công!", { variant: "success" }); // ✅ thông báo thành công
+        enqueueSnackbar("✅ Thêm thủ thư mới thành công!", { variant: "success" });
         onSuccess();
       } else {
-        enqueueSnackbar(res.message || "Không thể thêm thủ thư.", { variant: "error" }); // ✅ thông báo lỗi
+        enqueueSnackbar(res.message || "Không thể thêm thủ thư.", { variant: "error" });
         setError(res.message || "Thêm thất bại");
       }
     } catch (err) {
       console.error(err);
       const msg = err.response?.data?.message || "Lỗi khi thêm thủ thư";
-      enqueueSnackbar(`❌ ${msg}`, { variant: "error" }); // ✅ thông báo lỗi
+      enqueueSnackbar(`❌ ${msg}`, { variant: "error" });
       setError(msg);
     } finally {
       setLoading(false);
@@ -302,29 +302,7 @@ export default function AddLibrarian({ onSuccess, onCancel, open = true }) {
                   onChange={handleChange}
                   disabled={loading}
                   placeholder="Nhập số căn cước công dân"
-                  sx={fieldSx}
-                />
-
-                <TextField
-                  name="basicSalary"
-                  type="number"
-                  label="Lương cơ bản"
-                  value={form.basicSalary}
-                  onChange={handleChange}
-                  disabled={loading}
-                  placeholder="Nhập lương cơ bản"
-                  sx={fieldSx}
-                />
-
-                <TextField
-                  name="salaryCoefficient"
-                  type="number"
-                  label="Hệ số lương"
-                  value={form.salaryCoefficient}
-                  onChange={handleChange}
-                  disabled={loading}
-                  placeholder="Nhập hệ số lương"
-                  sx={fieldSx}
+                  sx={{ ...fieldSx, gridColumn: { xs: "auto", md: "1 / span 2" } }}
                 />
 
                 <TextField

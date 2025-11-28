@@ -442,7 +442,7 @@ export default function EditBookDialog({ open, id, initialBook, onClose, onUpdat
                     <Card elevation={1} sx={{ p: 3, borderRadius: 2, position: "sticky", top: 20 }}>
                       <Stack spacing={2}>
                         <Typography variant="h6" fontWeight={600} color="primary">
-                          Gợi ý
+                          Chú ý
                         </Typography>
                         <Typography variant="body2" color="text.secondary">
                           • Chỉ nhập các trường muốn thay đổi.
@@ -528,8 +528,8 @@ export default function EditBookDialog({ open, id, initialBook, onClose, onUpdat
                           <Stack spacing={2}>
                             {authorsUI.map((a, i) => (
                               <Paper key={i} variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
-                                <Grid container spacing={2} alignItems="center">
-                                  <Grid item xs={12} sm={5}>
+                                <Stack direction="row" spacing={2} alignItems="center">
+                                  <Box sx={{ flex: 1, minWidth: 0 }}>
                                     <Autocomplete
                                       freeSolo
                                       options={authorsOpt}
@@ -547,12 +547,13 @@ export default function EditBookDialog({ open, id, initialBook, onClose, onUpdat
                                           {...params}
                                           label="Họ tên tác giả"
                                           placeholder="Nhập tên tác giả..."
+                                          fullWidth
                                         />
                                       )}
                                     />
-                                  </Grid>
+                                  </Box>
 
-                                  <Grid item xs={6} sm={3}>
+                                  <Box sx={{ width: 200, flexShrink: 0 }}>
                                     <FormControl fullWidth>
                                       <InputLabel>Vai trò</InputLabel>
                                       <Select
@@ -566,22 +567,9 @@ export default function EditBookDialog({ open, id, initialBook, onClose, onUpdat
                                         <MenuItem value="translator">Dịch giả</MenuItem>
                                       </Select>
                                     </FormControl>
-                                  </Grid>
+                                  </Box>
 
-                                  <Grid item xs={4} sm={2}>
-                                    <TextField
-                                      label="Thứ tự"
-                                      type="number"
-                                      value={a.ord}
-                                      onChange={(e) =>
-                                        upAuthor(i, "ord", Math.max(1, Number(e.target.value || 1)))
-                                      }
-                                      InputProps={{ inputProps: { min: 1 } }}
-                                      fullWidth
-                                    />
-                                  </Grid>
-
-                                  <Grid item xs={2} sm={2}>
+                                  <Box sx={{ flexShrink: 0 }}>
                                     <Tooltip title="Xoá tác giả">
                                       <span>
                                         <IconButton
@@ -594,8 +582,14 @@ export default function EditBookDialog({ open, id, initialBook, onClose, onUpdat
                                         </IconButton>
                                       </span>
                                     </Tooltip>
-                                  </Grid>
-                                </Grid>
+                                  </Box>
+
+                                  {/* Ẩn input thứ tự nhưng vẫn lưu giá trị */}
+                                  <input
+                                    type="hidden"
+                                    value={a.ord}
+                                  />
+                                </Stack>
                               </Paper>
                             ))}
 
@@ -609,7 +603,6 @@ export default function EditBookDialog({ open, id, initialBook, onClose, onUpdat
                             </Button>
 
                             <Typography variant="caption" color="text.secondary">
-                              • Bỏ trống toàn bộ phần tác giả → giữ nguyên. • Xoá hết (để danh sách trống) → gửi mảng rỗng để xoá toàn bộ.
                             </Typography>
                           </Stack>
                         </Stack>
@@ -659,27 +652,10 @@ export default function EditBookDialog({ open, id, initialBook, onClose, onUpdat
                             }
                           />
                           <Typography variant="caption" color="text.secondary">
-                            • Bỏ trống (không chỉnh) → giữ nguyên. • Đặt về mảng rỗng → xoá hết thể loại.
                           </Typography>
                         </Stack>
                       </Card>
                     </Stack>
-                  </Grid>
-
-                  <Grid item xs={12} md={4}>
-                    <Card elevation={1} sx={{ p: 3, borderRadius: 2, position: "sticky", top: 20 }}>
-                      <Stack spacing={2}>
-                        <Typography variant="h6" fontWeight={600} color="primary">
-                          Lưu ý
-                        </Typography>
-                        <Typography variant="body2" color="text.secondary">
-                          • Thứ tự tác giả (ord) sẽ lưu đúng như bạn nhập.
-                        </Typography>
-                        <Typography variant="body2" color="text.secondary">
-                          • Tên tác giả/thể loại mới sẽ được tạo nếu chưa tồn tại.
-                        </Typography>
-                      </Stack>
-                    </Card>
                   </Grid>
                 </Grid>
               )}
@@ -839,22 +815,6 @@ export default function EditBookDialog({ open, id, initialBook, onClose, onUpdat
                       </Card>
                     </Stack>
                   </Grid>
-
-                  <Grid item xs={12} md={4}>
-                    <Card elevation={1} sx={{ p: 3, borderRadius: 2, position: "sticky", top: 20 }}>
-                      <Stack spacing={2}>
-                        <Typography variant="h6" fontWeight={600} color="primary">
-                          Hoàn tất
-                        </Typography>
-                        <Typography variant="body2" color="text.secondary">
-                          • Nếu không nhập gì, dữ liệu sẽ giữ nguyên.
-                        </Typography>
-                        <Typography variant="body2" color="text.secondary">
-                          • Một số trường có thể xoá bằng cách gửi chuỗi rỗng.
-                        </Typography>
-                      </Stack>
-                    </Card>
-                  </Grid>
                 </Grid>
               )}
             </>
@@ -885,6 +845,6 @@ export default function EditBookDialog({ open, id, initialBook, onClose, onUpdat
           </Button>
         )}
       </DialogActions>
-    </Dialog>
+    </Dialog >
   );
 }

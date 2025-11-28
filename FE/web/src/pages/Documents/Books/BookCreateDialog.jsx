@@ -585,8 +585,8 @@ export default function BookCreateDialog({ open, onClose, onCreated }) {
                       <Stack spacing={2}>
                         {form.authors.map((a, i) => (
                           <Paper key={i} variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
-                            <Grid container spacing={2} alignItems="center">
-                              <Grid item xs={12} sm={5}>
+                            <Stack direction="row" spacing={2} alignItems="center">
+                              <Box sx={{ flex: 1, minWidth: 0 }}>
                                 <Autocomplete
                                   freeSolo
                                   options={authorsOpt}
@@ -604,12 +604,13 @@ export default function BookCreateDialog({ open, onClose, onCreated }) {
                                       {...params}
                                       label="Họ tên tác giả"
                                       placeholder="Nhập tên tác giả..."
+                                      fullWidth
                                     />
                                   )}
                                 />
-                              </Grid>
+                              </Box>
 
-                              <Grid item xs={6} sm={3}>
+                              <Box sx={{ width: 200, flexShrink: 0 }}>
                                 <FormControl fullWidth>
                                   <InputLabel>Vai trò</InputLabel>
                                   <Select
@@ -623,22 +624,9 @@ export default function BookCreateDialog({ open, onClose, onCreated }) {
                                     <MenuItem value="translator">Dịch giả</MenuItem>
                                   </Select>
                                 </FormControl>
-                              </Grid>
+                              </Box>
 
-                              <Grid item xs={4} sm={2}>
-                                <TextField
-                                  label="Thứ tự"
-                                  type="number"
-                                  value={a.ord}
-                                  onChange={(e) =>
-                                    upAuthor(i, "ord", Number(e.target.value || 1))
-                                  }
-                                  InputProps={{ inputProps: { min: 1 } }}
-                                  fullWidth
-                                />
-                              </Grid>
-
-                              <Grid item xs={2} sm={2}>
+                              <Box sx={{ flexShrink: 0 }}>
                                 <Tooltip title="Xoá tác giả">
                                   <span>
                                     <IconButton
@@ -651,8 +639,14 @@ export default function BookCreateDialog({ open, onClose, onCreated }) {
                                     </IconButton>
                                   </span>
                                 </Tooltip>
-                              </Grid>
-                            </Grid>
+                              </Box>
+
+                              {/* Ẩn input thứ tự nhưng vẫn lưu giá trị */}
+                              <input
+                                type="hidden"
+                                value={a.ord}
+                              />
+                            </Stack>
                           </Paper>
                         ))}
 

@@ -5,7 +5,7 @@ import {
   Box, Alert, CircularProgress, Typography, IconButton, Card, CardContent,
 } from "@mui/material";
 import { Close } from "@mui/icons-material";
-import { useSnackbar } from "notistack"; // ✅ thêm import notistack
+import { useSnackbar } from "notistack";
 import { updateLibrarian } from "../../services/librarianService";
 
 // Chuẩn hóa giới tính
@@ -32,7 +32,7 @@ function normalizeDob(dob) {
 }
 
 export default function EditLibrarian({ librarian, onSuccess, onCancel, open = true }) {
-  const { enqueueSnackbar } = useSnackbar(); // ✅ hook để hiển thị thông báo
+  const { enqueueSnackbar } = useSnackbar();
 
   const [form, setForm] = useState({
     fullName: librarian?.fullName || "",
@@ -41,8 +41,8 @@ export default function EditLibrarian({ librarian, onSuccess, onCancel, open = t
     phoneNumber: librarian?.phoneNumber || "",
     cccd: librarian?.cccd || "",
     address: librarian?.address || "",
-    basicSalary: librarian?.basicSalary || "",
-    salaryCoefficient: librarian?.salaryCoefficient || "",
+    basicSalary: librarian?.basicSalary || "", // Vẫn giữ để gửi data
+    salaryCoefficient: librarian?.salaryCoefficient || "", // Vẫn giữ để gửi data
     note: librarian?.note || "",
   });
 
@@ -85,15 +85,15 @@ export default function EditLibrarian({ librarian, onSuccess, onCancel, open = t
       const res = await updateLibrarian(librarian.librarianId, payload, token);
 
       if (res?.success) {
-        enqueueSnackbar("✅ Cập nhật thông tin thủ thư thành công!", { variant: "success" }); // ✅ thông báo thành công
+        enqueueSnackbar("✅ Cập nhật thông tin thủ thư thành công!", { variant: "success" });
         onSuccess?.();
       } else {
-        enqueueSnackbar(res?.message || "Không thể cập nhật thủ thư.", { variant: "error" }); // ✅ thông báo lỗi
+        enqueueSnackbar(res?.message || "Không thể cập nhật thủ thư.", { variant: "error" });
         setError(res?.message || "Không thể cập nhật thủ thư.");
       }
     } catch (err) {
       const msg = err?.response?.data?.message || err?.message || "Lỗi khi cập nhật.";
-      enqueueSnackbar(`❌ ${msg}`, { variant: "error" }); // ✅ thông báo lỗi
+      enqueueSnackbar(`❌ ${msg}`, { variant: "error" });
       setError(msg);
     } finally {
       setLoading(false);
@@ -183,16 +183,13 @@ export default function EditLibrarian({ librarian, onSuccess, onCancel, open = t
                   display: "flex",
                   alignItems: "center",
                   "&::before": {
-                    content: '"1"',
+                    content: '"📝"',
                     display: "inline-flex",
                     alignItems: "center",
                     justifyContent: "center",
-                    width: 24,
-                    height: 24,
-                    backgroundColor: "#667EEA",
-                    color: "white",
-                    borderRadius: "50%",
-                    fontSize: "0.875rem",
+                    width: 32,
+                    height: 32,
+                    fontSize: "1.2rem",
                     mr: 2,
                   },
                 }}
@@ -262,29 +259,7 @@ export default function EditLibrarian({ librarian, onSuccess, onCancel, open = t
                   onChange={handleChange}
                   disabled={loading}
                   placeholder="Nhập số căn cước công dân"
-                  sx={fieldSx}
-                />
-
-                <TextField
-                  name="basicSalary"
-                  type="number"
-                  label="Lương cơ bản"
-                  value={form.basicSalary}
-                  onChange={handleChange}
-                  disabled={loading}
-                  placeholder="Nhập lương cơ bản"
-                  sx={fieldSx}
-                />
-
-                <TextField
-                  name="salaryCoefficient"
-                  type="number"
-                  label="Hệ số lương"
-                  value={form.salaryCoefficient}
-                  onChange={handleChange}
-                  disabled={loading}
-                  placeholder="Nhập hệ số lương"
-                  sx={fieldSx}
+                  sx={{ ...fieldSx, gridColumn: { xs: "auto", md: "1 / span 2" } }}
                 />
 
                 <TextField
