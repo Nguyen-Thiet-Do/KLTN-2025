@@ -25,7 +25,7 @@ import {
   Edit,
   CardMembership
 } from "@mui/icons-material";
-import QRPaymentModal from "../admin/QRPaymentModal";
+import QRPaymentModal from "../Readers/QRPaymentModal";
 import { completeRegistration } from "../../services/authService";
 
 export default function ProfilePage() {
@@ -152,26 +152,19 @@ export default function ProfilePage() {
     }
   };
 
-  // ✅ Xử lý sau khi thanh toán thành công
-  const handlePaymentSuccess = async () => {
-    console.log("✅ Thanh toán thành công - Đang cập nhật thông tin...");
+  // ✅ Xử lý sau khi thanh toán thành công (giống admin)
+  const handlePaymentSuccess = () => {
+    console.log("✅ Thanh toán thành công - Đang reload trang...");
     
-    try {
-      // Đóng modal
-      setPaymentModalOpen(false);
-      setCurrentPaymentData(null);
-      
-      // Hiển thị thông báo trước
-      alert("🎉 Thẻ thành viên đã được kích hoạt thành công!");
-      
-      // ✅ Force reload trang để cập nhật user data
-      window.location.reload();
-      
-    } catch (err) {
-      console.error("Lỗi khi refresh user:", err);
-      // Fallback: reload trang nếu refreshUser fail
-      window.location.reload();
-    }
+    // Đóng modal
+    setPaymentModalOpen(false);
+    setCurrentPaymentData(null);
+    
+    // Hiển thị thông báo
+    alert("🎉 Thẻ thành viên đã được kích hoạt thành công!");
+    
+    // ✅ Reload trang để cập nhật user data (đơn giản và chắc chắn)
+    window.location.reload();
   };
 
   if (loading || authLoading) {
