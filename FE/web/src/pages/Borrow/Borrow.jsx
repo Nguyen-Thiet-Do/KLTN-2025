@@ -923,6 +923,7 @@ export default function Borrow() {
       <ReturnSingleDialog
         open={openReturnSingle}
         onClose={() => handleCloseSingleReturn()}
+        slip={selectedDetailForReturn?.slip}
         loanDetail={selectedDetailForReturn?.detail}
         onReturned={() => {
           handleCloseSingleReturn();

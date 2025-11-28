@@ -1,5 +1,5 @@
 // src/components/Borrow/ReturnBulkDialog.jsx
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState, useRef } from "react";
 import {
   Dialog,
   DialogTitle,
@@ -27,6 +27,7 @@ import {
   confirmBulkReturnAfterPayment,
 } from "../../services/loanSlips";
 import { useSnackbar } from "notistack";
+import QRCode from "react-qr-code";
 
 const nf = new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 0 });
 
@@ -84,6 +85,10 @@ export default function ReturnBulkDialog({ open, onClose, slip, onReturned }) {
   const [pendingPayment, setPendingPayment] = useState(null); // { paymentId, orderCode, amount, checkoutUrl, qrCode }
   const [showQr, setShowQr] = useState(false);
 
+  // auto preview state + debounce
+  const [autoPreviewing, setAutoPreviewing] = useState(false);
+  const previewTimeoutRef = useRef(null);
+
   useEffect(() => {
     if (open && slip) {
       setReturnDate(parseDateOnly(new Date().toISOString()));
@@ -123,11 +128,12 @@ export default function ReturnBulkDialog({ open, onClose, slip, onReturned }) {
     setItems((prev) =>
       prev.map((it) => (it.loanDetailId === id ? { ...it, ...patch } : it))
     );
-    setPreview(null); // thay đổi dữ liệu -> phải tính lại preview
   }
 
-  // ---------- GỌI API PREVIEW ----------
-  async function handlePreview() {
+  // ---------- GỌI API PREVIEW (dùng chung cho auto + manual) ----------
+  async function doPreview(options = { showSnackbar: true }) {
+    const { showSnackbar } = options;
+
     if (!slip) return;
     if (!returnDate) {
       setErrorMsg("Chọn ngày trả");
@@ -149,22 +155,32 @@ export default function ReturnBulkDialog({ open, onClose, slip, onReturned }) {
       })),
     };
 
-    setLoading(true);
+    if (showSnackbar) {
+      setLoading(true);
+    } else {
+      setAutoPreviewing(true);
+    }
+
     setErrorMsg(null);
     try {
       const res = await previewBulkReturnFines(payload);
       if (!res?.success) {
         const msg = res?.message || "Preview tiền phạt thất bại";
         setErrorMsg(msg);
-        enqueueSnackbar(msg, { variant: "error" });
+        if (showSnackbar) {
+          enqueueSnackbar(msg, { variant: "error" });
+        }
         return;
       }
 
       const out = res.data || res; // controller trả { success, data }
       setPreview(out);
-      enqueueSnackbar("Đã tính phí preview thành công.", {
-        variant: "info",
-      });
+
+      if (showSnackbar) {
+        enqueueSnackbar("Đã tính phí preview thành công.", {
+          variant: "info",
+        });
+      }
     } catch (err) {
       console.error("previewBulkReturnFines error:", err);
       const msg =
@@ -172,10 +188,49 @@ export default function ReturnBulkDialog({ open, onClose, slip, onReturned }) {
         err?.message ||
         "Lỗi khi tính tiền preview";
       setErrorMsg(msg);
-      enqueueSnackbar(msg, { variant: "error" });
+      if (showSnackbar) {
+        enqueueSnackbar(msg, { variant: "error" });
+      }
     } finally {
-      setLoading(false);
+      if (showSnackbar) {
+        setLoading(false);
+      } else {
+        setAutoPreviewing(false);
+      }
     }
+  }
+
+  // ---------- AUTO PREVIEW chỉ khi toggle checkbox "Mất sách" ----------
+  useEffect(() => {
+    if (!open) return;
+    if (!slip) return;
+    if (!returnDate) return;
+    if (!items.length) return;
+
+    // Chỉ tự động preview khi thay đổi isLost
+    // Không tự động khi thay đổi conditionReturn, note, hoặc returnDate
+    const isLostStates = items.map(it => it.isLost).join(',');
+
+    // debounce 500ms
+    if (previewTimeoutRef.current) {
+      clearTimeout(previewTimeoutRef.current);
+    }
+
+    previewTimeoutRef.current = setTimeout(() => {
+      doPreview({ showSnackbar: false });
+    }, 500);
+
+    return () => {
+      if (previewTimeoutRef.current) {
+        clearTimeout(previewTimeoutRef.current);
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items.map(it => it.isLost).join(','), slip, open]);
+
+  // ---------- GỌI MANUAL PREVIEW (nếu vẫn muốn dùng nút) ----------
+  async function handlePreview() {
+    await doPreview({ showSnackbar: true });
   }
 
   // ---------- XÁC NHẬN TRẢ (BƯỚC 1: INIT + tạo QR nếu cần) ----------
@@ -190,7 +245,9 @@ export default function ReturnBulkDialog({ open, onClose, slip, onReturned }) {
       return;
     }
     if (!preview) {
-      setErrorMsg("Vui lòng bấm 'Tính phí (preview)' trước khi xác nhận.");
+      setErrorMsg(
+        "Chưa có dữ liệu phí preview. Vui lòng để hệ thống tính phí xong trước khi xác nhận."
+      );
       return;
     }
 
@@ -293,7 +350,8 @@ export default function ReturnBulkDialog({ open, onClose, slip, onReturned }) {
       const res = await confirmBulkReturnAfterPayment(payload);
       if (!res?.success) {
         const msg =
-          res?.message || "Xác nhận sau khi thanh toán thất bại hoặc chưa thanh toán.";
+          res?.message ||
+          "Xác nhận sau khi thanh toán thất bại hoặc chưa thanh toán.";
         enqueueSnackbar(msg, { variant: "error" });
         return;
       }
@@ -369,12 +427,9 @@ export default function ReturnBulkDialog({ open, onClose, slip, onReturned }) {
                 label="Ngày trả"
                 type="date"
                 value={returnDate}
-                onChange={(e) => {
-                  setReturnDate(e.target.value);
-                  setPreview(null);
-                }}
                 InputLabelProps={{ shrink: true }}
                 sx={{ minWidth: 180 }}
+                disabled
               />
               <Typography variant="body2" color="text.secondary">
                 Độc giả: {slip.Reader?.fullName || slip.readerId}
@@ -404,9 +459,8 @@ export default function ReturnBulkDialog({ open, onClose, slip, onReturned }) {
               <TableHead>
                 <TableRow>
                   <TableCell>#Detail</TableCell>
+                  <TableCell>Tài liệu</TableCell>
                   <TableCell>Mã vạch</TableCell>
-                  <TableCell>Tựa</TableCell>
-                  <TableCell>Tiền cọc</TableCell>
                   <TableCell>Tình trạng mượn</TableCell>
                   <TableCell>Tình trạng trả</TableCell>
                   <TableCell>Mất sách</TableCell>
@@ -416,59 +470,87 @@ export default function ReturnBulkDialog({ open, onClose, slip, onReturned }) {
               <TableBody>
                 {items.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={8} align="center">
+                    <TableCell colSpan={7} align="center">
                       Không có item BORROWED để trả
                     </TableCell>
                   </TableRow>
                 ) : (
-                  items.map((it) => (
-                    <TableRow key={it.loanDetailId}>
-                      <TableCell>{it.loanDetailId}</TableCell>
-                      <TableCell sx={{ fontFamily: "monospace" }}>
-                        {it.barCode || "-"}
-                      </TableCell>
-                      <TableCell>{/* có thể hiển thị title nếu cần */}</TableCell>
-                      <TableCell>{nf.format(it.depositAmount)}₫</TableCell>
-                      <TableCell>{it.borrowCond ?? "-"}</TableCell>
-                      <TableCell>
-                        <TextField
-                          type="number"
-                          value={it.conditionReturn}
-                          onChange={(e) =>
-                            updateItem(it.loanDetailId, {
-                              conditionReturn: Number(e.target.value),
-                            })
-                          }
-                          size="small"
-                          sx={{ width: 120 }}
-                          disabled={it.isLost}
-                          inputProps={{ min: 0, max: 100 }}
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <FormControlLabel
-                          control={
-                            <Checkbox
-                              checked={it.isLost}
-                              onChange={(e) =>
-                                handleLostToggle(it, e.target.checked)
+                  items.map((it) => {
+                    const detail = (slip.details || []).find(d => d.loanDetailId === it.loanDetailId);
+                    const copy = detail?.DocumentCopy;
+                    const doc = copy?.Document;
+                    const title = doc?.title || "-";
+                    const cover = doc?.coverPhoto || null;
+
+                    return (
+                      <TableRow key={it.loanDetailId}>
+                        <TableCell>{it.loanDetailId}</TableCell>
+                        <TableCell>
+                          <Stack direction="row" spacing={1.5} alignItems="center">
+                            {cover && (
+                              <img
+                                src={cover}
+                                alt={title}
+                                loading="lazy"
+                                style={{ width: 36, height: 48, objectFit: "cover", borderRadius: 4, display: "block", flexShrink: 0 }}
+                              />
+                            )}
+                            <Typography variant="body2" fontWeight={600} sx={{ maxWidth: 300 }}>
+                              {title}
+                            </Typography>
+                          </Stack>
+                        </TableCell>
+                        <TableCell sx={{ fontFamily: "monospace" }}>
+                          {it.barCode || "-"}
+                        </TableCell>
+                        <TableCell>{it.borrowCond ?? "-"}</TableCell>
+                        <TableCell>
+                          <TextField
+                            type="number"
+                            value={it.conditionReturn}
+                            onChange={(e) =>
+                              updateItem(it.loanDetailId, {
+                                conditionReturn: Number(e.target.value),
+                              })
+                            }
+                            onBlur={() => doPreview({ showSnackbar: false })}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                doPreview({ showSnackbar: false });
                               }
-                            />
-                          }
-                          label="Mất"
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <TextField
-                          value={it.note}
-                          onChange={(e) =>
-                            updateItem(it.loanDetailId, { note: e.target.value })
-                          }
-                          size="small"
-                        />
-                      </TableCell>
-                    </TableRow>
-                  ))
+                            }}
+                            size="small"
+                            sx={{ width: 120 }}
+                            disabled={it.isLost}
+                            inputProps={{ min: 0, max: 100 }}
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <FormControlLabel
+                            control={
+                              <Checkbox
+                                checked={it.isLost}
+                                onChange={(e) =>
+                                  handleLostToggle(it, e.target.checked)
+                                }
+                              />
+                            }
+                            label="Mất"
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <TextField
+                            value={it.note}
+                            onChange={(e) =>
+                              updateItem(it.loanDetailId, { note: e.target.value })
+                            }
+                            size="small"
+                          />
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })
                 )}
               </TableBody>
             </Table>
@@ -477,13 +559,17 @@ export default function ReturnBulkDialog({ open, onClose, slip, onReturned }) {
 
             <Box>
               <Typography variant="subtitle2" gutterBottom>
-                Tóm tắt phí (từ API preview)
+                Tóm tắt phí
               </Typography>
 
-              {!preview && (
+              {!preview && !autoPreviewing && (
                 <Typography variant="body2" color="text.secondary">
-                  Chưa tính phí. Nhấn nút <b>"Tính phí (preview)"</b> để xem tổng
-                  tiền phạt và cách trừ vào thẻ.
+                </Typography>
+              )}
+
+              {autoPreviewing && (
+                <Typography variant="caption" color="text.secondary">
+                  Đang cập nhật phí...
                 </Typography>
               )}
 
@@ -536,6 +622,8 @@ export default function ReturnBulkDialog({ open, onClose, slip, onReturned }) {
         <Button onClick={() => onClose?.()} disabled={loading}>
           Huỷ
         </Button>
+
+        {/* Nút này giờ chỉ là tùy chọn, không bắt buộc dùng nữa */}
         <Button
           variant="outlined"
           onClick={handlePreview}
@@ -543,6 +631,7 @@ export default function ReturnBulkDialog({ open, onClose, slip, onReturned }) {
         >
           Tính phí (preview)
         </Button>
+
         <Button
           variant="contained"
           onClick={handleConfirm}
@@ -569,19 +658,19 @@ export default function ReturnBulkDialog({ open, onClose, slip, onReturned }) {
                 {slip?.loanSlipId}.
               </Typography>
 
-              {pendingPayment.qrCode && (
+              {pendingPayment?.qrCode && (
                 <Box
-                  component="img"
-                  src={pendingPayment.qrCode}
-                  alt="QR PayOS"
                   sx={{
-                    width: 260,
-                    height: 260,
-                    objectFit: "contain",
+                    p: 2,
                     borderRadius: 2,
                     border: "1px solid #E2E8F0",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
                   }}
-                />
+                >
+                  <QRCode value={pendingPayment.qrCode} size={220} />
+                </Box>
               )}
 
               {pendingPayment.checkoutUrl && (
