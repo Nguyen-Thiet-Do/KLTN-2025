@@ -1,4 +1,5 @@
 const { Librarian, Account } = require("../model");
+const { Op } = require("sequelize");
 const bcrypt = require("bcrypt");
 
 // ============================================================
@@ -69,9 +70,17 @@ const createLibrarian = async (data) => {
   const transaction = await Librarian.sequelize.transaction();
   try {
     // 🔍 Kiểm tra email trùng
-    const existing = await Account.findOne({ where: { email } });
-    if (existing) {
+    const existingEmail = await Account.findOne({ where: { email } });
+    if (existingEmail) {
       throw new Error("Email đã tồn tại trong hệ thống.");
+    }
+
+    // 🔍 Kiểm tra số điện thoại trùng (nếu có nhập)
+    if (phoneNumber && phoneNumber.trim() !== "") {
+      const existingPhone = await Account.findOne({ where: { phoneNumber } });
+      if (existingPhone) {
+        throw new Error("Số điện thoại đã tồn tại trong hệ thống.");
+      }
     }
 
     const passwordHash = await bcrypt.hash(password, 10);
@@ -102,6 +111,7 @@ const createLibrarian = async (data) => {
 
     await transaction.commit();
     return {
+      success: true, // ← Thêm field này
       librarianId: librarian.librarianId,
       accountId: account.accountId,
       fullName,
@@ -113,7 +123,9 @@ const createLibrarian = async (data) => {
     throw err;
   }
 };
-
+// ============================================================
+// 🔹 CẬP NHẬT THỦ THƯ
+// ============================================================
 // ============================================================
 // 🔹 CẬP NHẬT THỦ THƯ
 // ============================================================
@@ -130,9 +142,41 @@ const updateLibrarian = async (id, data) => {
 
   const transaction = await Librarian.sequelize.transaction();
   try {
-    const librarian = await Librarian.findByPk(id);
-    if (!librarian) throw new Error("Không tìm thấy thủ thư.");
+    const librarian = await Librarian.findByPk(id, { 
+      include: [Account], 
+      transaction 
+    });
+    
+    if (!librarian) {
+      await transaction.rollback();
+      return { success: false, message: "Không tìm thấy thủ thư" };
+    }
 
+    // ✅ Kiểm tra số điện thoại trùng lặp (nếu thay đổi)
+    if (phoneNumber && phoneNumber.trim() !== "") {
+      const currentPhone = librarian.Account?.phoneNumber || "";
+
+      if (phoneNumber !== currentPhone) {
+        const { Op } = require("sequelize");
+        const existingPhone = await Account.findOne({
+          where: { 
+            phoneNumber, 
+            accountId: { [Op.ne]: librarian.accountId } 
+          },
+          transaction,
+        });
+
+        if (existingPhone) {
+          await transaction.rollback();
+          return { 
+            success: false, 
+            message: "Số điện thoại đã tồn tại trong hệ thống" 
+          };
+        }
+      }
+    }
+
+    // Cập nhật thông tin Librarian
     await Librarian.update(
       {
         fullName,
@@ -145,6 +189,7 @@ const updateLibrarian = async (id, data) => {
       { where: { librarianId: id }, transaction }
     );
 
+    // Cập nhật Account (chỉ phoneNumber)
     if (phoneNumber) {
       await Account.update(
         { phoneNumber },
@@ -153,14 +198,13 @@ const updateLibrarian = async (id, data) => {
     }
 
     await transaction.commit();
-    return { success: true, message: "Cập nhật thành công." };
+    return { success: true, message: "Cập nhật thủ thư thành công" };
   } catch (err) {
     await transaction.rollback();
     console.error("❌ Lỗi updateLibrarian:", err);
-    return { success: false, message: err.message };
+    return { success: false, message: err.message || "Có lỗi xảy ra khi cập nhật" };
   }
 };
-
 // ============================================================
 // 🔐 ĐẶT LẠI MẬT KHẨU
 // ============================================================

@@ -34,14 +34,29 @@ const getReaderByAccountId = async (req, res) => {
 const createReader = async (req, res) => {
   try {
     if (!isStaff(req)) {
-      return res.status(403).json({ success: false, message: "Chỉ Admin/Thủ thư được thêm độc giả" });
+      return res.status(403).json({ 
+        success: false, 
+        message: "Chỉ Admin/Thủ thư được thêm độc giả" 
+      });
     }
+    
     const data = req.body;
     const newReader = await readerService.createReader(data);
-    res.json({ success: true, message: "Thêm độc giả thành công", reader: newReader });
+    
+    // ✅ Trả về success: true khi thành công
+    return res.json({ 
+      success: true, 
+      message: "Thêm độc giả thành công", 
+      reader: newReader 
+    });
   } catch (err) {
     console.error("❌ Lỗi khi thêm độc giả:", err);
-    res.status(500).json({ success: false, message: err.message });
+    
+    // ✅ Trả về success: false khi có lỗi
+    return res.status(400).json({ 
+      success: false, 
+      message: err.message || "Không thể thêm độc giả" 
+    });
   }
 };
 
@@ -49,17 +64,29 @@ const createReader = async (req, res) => {
 const updateReader = async (req, res) => {
   try {
     if (!isStaff(req)) {
-      return res.status(403).json({ success: false, message: "Chỉ Admin/Thủ thư được cập nhật độc giả" });
+      return res.status(403).json({ 
+        success: false, 
+        message: "Chỉ Admin/Thủ thư được cập nhật độc giả" 
+      });
     }
+    
     const { id } = req.params;
     const result = await readerService.updateReader(id, req.body);
-    res.json({ success: true, message: "Cập nhật độc giả thành công", result });
+    
+    // ✅ QUAN TRỌNG: Kiểm tra result.success
+    if (!result.success) {
+      return res.status(400).json(result); // ← Trả về HTTP 400 khi có lỗi
+    }
+    
+    return res.json(result); // ← HTTP 200 khi thành công
   } catch (err) {
     console.error("❌ Lỗi khi cập nhật độc giả:", err);
-    res.status(500).json({ success: false, message: err.message });
+    return res.status(500).json({ 
+      success: false, 
+      message: err.message 
+    });
   }
 };
-
 // ✅ Đặt lại mật khẩu độc giả (Admin + Thủ thư)
 const resetReaderPassword = async (req, res) => {
   try {

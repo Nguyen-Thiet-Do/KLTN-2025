@@ -25,26 +25,48 @@ const getCurrentLibrarian = async (req, res) => {
 };
 
 // ✅ Thêm thủ thư
+
 const createLibrarian = async (req, res) => {
   try {
     const data = req.body;
     const result = await librarianService.createLibrarian(data);
-    res.json({ success: true, message: "Thêm thủ thư thành công", librarian: result });
+    
+    // ✅ Trả về response với success: true
+    return res.json({ 
+      success: true, 
+      message: "Thêm thủ thư thành công", 
+      librarian: result 
+    });
   } catch (err) {
     console.error("❌ Lỗi khi thêm thủ thư:", err);
-    res.status(500).json({ success: false, message: err.message });
+    
+    // ✅ Trả về lỗi với success: false
+    return res.status(400).json({ 
+      success: false, 
+      message: err.message || "Không thể thêm thủ thư" 
+    });
   }
 };
 
 // ✅ Cập nhật thủ thư
+
 const updateLibrarian = async (req, res) => {
   try {
     const { id } = req.params;
     const result = await librarianService.updateLibrarian(id, req.body);
-    res.json({ success: true, message: "Cập nhật thủ thư thành công", result });
+    
+    // ✅ Kiểm tra result.success và trả về status code phù hợp
+    if (!result.success) {
+      return res.status(400).json(result); // ← Trả về HTTP 400 khi có lỗi
+    }
+    
+    return res.json(result); // ← HTTP 200 khi thành công
   } catch (err) {
     console.error("❌ Lỗi khi cập nhật thủ thư:", err);
-    res.status(500).json({ success: false, message: err.message });
+    return res.status(500).json({ 
+      success: false, 
+      message: err.message 
+    });
   }
 };
 

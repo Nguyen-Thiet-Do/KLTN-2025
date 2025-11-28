@@ -170,6 +170,14 @@ const createReader = async (data) => {
       throw new Error("Email đã tồn tại trong hệ thống");
     }
 
+    // 🔍 Kiểm tra số điện thoại trùng trong bảng accounts
+    if (phoneNumber) {
+      const existingPhone = await Account.findOne({ where: { phoneNumber } });
+      if (existingPhone) {
+        throw new Error("Số điện thoại đã tồn tại trong hệ thống");
+      }
+    }
+
     const passwordHash = await bcrypt.hash(password, 10);
 
     // 1️⃣ Tạo tài khoản
@@ -212,6 +220,7 @@ const createReader = async (data) => {
   }
 };
 
+
 // ============================================================
 // 🔹 CẬP NHẬT THÔNG TIN ĐỘC GIẢ
 // ============================================================
@@ -221,19 +230,51 @@ const updateReader = async (id, data) => {
   const transaction = await Reader.sequelize.transaction();
   try {
     const reader = await Reader.findByPk(id, { include: [Account], transaction });
-    if (!reader) throw new Error("Không tìm thấy độc giả");
-
-    await reader.update({ fullName, gender, dateOfBirth, address, cccd }, { transaction });
-
-    const updates = {};
-
-    // 🔍 Kiểm tra nếu email mới trùng với email của người khác
-    if (email && email !== reader.Account.email) {
-      const existing = await Account.findOne({ where: { email } });
-      if (existing) throw new Error("Email này đã được sử dụng bởi tài khoản khác");
-      updates.email = email;
+    if (!reader) {
+      await transaction.rollback();
+      return { success: false, message: "Không tìm thấy độc giả" };
     }
 
+    // ✅ Kiểm tra số điện thoại trùng lặp (nếu thay đổi)
+    if (phoneNumber && phoneNumber.trim() !== "") {
+      const currentPhone = reader.Account?.phoneNumber || "";
+
+      if (phoneNumber !== currentPhone) {
+        const existingPhone = await Account.findOne({
+          where: { phoneNumber, accountId: { [Op.ne]: reader.accountId } },
+          transaction,
+        });
+
+        if (existingPhone) {
+          await transaction.rollback();
+          return { success: false, message: "Số điện thoại đã tồn tại trong hệ thống" };
+        }
+      }
+    }
+
+    // ✅ Kiểm tra email trùng lặp (nếu thay đổi)
+    if (email && email.trim() !== "") {
+      const currentEmail = reader.Account?.email || "";
+
+      if (email !== currentEmail) {
+        const existingEmail = await Account.findOne({
+          where: { email, accountId: { [Op.ne]: reader.accountId } },
+          transaction,
+        });
+
+        if (existingEmail) {
+          await transaction.rollback();
+          return { success: false, message: "Email đã được sử dụng bởi tài khoản khác" };
+        }
+      }
+    }
+
+    // Cập nhật thông tin Reader
+    await reader.update({ fullName, gender, dateOfBirth, address, cccd }, { transaction });
+
+    // Cập nhật Account
+    const updates = {};
+    if (email && email !== reader.Account.email) updates.email = email;
     if (phoneNumber) updates.phoneNumber = phoneNumber;
     if (password && password.trim() !== "") {
       updates.passwordHash = await bcrypt.hash(password, 10);
@@ -248,9 +289,10 @@ const updateReader = async (id, data) => {
   } catch (error) {
     await transaction.rollback();
     console.error("❌ Lỗi updateReader:", error);
-    return { success: false, message: error.message };
+    return { success: false, message: error.message || "Có lỗi xảy ra khi cập nhật" };
   }
 };
+
 
 // ============================================================
 // 🔐 ĐẶT LẠI MẬT KHẨU
