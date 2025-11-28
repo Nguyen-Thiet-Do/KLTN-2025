@@ -7,16 +7,32 @@ export const getReaders = async () => {
 };
 
 // ➕ Thêm mới độc giả
-export const createReader = async (token, data) => {
-  const res = await api.post("/reader", data, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
-  });
-  return res.data;
-};
 
+export const createReader = async (token, data) => {
+  try {
+    const res = await api.post("/reader", data, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+    });
+    return res.data;
+  } catch (error) {
+    console.error("❌ Error creating reader:", error);
+    
+    // ✅ Xử lý lỗi đúng cách
+    if (error.response?.data) {
+      // API trả về lỗi rõ ràng
+      return error.response.data;
+    }
+    
+    // Lỗi network hoặc khác
+    return {
+      success: false,
+      message: error.message || "Không thể kết nối đến máy chủ"
+    };
+  }
+};
 // 🗑️ Xóa độc giả
 export const deleteReader = async (id) => {
   const res = await api.delete(`/reader/${id}`);
@@ -24,9 +40,38 @@ export const deleteReader = async (id) => {
 };
 
 // ✏️ Cập nhật thông tin độc giả
-export const updateReader = async (id, data) => {
-  const res = await api.put(`/reader/${id}`, data);
-  return res.data;
+
+export const updateReader = async (readerId, data, token) => {
+  try {
+    const response = await api.put(
+      `/reader/${readerId}`,  // ← Sửa từ /readers thành /reader
+      data,
+      {
+        headers: { 
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+    
+    // ✅ Trả về đúng data từ API
+    return response.data;
+    
+  } catch (error) {
+    console.error("❌ Error updating reader:", error);
+    
+    // ✅ XỬ LÝ LỖI ĐÚNG CÁCH
+    if (error.response?.data) {
+      // API trả về lỗi rõ ràng (bao gồm cả lỗi validation như số điện thoại trùng)
+      return error.response.data;
+    }
+    
+    // Lỗi network hoặc khác
+    return {
+      success: false,
+      message: error.message || "Không thể kết nối đến máy chủ"
+    };
+  }
 };
 
 // 🔍 Lấy độc giả theo ID

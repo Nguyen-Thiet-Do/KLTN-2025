@@ -44,55 +44,119 @@ export default function AddLibrarian({ onSuccess, onCancel, open = true }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  const handleChange = (e) => {
-    setForm({ ...form, [e.target.name]: e.target.value });
-    if (error) setError(null);
-  };
+  // ✅ Chỉ cho phép nhập số cho phoneNumber và cccd
+const handleChange = (e) => {
+  const { name, value } = e.target;
+  
+  // Chỉ cho phép nhập số cho phoneNumber và cccd
+  if (name === "phoneNumber" || name === "cccd") {
+    // Loại bỏ tất cả ký tự không phải số
+    const numericValue = value.replace(/\D/g, "");
+    setForm((prev) => ({ ...prev, [name]: numericValue }));
+  } else {
+    setForm((prev) => ({ ...prev, [name]: value }));
+  }
+  
+  if (error) setError(null);
+};
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setLoading(true);
-    setError(null);
-    const phone = form.phoneNumber.trim();
-const cccd = form.cccd.trim();
+const handleSubmit = async (e) => {
+  e.preventDefault();
+  
+  const phone = form.phoneNumber.trim();
+  const cccd = form.cccd.trim();
 
-if (phone && !/^[0-9]{10}$/.test(phone)) {
-  setLoading(false);
-  const msg = "Số điện thoại phải có đúng 10 số.";
-  setError(msg);
-  enqueueSnackbar(msg, { variant: "error" });
-  return;
-}
+  // ✅ Validate số điện thoại (10 số)
+  if (phone && !/^[0-9]{10}$/.test(phone)) {
+    const msg = "Số điện thoại phải có đúng 10 số.";
+    setError(msg);
+    enqueueSnackbar(msg, { variant: "error" });
+    return;
+  }
 
-if (cccd && !/^[0-9]{12}$/.test(cccd)) {
-  setLoading(false);
-  const msg = "Số CCCD phải có đúng 12 số.";
-  setError(msg);
-  enqueueSnackbar(msg, { variant: "error" });
-  return;
-}
+  // ✅ Validate số CCCD (12 số)
+  if (cccd && !/^[0-9]{12}$/.test(cccd)) {
+    const msg = "Số CCCD phải có đúng 12 số.";
+    setError(msg);
+    enqueueSnackbar(msg, { variant: "error" });
+    return;
+  }
 
-    try {
-      const token = sessionStorage.getItem("accessToken");
-      const res = await createLibrarian(token, form);
+  setLoading(true);
+  setError(null);
 
-      if (res.success) {
-        enqueueSnackbar("✅ Thêm thủ thư mới thành công!", { variant: "success" });
-        onSuccess();
-      } else {
-        enqueueSnackbar(res.message || "Không thể thêm thủ thư.", { variant: "error" });
-        setError(res.message || "Thêm thất bại");
-      }
-    } catch (err) {
-      console.error(err);
-      const msg = err.response?.data?.message || "Lỗi khi thêm thủ thư";
-      enqueueSnackbar(`❌ ${msg}`, { variant: "error" });
-      setError(msg);
-    } finally {
-      setLoading(false);
+  try {
+    const token = sessionStorage.getItem("accessToken");
+    
+    if (!token) {
+      enqueueSnackbar("⚠️ Phiên đăng nhập hết hạn. Vui lòng đăng nhập lại.", {
+        variant: "warning",
+      });
+      return;
     }
-  };
 
+    const res = await createLibrarian(token, form);
+
+    console.log("📥 Response từ API:", res);
+    console.log("📥 res.success:", res.success);
+    console.log("📥 res.message:", res.message);
+
+    // ✅ Kiểm tra res.success một cách rõ ràng
+    if (res.success === true) {
+      enqueueSnackbar("✅ Thêm thủ thư mới thành công!", { 
+        variant: "success" 
+      });
+      onSuccess();
+    } else {
+      // ✅ Xử lý các loại lỗi cụ thể
+      const errorMsg = res.message || "Không thể thêm thủ thư.";
+      
+      console.log("❌ Phát hiện lỗi:", errorMsg);
+      
+      if (errorMsg.toLowerCase().includes("số điện thoại") || 
+          errorMsg.toLowerCase().includes("phone") ||
+          errorMsg.toLowerCase().includes("tồn tại")) {
+        setError("Số điện thoại đã tồn tại trong hệ thống.");
+        enqueueSnackbar("❌ Số điện thoại đã tồn tại trong hệ thống.", { 
+          variant: "error" 
+        });
+      } else if (errorMsg.toLowerCase().includes("email")) {
+        setError("Email đã tồn tại trong hệ thống.");
+        enqueueSnackbar("❌ Email đã tồn tại trong hệ thống.", { 
+          variant: "error" 
+        });
+      } else {
+        setError(errorMsg);
+        enqueueSnackbar(`❌ ${errorMsg}`, { variant: "error" });
+      }
+    }
+  } catch (err) {
+    console.error("❌ Lỗi khi thêm thủ thư:", err);
+    
+    // Xử lý lỗi từ response
+    const errorMessage = err.response?.data?.message || 
+                        err.message || 
+                        "Lỗi khi kết nối đến máy chủ!";
+    
+    if (errorMessage.toLowerCase().includes("số điện thoại") || 
+        errorMessage.toLowerCase().includes("phone")) {
+      setError("Số điện thoại đã tồn tại trong hệ thống.");
+      enqueueSnackbar("❌ Số điện thoại đã tồn tại trong hệ thống.", { 
+        variant: "error" 
+      });
+    } else if (errorMessage.toLowerCase().includes("email")) {
+      setError("Email đã tồn tại trong hệ thống.");
+      enqueueSnackbar("❌ Email đã tồn tại trong hệ thống.", { 
+        variant: "error" 
+      });
+    } else {
+      setError(errorMessage);
+      enqueueSnackbar(`⚠️ ${errorMessage}`, { variant: "error" });
+    }
+  } finally {
+    setLoading(false);
+  }
+};
   const handleClose = () => {
     if (!loading) onCancel();
   };

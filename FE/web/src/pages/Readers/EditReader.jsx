@@ -76,76 +76,109 @@ export default function EditReader({ open = true, reader = {}, onSuccess, onCanc
     return null;
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    const msg = validate();
-    if (msg) {
-      setError(msg);
-      enqueueSnackbar(msg, { variant: "warning" });
-      return;
-    }
-const phone = form.phoneNumber.trim();
+const handleSubmit = async (e) => {
+  e.preventDefault();
+  
+  const msg = validate();
+  if (msg) {
+    setError(msg);
+    enqueueSnackbar(msg, { variant: "warning" });
+    return;
+  }
+
+  const phone = form.phoneNumber.trim();
   const cccd = form.cccd.trim();
 
+  // Kiểm tra số điện thoại hợp lệ
   if (phone && !/^[0-9]{10}$/.test(phone)) {
-    setLoading(false);
     const msg = "Số điện thoại phải có đúng 10 số.";
     setError(msg);
     enqueueSnackbar(msg, { variant: "error" });
     return;
   }
 
-  // Validate CCCD (must be 12 digits)
+  // Kiểm tra số CCCD hợp lệ
   if (cccd && !/^[0-9]{12}$/.test(cccd)) {
-    setLoading(false);
     const msg = "Số CCCD phải có đúng 12 số.";
     setError(msg);
     enqueueSnackbar(msg, { variant: "error" });
     return;
   }
 
-    setLoading(true);
-    setError(null);
+  setLoading(true);
+  setError(null);
 
-    try {
-      const token = sessionStorage.getItem("accessToken");
-      if (!token) {
-        enqueueSnackbar("⚠️ Phiên đăng nhập hết hạn. Vui lòng đăng nhập lại.", {
-          variant: "warning",
-        });
-        setLoading(false);
-        return;
-      }
-
-      const payload = {
-        email: form.email,
-        password: form.password || undefined, // Không bắt buộc đổi
-        fullName: form.fullName,
-        gender: form.gender,
-        dateOfBirth: form.dateOfBirth || null,
-        phoneNumber: form.phoneNumber,
-        cccd: form.cccd,
-        address: form.address,
-        note: form.note,
-      };
-
-      const res = await updateReader(reader.readerId, payload, token);
-
-      if (res.success) {
-        enqueueSnackbar("✅ Cập nhật độc giả thành công!", { variant: "success" });
-        onSuccess?.();
-      } else {
-        enqueueSnackbar(res.message || "❌ Cập nhật thất bại!", { variant: "error" });
-        setError(res.message || "Cập nhật thất bại.");
-      }
-    } catch (err) {
-      console.error("❌ Lỗi khi cập nhật độc giả:", err);
-      enqueueSnackbar("⚠️ Lỗi khi kết nối đến máy chủ!", { variant: "error" });
-      setError(err.response?.data?.message || "Lỗi khi cập nhật độc giả.");
-    } finally {
+  try {
+    const token = sessionStorage.getItem("accessToken");
+    if (!token) {
+      enqueueSnackbar("⚠️ Phiên đăng nhập hết hạn. Vui lòng đăng nhập lại.", {
+        variant: "warning",
+      });
       setLoading(false);
+      return;
     }
-  };
+
+    const payload = {
+      email: form.email,
+      password: form.password || undefined,
+      fullName: form.fullName,
+      gender: form.gender,
+      dateOfBirth: form.dateOfBirth || null,
+      phoneNumber: form.phoneNumber,
+      cccd: form.cccd,
+      address: form.address,
+      note: form.note,
+    };
+
+    const res = await updateReader(reader.readerId, payload, token);
+
+    console.log("📥 Response từ API:", res);
+    console.log("📥 res.success:", res.success);
+    console.log("📥 res.message:", res.message);
+
+    if (res.success) {
+      enqueueSnackbar("✅ Cập nhật độc giả thành công!", { variant: "success" });
+      onSuccess?.();
+    } else {
+      // Xử lý các loại lỗi cụ thể
+      const errorMsg = res.message || "Cập nhật thất bại!";
+      
+      console.log("❌ Phát hiện lỗi:", errorMsg);
+      
+      if (errorMsg.toLowerCase().includes("số điện thoại") || 
+          errorMsg.toLowerCase().includes("phone") ||
+          errorMsg.toLowerCase().includes("tồn tại")) {
+        setError("Số điện thoại đã tồn tại trong hệ thống.");
+        enqueueSnackbar("❌ Số điện thoại đã tồn tại trong hệ thống.", { variant: "error" });
+      } else if (errorMsg.toLowerCase().includes("email")) {
+        setError("Email đã được sử dụng bởi tài khoản khác.");
+        enqueueSnackbar("❌ Email đã được sử dụng bởi tài khoản khác.", { variant: "error" });
+      } else {
+        setError(errorMsg);
+        enqueueSnackbar(`❌ ${errorMsg}`, { variant: "error" });
+      }
+    }
+  } catch (err) {
+    console.error("❌ Lỗi khi cập nhật độc giả:", err);
+    
+    // Xử lý lỗi từ response
+    const errorMessage = err.response?.data?.message || err.message || "Lỗi khi kết nối đến máy chủ!";
+    
+    if (errorMessage.toLowerCase().includes("số điện thoại") || 
+        errorMessage.toLowerCase().includes("phone")) {
+      setError("Số điện thoại đã tồn tại trong hệ thống.");
+      enqueueSnackbar("❌ Số điện thoại đã tồn tại trong hệ thống.", { variant: "error" });
+    } else if (errorMessage.toLowerCase().includes("email")) {
+      setError("Email đã được sử dụng bởi tài khoản khác.");
+      enqueueSnackbar("❌ Email đã được sử dụng bởi tài khoản khác.", { variant: "error" });
+    } else {
+      setError(errorMessage);
+      enqueueSnackbar(`⚠️ ${errorMessage}`, { variant: "error" });
+    }
+  } finally {
+    setLoading(false);
+  }
+}
 
   const handleClose = () => {
     if (!loading) onCancel?.();

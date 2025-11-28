@@ -106,6 +106,14 @@ const handleChange = (e) => {
     setLoading(true);
     setError(null);
     const token = sessionStorage.getItem("accessToken");
+    
+    if (!token) {
+      enqueueSnackbar("⚠️ Phiên đăng nhập hết hạn. Vui lòng đăng nhập lại.", {
+        variant: "warning",
+      });
+      return;
+    }
+    
     const payload = {
       ...form,
       gender: form.gender === "1" ? 1 : 0,
@@ -116,22 +124,56 @@ const handleChange = (e) => {
 
     const res = await updateLibrarian(librarian.librarianId, payload, token);
 
-    if (res?.success) {
-      enqueueSnackbar("✅ Cập nhật thông tin thủ thư thành công!", { variant: "success" });
+    console.log("📥 Response từ API:", res);
+    console.log("📥 res.success:", res.success);
+    console.log("📥 res.message:", res.message);
+
+    // ✅ Kiểm tra res.success một cách rõ ràng
+    if (res.success === true) {
+      enqueueSnackbar("✅ Cập nhật thông tin thủ thư thành công!", { 
+        variant: "success" 
+      });
       onSuccess?.();
     } else {
-      enqueueSnackbar(res?.message || "Không thể cập nhật thủ thư.", { variant: "error" });
-      setError(res?.message || "Không thể cập nhật thủ thư.");
+      // ✅ Xử lý các loại lỗi cụ thể
+      const errorMsg = res.message || "Không thể cập nhật thủ thư.";
+      
+      console.log("❌ Phát hiện lỗi:", errorMsg);
+      
+      if (errorMsg.toLowerCase().includes("số điện thoại") || 
+          errorMsg.toLowerCase().includes("phone") ||
+          errorMsg.toLowerCase().includes("tồn tại")) {
+        setError("Số điện thoại đã tồn tại trong hệ thống.");
+        enqueueSnackbar("❌ Số điện thoại đã tồn tại trong hệ thống.", { 
+          variant: "error" 
+        });
+      } else {
+        setError(errorMsg);
+        enqueueSnackbar(`❌ ${errorMsg}`, { variant: "error" });
+      }
     }
   } catch (err) {
-    const msg = err?.response?.data?.message || err?.message || "Lỗi khi cập nhật.";
-    enqueueSnackbar(`❌ ${msg}`, { variant: "error" });
-    setError(msg);
+    console.error("❌ Lỗi khi cập nhật thủ thư:", err);
+    
+    // Xử lý lỗi từ response
+    const errorMessage = err.response?.data?.message || 
+                        err.message || 
+                        "Lỗi khi kết nối đến máy chủ!";
+    
+    if (errorMessage.toLowerCase().includes("số điện thoại") || 
+        errorMessage.toLowerCase().includes("phone")) {
+      setError("Số điện thoại đã tồn tại trong hệ thống.");
+      enqueueSnackbar("❌ Số điện thoại đã tồn tại trong hệ thống.", { 
+        variant: "error" 
+      });
+    } else {
+      setError(errorMessage);
+      enqueueSnackbar(`⚠️ ${errorMessage}`, { variant: "error" });
+    }
   } finally {
     setLoading(false);
   }
 };
-
   const handleClose = () => {
     if (!loading) onCancel?.();
   };

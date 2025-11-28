@@ -10,23 +10,57 @@ export const getLibrarians = async (token) => {
 
 // ➕ Thêm mới thủ thư
 export const createLibrarian = async (token, data) => {
-  const res = await api.post("/librarian", data, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
-  });
-  return res.data;
+  try {
+    const res = await api.post("/librarian", data, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+    });
+    return res.data;
+  } catch (error) {
+    console.error("❌ Error creating librarian:", error);
+    
+    // ✅ Xử lý lỗi đúng cách
+    if (error.response?.data) {
+      // API trả về lỗi rõ ràng
+      return error.response.data;
+    }
+    
+    // Lỗi network hoặc khác
+    return {
+      success: false,
+      message: error.message || "Không thể kết nối đến máy chủ"
+    };
+  }
 };
-
 // ✏️ Cập nhật thông tin thủ thư
-export const updateLibrarian = async (id, data, token) => {
-  const res = await api.put(`/librarian/${id}`, data, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  return res.data;
-};
 
+export const updateLibrarian = async (id, data, token) => {
+  try {
+    const res = await api.put(`/librarian/${id}`, data, {
+      headers: { 
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json"
+      },
+    });
+    return res.data;
+  } catch (error) {
+    console.error("❌ Error updating librarian:", error);
+    
+    // ✅ Xử lý lỗi đúng cách
+    if (error.response?.data) {
+      // API trả về lỗi rõ ràng
+      return error.response.data;
+    }
+    
+    // Lỗi network hoặc khác
+    return {
+      success: false,
+      message: error.message || "Không thể kết nối đến máy chủ"
+    };
+  }
+};
 // 🔐 Đặt lại mật khẩu thủ công
 export const resetLibrarianPassword = async (id, newPassword, token) => {
   const res = await fetch(`${import.meta.env.VITE_API_URL}/librarian/${id}/reset-password`, {
