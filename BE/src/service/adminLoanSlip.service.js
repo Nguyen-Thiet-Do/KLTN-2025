@@ -1547,8 +1547,11 @@ async function previewBulkReturnFinesService(body) {
       throw e;
     }
 
-    if (String((slip.status || '').toUpperCase()) !== 'BORROWING') {
-      const e = new Error(`LoanSlip không ở trạng thái BORROWING (hiện tại: ${slip.status})`);
+    const slipStatus = String(slip.status || '').toUpperCase();
+    if (!['BORROWING', 'OVERDUE'].includes(slipStatus)) {
+      const e = new Error(
+        `Phiếu mượn không ở trạng thái đang mượn hoặc quá hạn (hiện tại: ${slip.status})`
+      );
       e.status = 409;
       throw e;
     }
