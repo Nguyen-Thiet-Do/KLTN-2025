@@ -3,6 +3,8 @@ import axios from "axios";
 
 const BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8080/api";
 
+console.log("🔧 API Base URL:", BASE_URL);
+
 const api = axios.create({
   baseURL: BASE_URL,
   timeout: 0,
@@ -17,6 +19,10 @@ api.interceptors.request.use(
       config.headers = config.headers || {};
       config.headers.Authorization = `Bearer ${token}`;
     }
+    
+    // ✅ Log request
+    console.log(`🔵 ${config.method?.toUpperCase()} ${config.url}`, config.data);
+    
     return config;
   },
   (error) => Promise.reject(error)
@@ -33,8 +39,15 @@ const pickMessage = (err) =>
 
 // Refresh token nếu 401 (trừ request auth/skip)
 api.interceptors.response.use(
-  (res) => res,
+  (res) => {
+    // ✅ Log response thành công
+    console.log(`🟢 ${res.config.method?.toUpperCase()} ${res.config.url}`, res.status, res.data);
+    return res;
+  },
   async (error) => {
+    // ✅ Log response lỗi
+    console.error(`🔴 ${error.config?.method?.toUpperCase()} ${error.config?.url}`, error.response?.status, error.response?.data);
+    
     const original = error.config || {};
     const status = error?.response?.status;
 
@@ -53,8 +66,6 @@ api.interceptors.response.use(
         if (!refreshToken) throw new Error("No refresh token");
 
         const res = await axios.post(`${BASE_URL}/auth/refresh-token`, { refreshToken });
-        // BE của bạn trả kiểu:
-        // { success, message, data: { accessToken, refreshToken? } }
         const newAccess = res?.data?.data?.accessToken;
         const newRefresh = res?.data?.data?.refreshToken;
 

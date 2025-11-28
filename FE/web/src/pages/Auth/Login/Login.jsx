@@ -456,7 +456,7 @@ export default function Login() {
             />
             <Typography
               component="a"
-              href="/forgot-password"
+              href="/forgotPassword"
               sx={{
                 fontSize: '0.875rem',
                 textDecoration: 'none',

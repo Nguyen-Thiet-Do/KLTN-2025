@@ -1,4 +1,4 @@
-// src/components/reader/ProfilePage.jsx
+// src/components/reader/ProfilePage.jsx 
 import { useState, useEffect } from "react";
 import { useAuth } from "../../contexts/AuthContext";
 import { 
@@ -25,7 +25,7 @@ import {
 } from "@mui/icons-material";
 
 export default function ProfilePage() {
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
 
@@ -56,10 +56,22 @@ export default function ProfilePage() {
   };
 
   useEffect(() => {
-    setLoading(false);
-  }, [user]); // ✅ Thêm dependency user để re-render khi user thay đổi
+    if (!authLoading) {
+      setLoading(false);
+      console.log('👤 Current user data:', user);
+    }
+  }, [user, authLoading]);
 
-  if (loading) return <div>Loading...</div>;
+  if (loading || authLoading) {
+    return (
+      <>
+        <ReaderHeader />
+        <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh' }}>
+          <Typography>Đang tải...</Typography>
+        </Box>
+      </>
+    );
+  }
 
   const InfoRow = ({ icon: Icon, label, value }) => (
     <Box
@@ -180,9 +192,11 @@ export default function ProfilePage() {
                 {user?.fullName || "Người dùng"}
               </Typography>
               <Chip
-                label="Thành viên"
+                label={user?.memberCard ? "Thành viên" : "Chưa là thành viên"}
                 sx={{
-                  backgroundColor: "rgba(255,255,255,0.2)",
+                  backgroundColor: user?.memberCard
+                    ? "rgba(255,255,255,0.25)"
+                    : "rgba(0,0,0,0.25)",
                   color: "white",
                   fontWeight: 600,
                   backdropFilter: "blur(10px)",
@@ -207,9 +221,8 @@ export default function ProfilePage() {
                 <InfoRow icon={Person} label="Họ và tên" value={user?.fullName} />
                 <InfoRow icon={Wc} label="Giới tính" value={getGenderDisplay(user?.gender)} />
                 <InfoRow icon={Cake} label="Ngày sinh" value={formatDate(user?.dateOfBirth)} />
-                {/* ✅ SỬA: Lấy email trực tiếp từ user (đã được flatten) */}
+                {/* ✅ Email và phoneNumber đã được merge từ account */}
                 <InfoRow icon={Email} label="Email" value={user?.email} />
-                {/* ✅ SỬA: Lấy phoneNumber trực tiếp từ user (đã được flatten) */}
                 <InfoRow icon={Phone} label="Số điện thoại" value={user?.phoneNumber} />
                 <InfoRow icon={CreditCard} label="CCCD" value={user?.cccd} />
                 <InfoRow icon={Home} label="Địa chỉ" value={user?.address} />

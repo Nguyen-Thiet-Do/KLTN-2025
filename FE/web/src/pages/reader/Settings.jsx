@@ -15,8 +15,10 @@ import {
   CardContent,
   Avatar,
   Paper,
+  InputAdornment,
+  IconButton,
 } from "@mui/material";
-import { Save, ArrowBack } from "@mui/icons-material";
+import { Save, ArrowBack, Visibility, VisibilityOff } from "@mui/icons-material";
 import { useSnackbar } from "notistack";
 import { useAuth } from "../../contexts/AuthContext";
 import { updateCurrentReader as updateFullProfile } from "../../services/readerService";
@@ -45,7 +47,9 @@ export default function Settings() {
 
   const [form, setForm] = useState({
     email: user?.email || "",
-    password: "",
+    oldPassword: "",
+    newPassword: "",
+    confirmPassword: "",
     fullName: user?.fullName || "",
     gender: normalizeGender(user?.gender),
     dateOfBirth: user?.dateOfBirth
@@ -58,12 +62,24 @@ export default function Settings() {
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [passwordErrors, setPasswordErrors] = useState({
+    old: "",
+    new: "",
+    confirm: "",
+  });
+  const [showPasswords, setShowPasswords] = useState({
+    old: false,
+    new: false,
+    confirm: false,
+  });
 
   useEffect(() => {
     if (user) {
       setForm({
         email: user?.email || "",
-        password: "",
+        oldPassword: "",
+        newPassword: "",
+        confirmPassword: "",
         fullName: user?.fullName || "",
         gender: normalizeGender(user?.gender),
         dateOfBirth: user?.dateOfBirth
@@ -77,87 +93,177 @@ export default function Settings() {
   }, [user]);
 
   const handleChange = (e) => {
-    setForm({ ...form, [e.target.name]: e.target.value });
+    const { name, value } = e.target;
+    setForm({ ...form, [name]: value });
     if (error) setError(null);
+    
+    // Reset password errors khi user đang nhập
+    if (name === "oldPassword" || name === "newPassword" || name === "confirmPassword") {
+      setPasswordErrors({ old: "", new: "", confirm: "" });
+    }
+    
+    // Real-time validation cho confirm password
+    if (name === "confirmPassword") {
+      if (value && form.newPassword && value !== form.newPassword) {
+        setPasswordErrors(prev => ({ ...prev, confirm: "Mật khẩu xác nhận không khớp" }));
+      } else {
+        setPasswordErrors(prev => ({ ...prev, confirm: "" }));
+      }
+    }
+    
+    // Real-time validation khi nhập new password
+    if (name === "newPassword") {
+      if (value && form.confirmPassword && value !== form.confirmPassword) {
+        setPasswordErrors(prev => ({ ...prev, confirm: "Mật khẩu xác nhận không khớp" }));
+      } else {
+        setPasswordErrors(prev => ({ ...prev, confirm: "" }));
+      }
+      
+      if (value && value.length < 6) {
+        setPasswordErrors(prev => ({ ...prev, new: "Mật khẩu phải có ít nhất 6 ký tự" }));
+      } else {
+        setPasswordErrors(prev => ({ ...prev, new: "" }));
+      }
+    }
+  };
+
+  const togglePasswordVisibility = (field) => {
+    setShowPasswords({ ...showPasswords, [field]: !showPasswords[field] });
   };
 
   const validate = () => {
     if (!form.fullName.trim()) return "Vui lòng nhập họ tên.";
-    if (!form.email.trim()) return "Vui lòng nhập email.";
-    if (form.password && form.password.length < 6)
-      return "Mật khẩu phải có ít nhất 6 ký tự.";
+    
+    // Kiểm tra nếu người dùng muốn đổi mật khẩu
+    const wantsToChangePassword = form.newPassword || form.confirmPassword || form.oldPassword;
+    
+    if (wantsToChangePassword) {
+      let hasError = false;
+      const errors = { old: "", new: "", confirm: "" };
+      
+      if (!form.oldPassword) {
+        errors.old = "Vui lòng nhập mật khẩu cũ";
+        hasError = true;
+      }
+      if (!form.newPassword) {
+        errors.new = "Vui lòng nhập mật khẩu mới";
+        hasError = true;
+      } else if (form.newPassword.length < 6) {
+        errors.new = "Mật khẩu phải có ít nhất 6 ký tự";
+        hasError = true;
+      }
+      if (!form.confirmPassword) {
+        errors.confirm = "Vui lòng xác nhận mật khẩu mới";
+        hasError = true;
+      } else if (form.newPassword !== form.confirmPassword) {
+        errors.confirm = "Mật khẩu xác nhận không khớp";
+        hasError = true;
+      }
+      
+      if (form.oldPassword && form.newPassword && form.oldPassword === form.newPassword) {
+        errors.new = "Mật khẩu mới không được trùng với mật khẩu cũ";
+        hasError = true;
+      }
+      
+      if (hasError) {
+        setPasswordErrors(errors);
+        return "Vui lòng kiểm tra lại thông tin mật khẩu.";
+      }
+    }
+    
     return null;
   };
 
-const handleSubmit = async (e) => {
-  e.preventDefault();
-  const msg = validate();
-  if (msg) {
-    setError(msg);
-    enqueueSnackbar(msg, { variant: "warning" });
-    return;
-  }
-
-  setLoading(true);
-  setError(null);
-
-  try {
-    const token = sessionStorage.getItem("accessToken");
-    if (!token) {
-      enqueueSnackbar("⚠️ Phiên đăng nhập hết hạn. Vui lòng đăng nhập lại.", {
-        variant: "warning",
-      });
-      setLoading(false);
-      navigate("/login");
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    const msg = validate();
+    if (msg) {
+      setError(msg);
+      enqueueSnackbar(msg, { variant: "warning" });
       return;
     }
 
-    const payload = {
-      email: form.email,
-      password: form.password || undefined,
-      fullName: form.fullName,
-      gender: form.gender,
-      dateOfBirth: form.dateOfBirth || null,
-      phoneNumber: form.phoneNumber,
-      cccd: form.cccd,
-      address: form.address,
-    };
+    setLoading(true);
+    setError(null);
 
-    // API call để cập nhật thông tin
-  const res = await updateFullProfile(payload, token);
+    try {
+      const token = sessionStorage.getItem("accessToken");
+      if (!token) {
+        enqueueSnackbar("⚠️ Phiên đăng nhập hết hạn. Vui lòng đăng nhập lại.", {
+          variant: "warning",
+        });
+        setLoading(false);
+        navigate("/login");
+        return;
+      }
 
-    if (res.success) {
-      enqueueSnackbar("✅ Cập nhật thông tin thành công!", { variant: "success" });
-      
-      // Cập nhật thông tin người dùng trong context
-      const updatedUserData = {
-        email: form.email,
+      const payload = {
         fullName: form.fullName,
         gender: form.gender,
-        dateOfBirth: form.dateOfBirth,
+        dateOfBirth: form.dateOfBirth || null,
         phoneNumber: form.phoneNumber,
         cccd: form.cccd,
         address: form.address,
       };
-      
-      updateUserContext(updatedUserData);  // Cập nhật context
-      setForm({ ...form, password: "" });
 
-      setTimeout(() => {
-        navigate("/profile", { replace: true });
-      }, 1500);
-    } else {
-      enqueueSnackbar(res.message || "❌ Cập nhật thất bại!", { variant: "error" });
-      setError(res.message || "Cập nhật thất bại.");
+      // Chỉ gửi mật khẩu nếu người dùng muốn đổi
+      if (form.oldPassword && form.newPassword) {
+        payload.oldPassword = form.oldPassword;
+        payload.password = form.newPassword;
+      }
+
+      const res = await updateFullProfile(payload, token);
+
+      if (res.success) {
+        enqueueSnackbar("✅ Cập nhật thông tin thành công!", { variant: "success" });
+        
+        const updatedUserData = {
+          fullName: form.fullName,
+          gender: form.gender,
+          dateOfBirth: form.dateOfBirth,
+          phoneNumber: form.phoneNumber,
+          cccd: form.cccd,
+          address: form.address,
+        };
+        
+        updateUserContext(updatedUserData);
+        
+        // Reset password fields
+        setForm({ 
+          ...form, 
+          oldPassword: "", 
+          newPassword: "", 
+          confirmPassword: "" 
+        });
+        setPasswordErrors({ old: "", new: "", confirm: "" });
+
+        setTimeout(() => {
+          navigate("/profile", { replace: true });
+        }, 1500);
+      } else {
+        // Xử lý lỗi từ backend
+        const errorMessage = res.message || "❌ Cập nhật thất bại!";
+        
+        // Kiểm tra nếu là lỗi mật khẩu cũ sai
+        if (errorMessage.toLowerCase().includes("mật khẩu cũ") || 
+            errorMessage.toLowerCase().includes("password") ||
+            errorMessage.toLowerCase().includes("incorrect")) {
+          setPasswordErrors(prev => ({ ...prev, old: "Mật khẩu cũ không chính xác" }));
+          enqueueSnackbar("❌ Mật khẩu cũ không chính xác!", { variant: "error" });
+        } else {
+          enqueueSnackbar(errorMessage, { variant: "error" });
+        }
+        
+        setError(errorMessage);
+      }
+    } catch (err) {
+      console.error("❌ Lỗi khi cập nhật thông tin:", err);
+      enqueueSnackbar("⚠️ Lỗi khi kết nối đến máy chủ!", { variant: "error" });
+      setError(err.response?.data?.message || "Lỗi khi cập nhật thông tin.");
+    } finally {
+      setLoading(false);
     }
-  } catch (err) {
-    console.error("❌ Lỗi khi cập nhật thông tin:", err);
-    enqueueSnackbar("⚠️ Lỗi khi kết nối đến máy chủ!", { variant: "error" });
-    setError(err.response?.data?.message || "Lỗi khi cập nhật thông tin.");
-  } finally {
-    setLoading(false);
-  }
-};
+  };
 
   const fieldSx = {
     "& .MuiOutlinedInput-root": {
@@ -204,7 +310,6 @@ const handleSubmit = async (e) => {
               boxShadow: "0 20px 60px rgba(0,0,0,0.3)",
             }}
           >
-            {/* Header Section */}
             <Box
               sx={{
                 background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
@@ -235,7 +340,6 @@ const handleSubmit = async (e) => {
               </Typography>
             </Box>
 
-            {/* Form Section */}
             <Box component="form" onSubmit={handleSubmit} sx={{ p: 4 }}>
               {error && (
                 <Alert severity="error" sx={{ mb: 3, borderRadius: 2 }}>
@@ -272,35 +376,114 @@ const handleSubmit = async (e) => {
                     Thông Tin Tài Khoản
                   </Typography>
 
-                  <Box
-                    sx={{
-                      display: "grid",
-                      gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" },
-                      gap: 3,
-                    }}
-                  >
+                  <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
                     <TextField
                       name="email"
                       type="email"
                       label="Email đăng nhập"
                       value={form.email}
-                      onChange={handleChange}
-                      required
-                      disabled={loading}
+                      disabled
                       placeholder="Nhập email"
-                      sx={fieldSx}
+                      sx={{
+                        ...fieldSx,
+                        "& .MuiOutlinedInput-root": {
+                          borderRadius: 2,
+                          backgroundColor: "#f5f5f5",
+                          "&:hover fieldset": { borderColor: "#ccc" },
+                          "&.Mui-disabled": {
+                            backgroundColor: "#f5f5f5",
+                          },
+                        },
+                      }}
+                      helperText="Email không thể thay đổi"
                     />
+
+                    <Typography variant="subtitle2" sx={{ color: "#667EEA", fontWeight: 600, mt: 1 }}>
+                      Đổi mật khẩu (tùy chọn)
+                    </Typography>
+
                     <TextField
-                      name="password"
-                      type="password"
-                      label="Mật khẩu mới (tùy chọn)"
-                      value={form.password}
+                      name="oldPassword"
+                      type={showPasswords.old ? "text" : "password"}
+                      label="Mật khẩu cũ"
+                      value={form.oldPassword}
                       onChange={handleChange}
                       disabled={loading}
-                      placeholder="Để trống nếu không đổi"
-                      helperText="Chỉ nhập nếu muốn thay đổi mật khẩu"
+                      placeholder="Nhập mật khẩu hiện tại"
+                      error={!!passwordErrors.old}
+                      helperText={passwordErrors.old || "Bắt buộc nếu muốn đổi mật khẩu"}
                       sx={fieldSx}
+                      InputProps={{
+                        endAdornment: (
+                          <InputAdornment position="end">
+                            <IconButton
+                              onClick={() => togglePasswordVisibility('old')}
+                              edge="end"
+                            >
+                              {showPasswords.old ? <VisibilityOff /> : <Visibility />}
+                            </IconButton>
+                          </InputAdornment>
+                        ),
+                      }}
                     />
+
+                    <Box
+                      sx={{
+                        display: "grid",
+                        gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" },
+                        gap: 3,
+                      }}
+                    >
+                      <TextField
+                        name="newPassword"
+                        type={showPasswords.new ? "text" : "password"}
+                        label="Mật khẩu mới"
+                        value={form.newPassword}
+                        onChange={handleChange}
+                        disabled={loading}
+                        placeholder="Nhập mật khẩu mới"
+                        error={!!passwordErrors.new}
+                        helperText={passwordErrors.new || "Tối thiểu 6 ký tự"}
+                        sx={fieldSx}
+                        InputProps={{
+                          endAdornment: (
+                            <InputAdornment position="end">
+                              <IconButton
+                                onClick={() => togglePasswordVisibility('new')}
+                                edge="end"
+                              >
+                                {showPasswords.new ? <VisibilityOff /> : <Visibility />}
+                              </IconButton>
+                            </InputAdornment>
+                          ),
+                        }}
+                      />
+
+                      <TextField
+                        name="confirmPassword"
+                        type={showPasswords.confirm ? "text" : "password"}
+                        label="Xác nhận mật khẩu mới"
+                        value={form.confirmPassword}
+                        onChange={handleChange}
+                        disabled={loading}
+                        placeholder="Nhập lại mật khẩu mới"
+                        error={!!passwordErrors.confirm}
+                        helperText={passwordErrors.confirm || "Nhập lại mật khẩu mới"}
+                        sx={fieldSx}
+                        InputProps={{
+                          endAdornment: (
+                            <InputAdornment position="end">
+                              <IconButton
+                                onClick={() => togglePasswordVisibility('confirm')}
+                                edge="end"
+                              >
+                                {showPasswords.confirm ? <VisibilityOff /> : <Visibility />}
+                              </IconButton>
+                            </InputAdornment>
+                          ),
+                        }}
+                      />
+                    </Box>
                   </Box>
                 </CardContent>
               </Card>

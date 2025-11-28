@@ -48,6 +48,10 @@ export default function ReaderHeader() {
 const { count } = useCart();
 const { favoriteCount } = useFavorite();
 const { unreadCount } = useNotification();
+ // ✅ DEBUG LOG
+  useEffect(() => {
+    console.log("🔔 ReaderHeader - unreadCount changed:", unreadCount);
+  }, [unreadCount]);
 
   const tabs = useMemo(
     () => [

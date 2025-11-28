@@ -38,6 +38,8 @@ import {
 } from "../../services/librarianService";
 import AddLibrarian from "./AddLibrarian";
 import EditLibrarian from "./EditLibrarian";
+import ViewLibrarianDetail from "./ViewLibrarianDetail";
+
 import ButtonLoader from "../../components/Loading/ButtonLoader";
 
 export default function Librarians() {
@@ -48,6 +50,8 @@ export default function Librarians() {
   const [editingLibrarian, setEditingLibrarian] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
+  const [viewingLibrarian, setViewingLibrarian] = useState(null);
+
   const itemsPerPage = 5;
 
   // 🔄 Lấy danh sách thủ thư
@@ -327,29 +331,44 @@ export default function Librarians() {
                     <TableCell>{lib.address || "-"}</TableCell>
                     <TableCell>{lib.email || "-"}</TableCell>
 
-                    {/* Nút hành động */}
+                    {/* Hành động */}
                     <TableCell sx={{ textAlign: "center" }}>
                       <Stack direction="row" spacing={1} justifyContent="center">
+
+                        {/* Xem chi tiết */}
+                        <IconButton
+                          size="small"
+                          onClick={() => setViewingLibrarian(lib)}
+                          sx={{ color: "#3182CE" }}
+                          title="Xem chi tiết"
+                        >
+                          <SearchIcon />
+                        </IconButton>
+
+                        {/* Sửa thông tin */}
                         <IconButton
                           size="small"
                           onClick={() => setEditingLibrarian(lib)}
                           sx={{ color: "#667EEA" }}
                           disabled={lib.deleted}
+                          title="Sửa thông tin"
                         >
                           <EditIcon />
                         </IconButton>
 
+                        {/* Đặt lại mật khẩu */}
                         <IconButton
                           size="small"
                           onClick={() => handleResetPassword(lib)}
                           sx={{ color: "#ED8936" }}
-                          title="Đặt lại mật khẩu"
                           disabled={lib.deleted}
+                          title="Đặt lại mật khẩu"
                         >
                           <ResetIcon />
                         </IconButton>
 
                         {!lib.deleted ? (
+                          /* Xóa thủ thư */
                           <IconButton
                             size="small"
                             onClick={() => handleDelete(lib.librarianId, lib.fullName)}
@@ -359,6 +378,7 @@ export default function Librarians() {
                             <DeleteIcon />
                           </IconButton>
                         ) : (
+                          /* Khôi phục */
                           <IconButton
                             size="small"
                             onClick={() => handleRestore(lib.librarianId, lib.fullName)}
@@ -370,7 +390,9 @@ export default function Librarians() {
                         )}
                       </Stack>
                     </TableCell>
+
                   </TableRow>
+
                 ))}
               </TableBody>
             </Table>
@@ -401,6 +423,13 @@ export default function Librarians() {
             fetchData();
           }}
           onCancel={() => setShowAddModal(false)}
+        />
+      )}
+      {viewingLibrarian && (
+        <ViewLibrarianDetail
+          open={!!viewingLibrarian}
+          librarian={viewingLibrarian}
+          onClose={() => setViewingLibrarian(null)}
         />
       )}
 

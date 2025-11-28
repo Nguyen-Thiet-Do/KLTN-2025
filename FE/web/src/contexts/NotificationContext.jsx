@@ -2,7 +2,7 @@
 import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { io } from "socket.io-client";
 import api from "../services/api";
-import { useAuth } from "./AuthContext"; // <- sử dụng auth
+import { useAuth } from "./AuthContext";
 
 // notistack
 import { SnackbarProvider, closeSnackbar } from "notistack";
@@ -44,39 +44,33 @@ export function NotificationProvider({ children }) {
     }
   };
 
-  // Chỉ load khi auth đã sẵn sàng và user/authenticated
-  useEffect(() => {
-    if (authLoading) return; // chờ init auth xong
-    if (!isAuthenticated) {
-      setUnreadCount(0);
-      return;
-    }
-    loadUnreadCount();
-  }, [authLoading, isAuthenticated]); // chạy lại khi auth thay đổi
-
-  // Kết nối socket — chỉ khi user đã login
+  // Socket + Load unread count khi auth sẵn sàng
   useEffect(() => {
     if (authLoading) return;
-    if (!isAuthenticated) return;
+    
+    if (!isAuthenticated) {
+      setUnreadCount(0); // Reset khi logout
+      return;
+    }
 
     const token = sessionStorage.getItem("accessToken");
     if (!token) return;
 
-    const accountId = user?.accountId || (() => {
-      try {
-        const acc = JSON.parse(sessionStorage.getItem("account") || "{}");
-        return acc?.accountId;
-      } catch { return null; }
-    })();
-    if (!accountId) return;
+    // LẤY readerId để join room (KHÔNG dùng accountId)
+    const readerId =
+      user?.readerId ||
+      JSON.parse(sessionStorage.getItem("profile") || "{}")?.readerId;
+
+    if (!readerId) return;
+
+    // ✅ THÊM: Load unread count ngay khi mount
+    loadUnreadCount();
 
     const baseUrl = getSocketBaseUrl();
 
-    // Nếu còn socket cũ -> disconnect
+    // Clear socket cũ
     if (socketRef.current) {
-      try {
-        socketRef.current.disconnect();
-      } catch { }
+      try { socketRef.current.disconnect(); } catch {}
       socketRef.current = null;
     }
 
@@ -87,35 +81,38 @@ export function NotificationProvider({ children }) {
     });
     socketRef.current = socket;
 
+    // --- ĐỊNH NGHĨA HÀM ---
     const onConnect = () => {
-      socket.emit("join", `user_${accountId}`);
+      console.log("✅ Socket connected");
+    socket.emit("register", readerId);
+
     };
 
     const onConnectError = (err) => {
-      console.error("Socket connect_error:", err);
+      console.error("❌ Socket connect_error:", err);
     };
 
     const onNewNotification = () => {
+      console.log("🔔 New notification received");
       setUnreadCount((v) => v + 1);
     };
 
+    // --- BIND ---
     socket.on("connect", onConnect);
     socket.on("connect_error", onConnectError);
     socket.on("notification:new", onNewNotification);
 
+    // --- CLEANUP ---
     return () => {
       try {
         socket.off("connect", onConnect);
         socket.off("connect_error", onConnectError);
         socket.off("notification:new", onNewNotification);
         socket.disconnect();
-      } catch (err) {
-        console.warn("Socket cleanup error:", err);
-      } finally {
-        socketRef.current = null;
-      }
+      } catch {}
+      socketRef.current = null;
     };
-  }, [authLoading, isAuthenticated, user?.accountId]);
+  }, [authLoading, isAuthenticated, user?.readerId]);
 
   // Mark read/unread/markAll
   const markRead = async (id) => {
@@ -157,8 +154,6 @@ export function NotificationProvider({ children }) {
     markAllRead,
   };
 
-  // Trả về NotificationContext.Provider bao quanh SnackbarProvider
-  // NotificationContext cung cấp API; SnackbarProvider cho useSnackbar ở component con
   return (
     <NotificationContext.Provider value={ctxValue}>
       <SnackbarProvider

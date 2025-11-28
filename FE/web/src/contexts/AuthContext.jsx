@@ -1,3 +1,4 @@
+// src/contexts/AuthContext.jsx 
 import { createContext, useContext, useState, useEffect } from 'react';
 import { authService } from '../services/authService';
 
@@ -67,6 +68,7 @@ export const AuthProvider = ({ children }) => {
 
       // Merge account + profile để hiển thị đầy đủ thông tin
       const userData = {
+        // Account fields - IMPORTANT: phải lấy email và phoneNumber từ account
         accountId: account.accountId,
         roleId: account.roleId,
         email: account.email,
@@ -75,6 +77,8 @@ export const AuthProvider = ({ children }) => {
         cardType: profile.memberCard?.cardType || null  // thêm loại thẻ
       };
 
+      console.log('✅ Login success - userData:', userData);
+      
       // Update state
       setUser(userData);
 
@@ -100,6 +104,9 @@ export const AuthProvider = ({ children }) => {
       sessionStorage.removeItem('refreshToken');
       sessionStorage.removeItem('account');
       sessionStorage.removeItem('profile');
+      sessionStorage.removeItem('readerId');
+      sessionStorage.removeItem('roleId');
+      sessionStorage.removeItem('accountId');
       setUser(null);
     }
   };
@@ -131,8 +138,10 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  // ✅ THÊM HÀM MỚI: updateUserContext (tương tự updateUserProfile nhưng đơn giản hơn)
+  // ✅ HÀM updateUserContext - Đơn giản hơn, chỉ merge vào user
   const updateUserContext = (updatedData) => {
+    console.log('📝 Updating user context with:', updatedData);
+    
     // Merge dữ liệu mới vào user hiện tại
     const newUserData = {
       ...user,
@@ -143,7 +152,6 @@ export const AuthProvider = ({ children }) => {
     setUser(newUserData);
 
     // Cập nhật sessionStorage
-    // Phân loại dữ liệu thuộc profile hay account
     const profileKeys = [
       'readerId', 'fullName', 'gender', 'dateOfBirth',
       'phoneNumber', 'cccd', 'address', 'avatar'
@@ -187,7 +195,7 @@ export const AuthProvider = ({ children }) => {
     logout,
     isAuthenticated: !!user,
     updateUserProfile,
-    updateUserContext, // ✅ THÊM VÀO ĐÂY
+    updateUserContext,
   };
 
   return (

@@ -272,7 +272,7 @@ export default function EditLibrarian({ librarian, onSuccess, onCancel, open = t
                   sx={{ ...fieldSx, gridColumn: { xs: "auto", md: "1 / span 2" } }}
                 />
 
-                <TextField
+                {/* <TextField
                   name="note"
                   label="Ghi chú"
                   value={form.note}
@@ -282,7 +282,7 @@ export default function EditLibrarian({ librarian, onSuccess, onCancel, open = t
                   multiline
                   rows={3}
                   sx={{ ...fieldSx, gridColumn: { xs: "auto", md: "1 / span 2" } }}
-                />
+                /> */}
               </Box>
             </CardContent>
           </Card>
