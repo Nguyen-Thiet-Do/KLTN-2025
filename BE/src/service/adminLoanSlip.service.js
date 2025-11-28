@@ -3535,10 +3535,6 @@ async function handleLostBookAndCharge({ loanDetailId, librarianId, returnDate }
   }); // end tx
 }
 
-
-
-
-
 module.exports = {
   getAllLoanSlipsService,
   createLoanSlipService,

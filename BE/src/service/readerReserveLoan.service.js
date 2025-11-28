@@ -1,6 +1,6 @@
 // src/service/readerReserveLoan.service.js
 const { Op } = require('sequelize');
-const sequelize = require('../config/database');
+const sequelize = require('../config/database'); // Sequelize instance của bạn
 const {
   LoanSlip,
   LoanDetail,
@@ -10,13 +10,15 @@ const {
   Payment,
   MemberCard,
   CardType,
+  LoanSlip: LoanSlipModel,
   Account,
-  Notification
+  Notification // <-- thêm Notification
 } = require('../model');
 
 const { emitToUser } = require('../config/socket');
-const mailService = require('./mailService');
-const { getDocumentDetailWithDeposit } = require('./documentService');
+
+const mailService = require('./mailService'); // <-- thêm mailService
+const { getDocumentDetailWithDeposit } = require('./documentService'); // nếu bạn đã đổi tên, thay lại cho khớp
 
 /** Helpers: xử lý ngày (giống admin service) */
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
@@ -36,11 +38,13 @@ function daysDiff(a, b) {
 }
 
 /**
- * Snapshot tình trạng mượn của độc giả
+ * Snapshot tình trạng mượn của độc giả (để kiểm tra điều kiện/ quota)
+ * Trả về object giống admin service: { pendingApprovalCount, waitingForPickupCount, borrowingCount, overdueCount, unresolvedViolationCount, activeCount }
  */
 async function getReaderBorrowSnapshot(readerId, t) {
   const today = fmtToday();
 
+  // pending slips/details
   const pendingSlips = await LoanSlip.findAll({
     where: { readerId, deleted: false, status: 'PENDING' },
     attributes: ['loanSlipId'],
@@ -52,6 +56,7 @@ async function getReaderBorrowSnapshot(readerId, t) {
     ? await LoanDetail.count({ where: { loanSlipId: pendingSlipIds, status: 'PENDING' }, transaction: t })
     : 0;
 
+  // waiting for pickup
   const waitingSlips = await LoanSlip.findAll({
     where: { readerId, deleted: false, status: ['WAITING_FOR_PICKUP'] },
     attributes: ['loanSlipId'],
@@ -63,6 +68,7 @@ async function getReaderBorrowSnapshot(readerId, t) {
     ? await LoanDetail.count({ where: { loanSlipId: waitingSlipIds, status: 'WAITING_FOR_PICKUP' }, transaction: t })
     : 0;
 
+  // borrowing (active)
   const borrowingSlips = await LoanSlip.findAll({
     where: { readerId, deleted: false, status: 'BORROWING' },
     attributes: ['loanSlipId', 'dueDate'],
@@ -74,6 +80,7 @@ async function getReaderBorrowSnapshot(readerId, t) {
     ? await LoanDetail.count({ where: { loanSlipId: borrowingSlipIds, status: 'BORROWED' }, transaction: t })
     : 0;
 
+  // overdue: borrowings with slip.dueDate < today and LoanDetail status BORROWED and returnDate IS NULL
   let overdueCount = 0;
   if (borrowingSlipIds.length) {
     const overdueSlipIds = borrowingSlips
@@ -88,6 +95,7 @@ async function getReaderBorrowSnapshot(readerId, t) {
       : 0;
   }
 
+  // unresolved violations/payments: giống admin - check Payment pending (non DEPOSIT) and Violation paymentStatus != PAID
   const unresolvedPayments = await Payment.count({
     where: { readerId, status: 'PENDING', paymentType: { [Op.not]: 'DEPOSIT' } },
     transaction: t
@@ -109,9 +117,13 @@ async function getReaderBorrowSnapshot(readerId, t) {
     activeCount,
   };
 }
-
 /**
- * Helper kiểm tra quota mượn sách
+ * Helper kiểm tra quota mượn sách theo loại thẻ của độc giả.
+ *
+ * - Luôn dùng snapshot: pendingApprovalCount + waitingForPickupCount + borrowingCount
+ * - Nếu extraRequested > 0: kiểm tra tổng hiện tại + số đăng ký thêm
+ * - Nếu extraRequested = 0: chỉ kiểm tra tổng hiện tại không vượt maxBorrowLimit
+ * - Nếu checkOverdueAndViolation = true: chặn khi còn sách trễ hạn / vi phạm chưa xử lý
  */
 async function ensureReaderBorrowQuota({
   readerId,
@@ -134,6 +146,7 @@ async function ensureReaderBorrowQuota({
     throw e;
   }
 
+  // Lấy snapshot hiện tại
   const snap = await getReaderBorrowSnapshot(readerId, t);
 
   const currentTotal =
@@ -155,6 +168,7 @@ async function ensureReaderBorrowQuota({
     }
   }
 
+  // Nếu chặn do trễ hạn / vi phạm
   if (blockingReasons.length) {
     const e = new Error('Độc giả chưa đủ điều kiện mượn');
     e.status = 409;
@@ -180,6 +194,7 @@ async function ensureReaderBorrowQuota({
     throw e;
   }
 
+  // Nếu có đăng ký thêm
   if (requested > 0) {
     if (remaining <= 0 || requested > remaining) {
       const e = new Error('Vượt quá hạn mức mượn');
@@ -206,6 +221,7 @@ async function ensureReaderBorrowQuota({
       throw e;
     }
   } else {
+    // Không đăng ký thêm, chỉ check tổng hiện tại
     if (currentTotal > maxBorrowLimit) {
       const e = new Error('Vượt quá số sách tối đa cho phép theo loại thẻ');
       e.status = 409;
@@ -226,103 +242,23 @@ async function ensureReaderBorrowQuota({
     }
   }
 
+  // Không lỗi thì trả về cho ai cần dùng tiếp
   return { snap, maxBorrowLimit, currentTotal, remaining };
-}
-
-/**
- * Helper: Kiểm tra các tài liệu đã có trong phiếu mượn hiện tại của độc giả
- * Trả về: { duplicates: Array<{ documentId, title, slipId, status, statusText }> }
- */
-async function checkExistingDocuments(readerId, documentIds, transaction) {
-  const duplicates = [];
-
-  // Lấy tất cả phiếu mượn đang active (PENDING, WAITING_FOR_PICKUP, BORROWING)
-  const activeSlips = await LoanSlip.findAll({
-    where: {
-      readerId,
-      deleted: false,
-      status: { [Op.in]: ['PENDING', 'WAITING_FOR_PICKUP', 'BORROWING'] } // ✅
-    },
-    attributes: ['loanSlipId', 'status'],
-    include: [{
-      model: LoanDetail,
-      as: 'details',   // ✅ ĐÚNG alias với model/index.js
-      where: {
-        status: { [Op.in]: ['PENDING', 'WAITING_FOR_PICKUP', 'BORROWED'] } // ✅
-      },
-      attributes: ['loanDetailId', 'documentCopyId', 'note', 'status'],
-      required: true
-    }],
-    transaction
-  });
-
-  if (!activeSlips.length) {
-    return { duplicates };
-  }
-
-  const statusTextMap = {
-    PENDING: 'đang chờ duyệt',
-    WAITING_FOR_PICKUP: 'đang chờ bạn đến lấy',
-    BORROWED: 'đang mượn'
-  };
-
-  const slipStatusTextMap = {
-    PENDING: 'đang chờ duyệt',
-    WAITING_FOR_PICKUP: 'đang chờ đến lấy',
-    BORROWING: 'đang mượn'
-  };
-
-  const checkDocIds = new Set(documentIds.map(id => Number(id)));
-
-  for (const slip of activeSlips) {
-    for (const detail of slip.details || []) {   // ✅ dùng đúng alias 'details'
-      let docId = null;
-
-      if (detail.documentCopyId) {
-        const copy = await DocumentCopy.findByPk(detail.documentCopyId, {
-          attributes: ['documentId'],
-          transaction
-        });
-        if (copy) docId = copy.documentId;
-      }
-
-      if (!docId && detail.note) {
-        const match = detail.note.match(/REQUEST_DOCUMENT_ID=(\d+)/);
-        if (match) docId = Number(match[1]);
-      }
-
-      if (docId && checkDocIds.has(docId)) {
-        let title = `Tài liệu #${docId}`;
-        try {
-          const doc = await getDocumentDetailWithDeposit(docId);
-          if (doc && doc.title) title = doc.title;
-        } catch (e) {
-          // ignore
-        }
-
-        duplicates.push({
-          documentId: docId,
-          title,
-          slipId: slip.loanSlipId,
-          status: slip.status,
-          statusText: slipStatusTextMap[slip.status] || slip.status,
-          detailStatus: detail.status,
-          detailStatusText: statusTextMap[detail.status] || detail.status
-        });
-      }
-    }
-  }
-
-  return { duplicates };
 }
 
 
 /**
  * Đặt mượn trước (Reader)
+ * - KHÔNG truyền quantity
+ * - Mỗi documentId chỉ được đặt 1 bản (trùng -> 400)
+ *
+ * @param {object} user - req.user (JWT), yêu cầu roleId = 3
+ * @param {object} payload - { items: Array<number | { documentId: number }>, note?: string }
  */
 async function reserveLoanForReaderService(user, payload) {
   const t = await sequelize.transaction();
 
+  // Biến lưu quota để dùng cho response & email sau khi commit
   let quotaSnap = null;
   let quotaRemaining = 0;
   let quotaCurrentTotal = 0;
@@ -336,6 +272,7 @@ async function reserveLoanForReaderService(user, payload) {
       throw e;
     }
 
+    // Map account -> reader
     const reader = await Reader.findOne({
       where: { accountId: user.accountId, deleted: false },
       attributes: ['readerId', 'fullName', 'accountId'],
@@ -379,28 +316,7 @@ async function reserveLoanForReaderService(user, payload) {
 
     requestedTotal = items.length;
 
-    // ========== KIỂM TRA TÀI LIỆU ĐÃ TỒN TẠI TRONG PHIẾU HIỆN TẠI ==========
-    const documentIds = items.map(it => it.documentId);
-    const { duplicates } = await checkExistingDocuments(reader.readerId, documentIds, t);
-
-    if (duplicates.length > 0) {
-      // Tạo thông báo chi tiết cho từng tài liệu trùng
-      const duplicateMessages = duplicates.map(dup =>
-        `"${dup.title}" đã có trong phiếu #${dup.slipId} (${dup.statusText})`
-      );
-
-      const e = new Error('Một số tài liệu đã có trong phiếu mượn hiện tại của bạn');
-      e.statusCode = 400;
-      e.details = {
-        message: 'Các tài liệu sau đã có trong phiếu mượn của bạn',
-        duplicates: duplicates,
-        messages: duplicateMessages
-      };
-      throw e;
-    }
-    // ========================================================================
-
-    // LẤY THẺ
+    // LẤY THẺ QUA readerId
     const memberCard = await MemberCard.findOne({
       where: { readerId: reader.readerId, deleted: false, status: 'ACTIVE' },
       order: [['issueDate', 'DESC']],
@@ -447,22 +363,24 @@ async function reserveLoanForReaderService(user, payload) {
       throw e;
     }
 
-    // SNAPSHOT + QUOTA
+    // ================== SNAPSHOT + QUOTA (DÙNG HELPER) ==================
+    // Rule mới: (pending + waiting + borrowing) + requestedTotal <= maxBorrowLimit
     const quotaInfo = await ensureReaderBorrowQuota({
       readerId: reader.readerId,
       cardType,
       transaction: t,
       extraRequested: requestedTotal,
-      checkOverdueAndViolation: true,
+      checkOverdueAndViolation: true, // đặt mượn cũng phải sạch nợ
       context: 'reserveLoanForReaderService'
     });
 
     quotaSnap = quotaInfo.snap;
-    quotaRemaining = quotaInfo.remaining;
-    quotaCurrentTotal = quotaInfo.currentTotal;
+    quotaRemaining = quotaInfo.remaining;         // max - currentTotal
+    quotaCurrentTotal = quotaInfo.currentTotal;   // tổng hiện tại (pending + waiting + borrowing)
     quotaMaxBorrowLimit = quotaInfo.maxBorrowLimit;
+    // ====================================================================
 
-    // Check từng tài liệu (đủ bản AVAILABLE)
+    // Check từng tài liệu (đủ bản AVAILABLE trừ pending holds)
     const detailPreview = [];
     for (const it of items) {
       const detail = await getDocumentDetailWithDeposit(it.documentId);
@@ -523,7 +441,7 @@ async function reserveLoanForReaderService(user, payload) {
       { transaction: t }
     );
 
-    // Tạo LoanDetail
+    // Tạo LoanDetail với note = REQUEST_DOCUMENT_ID=...
     for (const it of detailPreview) {
       await LoanDetail.create(
         {
@@ -541,7 +459,7 @@ async function reserveLoanForReaderService(user, payload) {
 
     await t.commit();
 
-    // TẠO NOTIFICATION
+    // TẠO BẢN GHI NOTIFICATION trong DB
     let createdNotification = null;
     try {
       const notifTitle = `Đặt mượn thành công — Phiếu #${slip.loanSlipId}`;
@@ -559,9 +477,10 @@ async function reserveLoanForReaderService(user, payload) {
       });
     } catch (err) {
       console.error('❌ Failed to create Notification record:', err.message || err);
+      // không throw, tránh làm hỏng luồng chính
     }
 
-    // EMIT SOCKET
+    // Emit socket để FE tăng số thông báo
     try {
       if (createdNotification && createdNotification.notificationID) {
         emitToUser(reader.readerId, "notification:new", {
@@ -574,7 +493,7 @@ async function reserveLoanForReaderService(user, payload) {
       console.error("❌ Socket emit failed:", err);
     }
 
-    // GỬI EMAIL
+    // Gửi email — background
     setImmediate(async () => {
       try {
         let readerEmail = null;
@@ -601,6 +520,7 @@ async function reserveLoanForReaderService(user, payload) {
 
         const mailItems = detailPreview.map(d => ({ documentId: d.documentId, title: d.title }));
 
+        // remainingAfterReserve = maxBorrowLimit - (currentTotal + requestedTotal)
         const remainingAfterReserveMail = Math.max(
           0,
           quotaMaxBorrowLimit - (quotaCurrentTotal + requestedTotal)
@@ -619,6 +539,7 @@ async function reserveLoanForReaderService(user, payload) {
 
         await mailService.sendReservationConfirmationEmail(readerEmail, mailData);
 
+        // Nếu có Notification vừa tạo, cập nhật emailAt = now
         try {
           if (createdNotification && createdNotification.notificationID) {
             await Notification.update(
@@ -627,7 +548,7 @@ async function reserveLoanForReaderService(user, payload) {
             );
           }
         } catch (updErr) {
-          console.error('❌ Failed to update Notification.emailAt:', updErr.message || updErr);
+          console.error('❌ Failed to update Notification.emailAt after sending email:', updErr.message || updErr);
         }
 
       } catch (err) {
@@ -635,6 +556,7 @@ async function reserveLoanForReaderService(user, payload) {
       }
     });
 
+    // remainingAfterReserve cho response = remaining - requestedTotal
     const remainingAfterReserve = quotaRemaining - requestedTotal;
 
     return {
@@ -660,8 +582,5 @@ async function reserveLoanForReaderService(user, payload) {
   }
 }
 
-module.exports = {
-  reserveLoanForReaderService,
-  getReaderBorrowSnapshot,
-  checkExistingDocuments // export để có thể dùng ở nơi khác nếu cần
-};
+
+module.exports = { reserveLoanForReaderService, getReaderBorrowSnapshot };
