@@ -1406,12 +1406,18 @@ function calculateLostFine(coverPrice) {
   return Number(coverPrice) || 0;
 }
 
+
 /**
- * TRẢ TỪNG QUYỂN (PARTIAL RETURN) - SỬA: trừ vào MemberCard thay vì tạo Payment
- * - body: { loanDetailId, returnDate, conditionReturn, isLost = false, note }
- * - librarianId: id của thủ thư thực hiện
+ * TRẢ TỪNG QUYỂN
+ * - Dùng lại logic của returnBulkItemsService để:
+ *   + Tính phạt (trễ, hư, mất)
+ *   + Tạo Violation
+ *   + Trừ thẻ / tạo QR PayOS
+ *
+ * body: { loanDetailId, returnDate, conditionReturn, isLost = false, note? }
+ * rawLibrarianId: có thể là librarianId hoặc accountId (giống bulk)
  */
-async function returnSingleItemService(body, librarianId) {
+async function returnSingleItemService(body, rawLibrarianId) {
   const {
     loanDetailId,
     returnDate,
@@ -1433,238 +1439,51 @@ async function returnSingleItemService(body, librarianId) {
     throw e;
   }
 
-  const conditionNum = Number(conditionReturn);
-  if (isNaN(conditionNum) || conditionNum < 0 || conditionNum > 100) {
-    const e = new Error('conditionReturn phải là số từ 0-100');
-    e.status = 400;
+  // Nếu không mất sách thì bắt buộc conditionReturn 0-100
+  if (!isLost) {
+    const conditionNum = Number(conditionReturn);
+    if (isNaN(conditionNum) || conditionNum < 0 || conditionNum > 100) {
+      const e = new Error('conditionReturn phải là số từ 0-100');
+      e.status = 400;
+      throw e;
+    }
+  }
+
+  // Lấy loanSlipId từ LoanDetail
+  const detail = await LoanDetail.findByPk(loanDetailId, {
+    attributes: ['loanDetailId', 'loanSlipId'],
+    raw: true
+  });
+
+  if (!detail) {
+    const e = new Error('Không tìm thấy LoanDetail');
+    e.status = 404;
     throw e;
   }
 
-  return await sequelize.transaction(async (t) => {
+  const loanSlipId = detail.loanSlipId;
 
-    const detail = await LoanDetail.findByPk(loanDetailId, {
-      include: [
-        {
-          model: LoanSlip,
-          attributes: ['loanSlipId', 'readerId', 'dueDate', 'status']
-        },
-        {
-          model: DocumentCopy,
-          include: [{
-            model: Document,
-            attributes: ['documentId', 'coverPrice', 'title']
-          }]
-        }
-      ],
-      transaction: t,
-      lock: t.LOCK.UPDATE
-    });
-
-    if (!detail) {
-      const e = new Error('Không tìm thấy LoanDetail');
-      e.status = 404;
-      throw e;
-    }
-
-    if (String((detail.status || '').toUpperCase()) !== 'BORROWED') {
-      const e = new Error(`LoanDetail không ở trạng thái BORROWED (hiện tại: ${detail.status})`);
-      e.status = 409;
-      throw e;
-    }
-
-    if (detail.returnDate) {
-      const e = new Error('LoanDetail đã được trả trước đó');
-      e.status = 409;
-      throw e;
-    }
-
-    const slip = detail.LoanSlip;
-    const copy = detail.DocumentCopy;
-    const coverPrice = copy?.Document?.coverPrice || 0;
-
-    let overdueFine = slip.dueDate
-      ? calculateOverdueFine(slip.dueDate, returnDate)
-      : 0;
-
-    let damageFine = 0;
-    let lostFine = 0;
-
-    if (isLost) {
-      lostFine = calculateLostFine(coverPrice);
-    } else {
-      damageFine = calculateDamageFine(
-        detail.conditionBorrow,
-        conditionNum,
-        coverPrice
-      );
-    }
-
-    const totalFine = overdueFine + damageFine + lostFine;
-
-    await detail.update({
+  // Gọi lại returnBulkItemsService với 1 item
+  const result = await returnBulkItemsService(
+    {
+      loanSlipId,
       returnDate,
-      conditionReturn: conditionNum,
-      fineAmount: totalFine,
-      status: 'RETURNED',
-      note: note || detail.note
-    }, { transaction: t });
-
-    // Update DocumentCopy
-    if (copy) {
-      let newCopyStatus = isLost ? "LOST" :
-        conditionNum < 50 ? "DAMAGED" : "AVAILABLE";
-
-      const newCondition = isLost ? 0 : conditionNum;
-
-      await DocumentCopy.update({
-        status: newCopyStatus,
-        conditionNote: String(newCondition),
-        conditionGrade:
-          newCondition >= 90 ? 'A'
-            : newCondition >= 70 ? 'B' : 'C'
-      }, {
-        where: { documentCopyId: copy.documentCopyId },
-        transaction: t
-      });
-    }
-
-    // ========================
-    // TRỪ TIỀN VÀO THẺ HỘI VIÊN
-    // ========================
-    let deducted = 0;
-
-    if (totalFine > 0) {
-      const memberCard = await MemberCard.findOne({
-        where: { readerId: slip.readerId, deleted: false, status: 'ACTIVE' },
-        order: [['issueDate', 'DESC']],
-        transaction: t,
-        lock: t.LOCK.UPDATE
-      });
-
-      if (!memberCard) {
-        await createNotificationSafe({
-          readerId: slip.readerId,
-          type: 'VIOLATION',
-          title: 'Không thể trừ tiền phạt',
-          content: `Không có thẻ hội viên ACTIVE để trừ ${totalFine}đ.`,
-          priority: 'HIGH'
-        }, t);
-      } else {
-        await MemberCard.update({
-          balance: sequelize.literal(`COALESCE(balance,0) - ${Number(totalFine)}`)
-        }, {
-          where: { memberCardId: memberCard.memberCardId },
-          transaction: t
-        });
-
-        deducted = totalFine;
-
-        await createNotificationSafe({
-          readerId: slip.readerId,
-          type: 'INFO',
-          title: 'Đã trừ tiền phạt',
-          content: `Đã trừ ${totalFine}đ vào số dư thẻ hội viên.`,
-          priority: 'NORMAL'
-        }, t);
-      }
-    }
-
-    // ========================
-    // GỬI EMAIL
-    // ========================
-    try {
-      const reader = await Reader.findByPk(slip.readerId, {
-        include: [{ model: Account }]
-      });
-
-      const email = reader?.Account?.email;
-      const fullName = reader?.fullName || "Độc giả";
-
-      if (email) {
-        await mailService.sendReturnReceiptEmail(email, {
-          fullName,
-          slipId: slip.loanSlipId,
-          title: copy?.Document?.title,
-          returnDate,
-          overdueFine,
-          damageFine,
-          lostFine,
-          totalFine
-        });
-      }
-    } catch (err) {
-      console.log("⚠️ Gửi email thất bại:", err.message);
-    }
-
-    // ========================
-    // GỬI FCM
-    // ========================
-    try {
-      const payload = buildFcmPayload({
-        title: `Trả tài liệu thành công`,
-        body: `Phiếu #${slip.loanSlipId}, tổng phạt: ${totalFine}đ`,
-        data: {
-          type: 'RETURN_BOOK',
-          slipId: String(slip.loanSlipId),
-          loanDetailId: String(detail.loanDetailId),
-          totalFine: String(totalFine)
+      items: [
+        {
+          loanDetailId,
+          conditionReturn,
+          isLost,
+          note
         }
-      });
+      ]
+    },
+    rawLibrarianId
+  );
 
-      await sendFcmToReader(slip.readerId, payload);
-    } catch (err) {
-      console.log("⚠️ Lỗi gửi FCM:", err.message);
-    }
-
-    // ========================
-    // GỬI SOCKET.IO
-    // ========================
-    try {
-      emitToUser(slip.readerId, "bookReturned", {
-        slipId: slip.loanSlipId,
-        loanDetailId: detail.loanDetailId,
-        totalFine,
-        overdueFine,
-        damageFine,
-        lostFine
-      });
-    } catch (err) {
-      console.log("⚠️ Lỗi gửi socket:", err.message);
-    }
-
-    // Kiểm tra đã trả hết chưa
-    const allDetails = await LoanDetail.findAll({
-      where: { loanSlipId: slip.loanSlipId },
-      transaction: t
-    });
-
-    const allReturned = allDetails.every(d => d.returnDate !== null);
-
-    if (allReturned) {
-      await LoanSlip.update(
-        { status: 'RETURNED' },
-        { where: { loanSlipId: slip.loanSlipId }, transaction: t }
-      );
-    }
-
-    return {
-      message: 'Trả tài liệu thành công',
-      loanDetailId: detail.loanDetailId,
-      loanSlipId: slip.loanSlipId,
-      returnDate,
-      fines: {
-        overdue: overdueFine,
-        damage: damageFine,
-        lost: lostFine,
-        total: totalFine
-      },
-      deductedFromMemberCard: deducted,
-      slipFullyReturned: allReturned,
-      payment: null
-    };
-
-  }); // end transaction
+  // result có dạng giống trả phiếu: { loanSlipId, returnDate, fines, deductedFromCard, cardPaymentRecord, qrPaymentRecord, qrPayos, processedItems }
+  return result;
 }
+
 
 /**
  * PREVIEW TÍNH PHÍ TRẢ TOÀN BỘ PHIẾU (KHÔNG GHI DB)
