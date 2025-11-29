@@ -31,6 +31,7 @@ export default function ReaderCard({ doc = {} }) {
     author,
     publishYear,
     reviewCount = 12,
+    shelfLocation,
   } = doc;
 
   const cover = coverPhoto || "/no-cover.png";
@@ -57,14 +58,14 @@ export default function ReaderCard({ doc = {} }) {
         },
       }}
     >
-      <CardActionArea 
-        component={to ? RouterLink : "div"} 
-        to={to} 
-        sx={{ 
-          flexGrow: 1, 
-          display: "flex", 
+      <CardActionArea
+        component={to ? RouterLink : "div"}
+        to={to}
+        sx={{
+          flexGrow: 1,
+          display: "flex",
           flexDirection: "column",
-          alignItems: "stretch" 
+          alignItems: "stretch"
         }}
       >
         {/* Cover Image */}
@@ -172,13 +173,16 @@ export default function ReaderCard({ doc = {} }) {
                   )}
                 </Stack>
               )}
-
-
             </Stack>
 
             {/* Deposit & Stock Info */}
             <Stack spacing={1.5}>
-
+              <Stack direction="row" spacing={1} alignItems="center" sx={{ opacity: 0.8 }}>
+                <BookmarkBorder sx={{ fontSize: 16 }} />
+                <Typography variant="body2" noWrap flex={1}>
+                  Kệ: {shelfLocation || "Chưa xác định"}
+                </Typography>
+              </Stack>
               <Stack spacing={1}>
                 <Stack direction="row" justifyContent="space-between" alignItems="center">
                   <Typography variant="body2" fontWeight={600}>
@@ -188,22 +192,22 @@ export default function ReaderCard({ doc = {} }) {
                     {availableCopies}
                   </Typography>
                 </Stack>
-                
+
                 {/* Stock Progress Bar */}
-                <Box sx={{ 
-                  width: "100%", 
-                  height: 4, 
-                  backgroundColor: "grey.200", 
+                <Box sx={{
+                  width: "100%",
+                  height: 4,
+                  backgroundColor: "grey.200",
                   borderRadius: 2,
                   overflow: "hidden"
                 }}>
-                  <Box 
-                    sx={{ 
-                      height: "100%", 
+                  <Box
+                    sx={{
+                      height: "100%",
                       backgroundColor: inStock ? "success.main" : "error.main",
                       width: `${stockPercentage}%`,
                       transition: "width 0.3s ease"
-                    }} 
+                    }}
                   />
                 </Box>
               </Stack>

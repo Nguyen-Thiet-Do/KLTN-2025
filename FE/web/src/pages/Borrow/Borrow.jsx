@@ -44,7 +44,7 @@ import {
   cancelReservation,
   createViolationPaymentForSlip,
 } from "../../services/loanSlips";
-import AddLoanSlipDialog from "../Borrow/AddLoanSlipDialog";
+import AddLoanSlipDialog from "./AddLoanSlipDialog";
 import ApproveReservationDialog from "./ApproveReservationDialog";
 import ReturnSingleDialog from "./ReturnSingleDialog";
 import ReturnBulkDialog from "./ReturnBulkDialog";
@@ -76,32 +76,107 @@ function formatDate(d) {
 function chipForSlipStatus(status) {
   switch (status) {
     case "PENDING":
-      return <Chip color="warning" label="Chờ duyệt" size="small" sx={{ fontWeight: 600 }} />;
+      return (
+        <Chip
+          color="warning"
+          label="Chờ duyệt"
+          size="small"
+          sx={{ fontWeight: 600 }}
+        />
+      );
     case "WAITING_FOR_PICKUP":
-      return <Chip color="info" label="Chờ đến lấy" size="small" sx={{ fontWeight: 600 }} />;
+      return (
+        <Chip
+          color="info"
+          label="Chờ đến lấy"
+          size="small"
+          sx={{ fontWeight: 600 }}
+        />
+      );
     case "BORROWING":
-      return <Chip color="primary" label="Đang mượn" size="small" sx={{ fontWeight: 600 }} />;
+      return (
+        <Chip
+          color="primary"
+          label="Đang mượn"
+          size="small"
+          sx={{ fontWeight: 600 }}
+        />
+      );
     case "RETURNED":
-      return <Chip color="success" label="Đã trả" size="small" sx={{ fontWeight: 600 }} />;
+      return (
+        <Chip
+          color="success"
+          label="Đã trả"
+          size="small"
+          sx={{ fontWeight: 600 }}
+        />
+      );
     case "OVERDUE":
-      return <Chip color="error" label="Quá hạn" size="small" sx={{ fontWeight: 600 }} />;
+      return (
+        <Chip
+          color="error"
+          label="Quá hạn"
+          size="small"
+          sx={{ fontWeight: 600 }}
+        />
+      );
     default:
-      return <Chip label={status || "Không rõ"} size="small" sx={{ fontWeight: 600 }} />;
+      return (
+        <Chip
+          label={status || "Không rõ"}
+          size="small"
+          sx={{ fontWeight: 600 }}
+        />
+      );
   }
 }
 
 function chipForDetailStatus(status) {
   switch (status) {
     case "PENDING":
-      return <Chip size="small" color="warning" label="Chờ duyệt" sx={{ fontWeight: 600 }} />;
+      return (
+        <Chip
+          size="small"
+          color="warning"
+          label="Chờ duyệt"
+          sx={{ fontWeight: 600 }}
+        />
+      );
     case "BORROWED":
-      return <Chip size="small" color="primary" label="Đang mượn" sx={{ fontWeight: 600 }} />;
+      return (
+        <Chip
+          size="small"
+          color="primary"
+          label="Đang mượn"
+          sx={{ fontWeight: 600 }}
+        />
+      );
     case "RETURNED":
-      return <Chip size="small" color="success" label="Đã trả" sx={{ fontWeight: 600 }} />;
+      return (
+        <Chip
+          size="small"
+          color="success"
+          label="Đã trả"
+          sx={{ fontWeight: 600 }}
+        />
+      );
     case "OVERDUE":
-      return <Chip size="small" color="error" label="Quá hạn" sx={{ fontWeight: 600 }} />;
+      return (
+        <Chip
+          size="small"
+          color="error"
+          label="Quá hạn"
+          sx={{ fontWeight: 600 }}
+        />
+      );
     default:
-      return <Chip size="small" label={status || "-"} sx={{ fontWeight: 600 }} />;
+      return (
+        <Chip
+          size="small"
+          label={status || "-"}
+          sx={{ fontWeight: 600 }}
+        />
+      );
   }
 }
 
@@ -114,6 +189,226 @@ function Money({ value }) {
   if (value == null || value === "") return "-";
   const n = Number(value);
   return isNaN(n) ? String(value) : `${nf.format(n)}₫`;
+}
+
+/**
+ * Dialog xem / thanh toán vi phạm cho 1 phiếu
+ */
+function ViolationDialog({
+  open,
+  onClose,
+  slip,
+  payment,
+  paying,
+  payError,
+  onPay,
+}) {
+  const slipId = slip?.loanSlipId ?? null;
+
+  // Gom tất cả violation theo từng chi tiết
+  const rows = [];
+  (slip?.details || []).forEach((d) => {
+    const violations = d.Violations || d.violations || [];
+    const copy = d.DocumentCopy;
+    const doc = copy?.Document;
+
+    violations.forEach((v) => {
+      rows.push({
+        loanDetailId: d.loanDetailId,
+        documentTitle: doc?.title || "-",
+        barCode: copy?.barCode || "-",
+        type: v.type,
+        severity: v.severity,
+        description: v.violationDescription,
+        fineAmount: v.fineAmount,
+        paymentStatus: v.paymentStatus,
+        createdAt: v.created_at || v.createdAt,
+      });
+    });
+  });
+
+  const hasData = rows.length > 0;
+  const hasUnpaid = rows.some(
+    (r) => String(r.paymentStatus || "").toUpperCase() !== "PAID"
+  );
+
+  return (
+    <Dialog open={Boolean(open)} onClose={onClose} fullWidth maxWidth="md">
+      <DialogTitle>Vi phạm của phiếu #{slipId ?? ""}</DialogTitle>
+
+      <DialogContent dividers>
+        {!hasData ? (
+          <Typography variant="body2" color="text.secondary">
+            Phiếu này không có vi phạm nào.
+          </Typography>
+        ) : (
+          <>
+            <Table size="small">
+              <TableHead>
+                <TableRow>
+                  <TableCell>#Detail</TableCell>
+                  <TableCell>Tài liệu</TableCell>
+                  <TableCell>Mã vạch</TableCell>
+                  <TableCell>Loại</TableCell>
+                  <TableCell>Mức độ</TableCell>
+                  <TableCell>Mô tả</TableCell>
+                  <TableCell>Tiền phạt</TableCell>
+                  <TableCell>Thanh toán</TableCell>
+                  <TableCell>Ngày tạo</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {rows.map((r, idx) => (
+                  <TableRow key={`${r.loanDetailId}-${idx}`} hover>
+                    <TableCell>
+                      <Typography variant="body2" fontFamily="monospace">
+                        {r.loanDetailId}
+                      </Typography>
+                    </TableCell>
+                    <TableCell>
+                      <Typography
+                        variant="body2"
+                        fontWeight={600}
+                        noWrap
+                        sx={{ maxWidth: 200 }}
+                      >
+                        {r.documentTitle}
+                      </Typography>
+                    </TableCell>
+                    <TableCell>
+                      <Typography variant="body2" fontFamily="monospace">
+                        {r.barCode}
+                      </Typography>
+                    </TableCell>
+                    <TableCell>
+                      <Chip
+                        size="small"
+                        label={r.type || "-"}
+                        sx={{ fontWeight: 600 }}
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <Chip
+                        size="small"
+                        label={r.severity || "-"}
+                        sx={{ fontWeight: 600 }}
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <Typography variant="caption" color="text.secondary">
+                        {r.description || "-"}
+                      </Typography>
+                    </TableCell>
+                    <TableCell>
+                      <Typography variant="body2" fontWeight={600}>
+                        <Money value={r.fineAmount} />
+                      </Typography>
+                    </TableCell>
+                    <TableCell>
+                      {String(r.paymentStatus || "").toUpperCase() === "PAID" ? (
+                        <Chip
+                          size="small"
+                          color="success"
+                          label="Đã thanh toán"
+                          sx={{ fontWeight: 600 }}
+                        />
+                      ) : (
+                        <Chip
+                          size="small"
+                          color="warning"
+                          label="Chưa thanh toán"
+                          sx={{ fontWeight: 600 }}
+                        />
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <Typography variant="body2">
+                        {formatDate(r.createdAt)}
+                      </Typography>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+
+            {/* Thanh toán vi phạm */}
+            {hasUnpaid && (
+              <Box sx={{ mt: 2 }}>
+                <Typography variant="subtitle2" sx={{ mb: 1 }}>
+                  Thanh toán các vi phạm chưa thanh toán
+                </Typography>
+
+                {payError && (
+                  <Typography
+                    variant="body2"
+                    color="error"
+                    sx={{ mb: 1 }}
+                  >
+                    {payError}
+                  </Typography>
+                )}
+
+                {payment && payment.checkoutUrl ? (
+                  <Stack
+                    direction={{ xs: "column", md: "row" }}
+                    spacing={2}
+                    alignItems={{ xs: "flex-start", md: "center" }}
+                    sx={{ mt: 1 }}
+                  >
+                    <Box
+                      sx={{
+                        p: 2,
+                        bgcolor: "white",
+                        borderRadius: 2,
+                        border: "1px solid rgba(0,0,0,0.08)",
+                      }}
+                    >
+                      <QRCode
+                        value={payment.checkoutUrl}
+                        size={160}
+                        style={{ display: "block" }}
+                      />
+                    </Box>
+
+                    <Box>
+                      <Typography variant="body2" sx={{ mb: 1 }}>
+                        Số tiền cần thanh toán:{" "}
+                        <strong>
+                          <Money value={payment.amount} />
+                        </strong>
+                      </Typography>
+                      <Button
+                        variant="contained"
+                        href={payment.checkoutUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        sx={{ textTransform: "none", mr: 1, mb: { xs: 1, md: 0 } }}
+                      >
+                        Mở trang thanh toán
+                      </Button>
+                    </Box>
+                  </Stack>
+                ) : (
+                  <Button
+                    variant="contained"
+                    disabled={paying}
+                    onClick={onPay}
+                    sx={{ mt: 1, textTransform: "none" }}
+                  >
+                    {paying ? "Đang tạo QR..." : "Tạo QR thanh toán vi phạm"}
+                  </Button>
+                )}
+              </Box>
+            )}
+          </>
+        )}
+      </DialogContent>
+
+      <DialogActions>
+        <Button onClick={onClose}>Đóng</Button>
+      </DialogActions>
+    </Dialog>
+  );
 }
 
 /**
@@ -136,12 +431,17 @@ function Row({
   const librarianName =
     row?.Librarian?.fullName || (row?.librarianId ? `#${row.librarianId}` : "-");
 
+  // check note có yêu cầu hủy
+  const hasReaderCancelRequest = String(row.note || "").includes(
+    "[READER_CANCEL_REQUEST"
+  );
+
   // Gom tất cả Violation từ các LoanDetail của phiếu
   const allViolations = [];
   for (const d of row.details || []) {
     const vs = d.Violations || d.violations;
     if (Array.isArray(vs)) {
-      allViolations.push(...vs);
+      allViolations.push(...vs); // FIX: spread thay vì .vs
     }
   }
 
@@ -184,12 +484,28 @@ function Row({
 
   return (
     <>
-      <TableRow hover>
+      <TableRow
+        hover
+        sx={
+          hasReaderCancelRequest
+            ? {
+              backgroundColor: "rgba(254, 215, 215, 0.6)", // hồng nhạt
+              borderLeft: "4px solid #E53E3E",
+              "&:hover": {
+                backgroundColor: "rgba(252, 129, 129, 0.25)",
+              },
+            }
+            : {}
+        }
+      >
         <TableCell width={40}>
           <IconButton
             size="small"
             onClick={() => setOpen((v) => !v)}
-            sx={{ color: "#667EEA", "&:hover": { backgroundColor: "rgba(102,126,234,0.08)" } }}
+            sx={{
+              color: "#667EEA",
+              "&:hover": { backgroundColor: "rgba(102,126,234,0.08)" },
+            }}
             aria-label={open ? "Thu gọn" : "Mở rộng"}
           >
             {open ? <ExpandLess /> : <ExpandMore />}
@@ -212,7 +528,8 @@ function Row({
               sx={{
                 width: 24,
                 height: 24,
-                background: "linear-gradient(135deg, #667EEA 0%, #764BA2 100%)",
+                background:
+                  "linear-gradient(135deg, #667EEA 0%, #764BA2 100%)",
                 fontSize: 12,
                 fontWeight: 600,
               }}
@@ -235,14 +552,33 @@ function Row({
         </TableCell>
 
         <TableCell>
-          <Typography variant="body2">{formatDate(row.loanDate)}</Typography>
+          <Typography variant="body2">
+            {formatDate(row.loanDate)}
+          </Typography>
         </TableCell>
 
         <TableCell>
-          <Typography variant="body2">{formatDate(row.dueDate)}</Typography>
+          <Typography variant="body2">
+            {formatDate(row.dueDate)}
+          </Typography>
         </TableCell>
 
-        <TableCell>{chipForSlipStatus(row.status)}</TableCell>
+        <TableCell>
+          <Stack direction="row" spacing={1} alignItems="center">
+            {chipForSlipStatus(row.status)}
+            {hasReaderCancelRequest && (
+              <Chip
+                size="small"
+                color="error"
+                label="Độc giả yêu cầu hủy"
+                sx={{
+                  fontWeight: 700,
+                  backgroundColor: "rgba(229,62,62,0.12)",
+                }}
+              />
+            )}
+          </Stack>
+        </TableCell>
 
         {/* Trạng thái vi phạm (chỉ áp dụng tab ĐÃ TRẢ) */}
         <TableCell>
@@ -254,7 +590,8 @@ function Row({
             label={Array.isArray(row.details) ? row.details.length : 0}
             size="small"
             sx={{
-              background: "linear-gradient(135deg, #667EEA 0%, #764BA2 100%)",
+              background:
+                "linear-gradient(135deg, #667EEA 0%, #764BA2 100%)",
               color: "white",
               fontWeight: 700,
             }}
@@ -264,7 +601,11 @@ function Row({
         <TableCell align="right">
           {String(row.status).toUpperCase() === "PENDING" && (
             <>
-              <Button size="small" variant="contained" onClick={() => onApprove?.(row)}>
+              <Button
+                size="small"
+                variant="contained"
+                onClick={() => onApprove?.(row)}
+              >
                 Duyệt
               </Button>
 
@@ -282,7 +623,11 @@ function Row({
 
           {String(row.status).toUpperCase() === "WAITING_FOR_PICKUP" && (
             <>
-              <Button size="small" variant="contained" onClick={() => onPickup?.(row)}>
+              <Button
+                size="small"
+                variant="contained"
+                onClick={() => onPickup?.(row)}
+              >
                 Xác nhận lấy
               </Button>
 
@@ -298,16 +643,18 @@ function Row({
             </>
           )}
 
-          {["BORROWING", "OVERDUE"].includes(String(row.status).toUpperCase()) && (
-            <Button
-              size="small"
-              variant="outlined"
-              sx={{ ml: 1 }}
-              onClick={() => onBulkReturn?.(row)}
-            >
-              Trả toàn bộ
-            </Button>
-          )}
+          {["BORROWING", "OVERDUE"].includes(
+            String(row.status).toUpperCase()
+          ) && (
+              <Button
+                size="small"
+                variant="outlined"
+                sx={{ ml: 1 }}
+                onClick={() => onBulkReturn?.(row)}
+              >
+                Trả toàn bộ
+              </Button>
+            )}
 
           {isReturnedTab && hasViolations && (
             <Button
@@ -373,35 +720,45 @@ function Row({
                     <TableCell>Trạng thái</TableCell>
                     <TableCell>Ngày trả</TableCell>
                     <TableCell>Tiền phạt</TableCell>
-                    <TableCell>Gia hạn</TableCell>
+                    <TableCell>Lượt gia hạn</TableCell>
                     <TableCell>Ghi chú</TableCell>
-                    <TableCell align="right">Hành động</TableCell>
+                    <TableCell align="right">Thao tác</TableCell>
                   </TableRow>
                 </TableHead>
 
                 <TableBody>
-                  {(row.details || []).length === 0 ? (
+                  {(!row.details || row.details.length === 0) ? (
                     <TableRow>
-                      <TableCell colSpan={11} align="center" sx={{ py: 2 }}>
-                        <Typography variant="body2" color="text.secondary">
-                          Chưa có bản ghi
+                      <TableCell colSpan={11} align="center">
+                        <Typography
+                          variant="body2"
+                          color="text.secondary"
+                        >
+                          Không có chi tiết
                         </Typography>
                       </TableCell>
                     </TableRow>
                   ) : (
                     row.details.map((d) => {
-                      const requestedId =
-                        row.status === "PENDING" ? parseRequestedDocumentId(d.note) : null;
                       const copy = d.DocumentCopy;
                       const doc = copy?.Document;
-                      const documentId = requestedId ?? doc?.documentId ?? null;
+
+                      const documentId =
+                        row.status === "PENDING"
+                          ? parseRequestedDocumentId(d.note)
+                          : doc?.documentId;
+
                       const title =
                         row.status === "PENDING"
                           ? documentId
                             ? titleCache.get(documentId) ?? "Đang tải..."
                             : "-"
                           : doc?.title || "-";
-                      const cover = row.status === "PENDING" ? null : doc?.coverPhoto || null;
+
+                      const cover =
+                        row.status === "PENDING"
+                          ? null
+                          : doc?.coverPhoto || null;
 
                       return (
                         <TableRow key={d.loanDetailId} hover>
@@ -412,7 +769,10 @@ function Row({
                           </TableCell>
 
                           <TableCell>
-                            <Typography variant="body2" fontFamily="monospace">
+                            <Typography
+                              variant="body2"
+                              fontFamily="monospace"
+                            >
                               {documentId ?? "-"}
                             </Typography>
                           </TableCell>
@@ -448,15 +808,22 @@ function Row({
                           </TableCell>
 
                           <TableCell>
-                            <Typography variant="body2" fontFamily="monospace">
+                            <Typography
+                              variant="body2"
+                              fontFamily="monospace"
+                            >
                               {copy?.barCode || "-"}
                             </Typography>
                           </TableCell>
 
-                          <TableCell>{chipForDetailStatus(d.status)}</TableCell>
+                          <TableCell>
+                            {chipForDetailStatus(d.status)}
+                          </TableCell>
 
                           <TableCell>
-                            <Typography variant="body2">{formatDate(d.returnDate)}</Typography>
+                            <Typography variant="body2">
+                              {formatDate(d.returnDate)}
+                            </Typography>
                           </TableCell>
 
                           <TableCell>
@@ -475,7 +842,10 @@ function Row({
                           </TableCell>
 
                           <TableCell>
-                            <Typography variant="caption" color="text.secondary">
+                            <Typography
+                              variant="caption"
+                              color="text.secondary"
+                            >
                               {d.note || "-"}
                             </Typography>
                           </TableCell>
@@ -487,7 +857,9 @@ function Row({
                                 <Button
                                   size="small"
                                   variant="outlined"
-                                  onClick={() => onSingleReturn?.(row, d)}
+                                  onClick={() =>
+                                    onSingleReturn?.(row, d)
+                                  }
                                 >
                                   Trả
                                 </Button>
@@ -498,7 +870,9 @@ function Row({
                                 size="small"
                                 variant="outlined"
                                 color="error"
-                                onClick={() => onDeleteDetail?.(row, d)}
+                                onClick={() =>
+                                  onDeleteDetail?.(row, d)
+                                }
                               >
                                 Xóa
                               </Button>
@@ -515,6 +889,78 @@ function Row({
         </TableCell>
       </TableRow>
     </>
+  );
+}
+
+function CancelReservationDialog({ open, onClose, slip, onCancelled }) {
+  const [reason, setReason] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState("");
+
+  const slipId = slip?.loanSlipId;
+
+  async function handleSubmit() {
+    if (!slipId) return;
+    setLoading(true);
+    setErrorMsg("");
+    try {
+      const res = await cancelReservation(slipId, {
+        reason: reason || undefined,
+      });
+      if (!res?.success) {
+        setErrorMsg(res?.message || "Hủy phiếu thất bại");
+        return;
+      }
+      onCancelled?.(res);
+    } catch (e) {
+      console.error(e);
+      setErrorMsg(e?.message || "Lỗi khi hủy phiếu");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <Dialog open={open} onClose={loading ? undefined : onClose} fullWidth>
+      <DialogTitle>Hủy phiếu đặt trước #{slipId}</DialogTitle>
+      <DialogContent dividers>
+        <Typography variant="body2" sx={{ mb: 1 }}>
+          Bạn có chắc muốn hủy phiếu đặt trước này? Hành động này không thể
+          hoàn tác.
+        </Typography>
+        <TextField
+          label="Lý do hủy (tuỳ chọn)"
+          fullWidth
+          multiline
+          minRows={2}
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          sx={{ mt: 1 }}
+        />
+        {errorMsg && (
+          <Typography
+            variant="body2"
+            color="error"
+            sx={{ mt: 1 }}
+          >
+            {errorMsg}
+          </Typography>
+        )}
+      </DialogContent>
+      <DialogActions>
+        <Button disabled={loading} onClick={onClose}>
+          Đóng
+        </Button>
+        <Button
+          color="error"
+          variant="contained"
+          disabled={loading}
+          onClick={handleSubmit}
+        >
+          {loading ? "Đang hủy..." : "Xác nhận hủy"}
+        </Button>
+      </DialogActions>
+    </Dialog>
   );
 }
 
@@ -565,7 +1011,8 @@ export default function Borrow() {
   const [selectedDetailForReturn, setSelectedDetailForReturn] = useState(null);
 
   const [openReturnBulk, setOpenReturnBulk] = useState(false);
-  const [selectedSlipForBulkReturn, setSelectedSlipForBulkReturn] = useState(null);
+  const [selectedSlipForBulkReturn, setSelectedSlipForBulkReturn] =
+    useState(null);
 
   // Cancel reservation (PENDING)
   const [openCancel, setOpenCancel] = useState(false);
@@ -577,7 +1024,8 @@ export default function Borrow() {
 
   // Cancel full slip (WAITING_FOR_PICKUP)
   const [openCancelSlip, setOpenCancelSlip] = useState(false);
-  const [selectedSlipForCancelSlip, setSelectedSlipForCancelSlip] = useState(null);
+  const [selectedSlipForCancelSlip, setSelectedSlipForCancelSlip] =
+    useState(null);
 
   // Delete single detail (from waiting slip)
   const [openDeleteDetail, setOpenDeleteDetail] = useState(false);
@@ -586,7 +1034,8 @@ export default function Borrow() {
 
   // Violation dialog (xem vi phạm của phiếu đã trả)
   const [openViolationDialog, setOpenViolationDialog] = useState(false);
-  const [selectedSlipForViolations, setSelectedSlipForViolations] = useState(null);
+  const [selectedSlipForViolations, setSelectedSlipForViolations] =
+    useState(null);
 
   // Thanh toán vi phạm
   const [violationPaying, setViolationPaying] = useState(false);
@@ -664,10 +1113,11 @@ export default function Borrow() {
 
   useEffect(() => {
     load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, page]);
 
   const filteredRows = useMemo(() => {
-    let result = [...rows];
+    let result = [...rows]; // FIX: clone rows
 
     if (searchQuery.trim()) {
       const kw = searchQuery.trim().toLowerCase();
@@ -791,7 +1241,9 @@ export default function Borrow() {
     if (!selectedSlipForViolations) return;
     const resolvedLibrarianId = resolveLibrarianId();
     if (!resolvedLibrarianId) {
-      alert("Không xác định thủ thư. Vui lòng đăng nhập lại hoặc liên hệ admin.");
+      alert(
+        "Không xác định thủ thư. Vui lòng đăng nhập lại hoặc liên hệ admin."
+      );
       return;
     }
 
@@ -806,7 +1258,9 @@ export default function Borrow() {
       );
 
       if (!res?.success) {
-        setViolationPayError(res?.message || "Tạo thanh toán vi phạm thất bại");
+        setViolationPayError(
+          res?.message || "Tạo thanh toán vi phạm thất bại"
+        );
         return;
       }
 
@@ -820,7 +1274,9 @@ export default function Borrow() {
       setViolationPayment(res.payment || null);
     } catch (err) {
       console.error("createViolationPaymentForSlip error", err);
-      setViolationPayError(err?.message || "Lỗi khi tạo thanh toán vi phạm");
+      setViolationPayError(
+        err?.message || "Lỗi khi tạo thanh toán vi phạm"
+      );
     } finally {
       setViolationPaying(false);
     }
@@ -847,7 +1303,13 @@ export default function Borrow() {
         </Typography>
       </Box>
 
-      <Card sx={{ mb: 3, borderRadius: 3, boxShadow: "0 8px 32px rgba(0,0,0,0.1)" }}>
+      <Card
+        sx={{
+          mb: 3,
+          borderRadius: 3,
+          boxShadow: "0 8px 32px rgba(0,0,0,0.1)",
+        }}
+      >
         <CardContent>
           <Stack spacing={2}>
             {/* HÀNG ĐẦU TIÊN: TABS + NÚT HÀNH ĐỘNG */}
@@ -872,7 +1334,8 @@ export default function Borrow() {
                     "&.Mui-selected": { color: "#667EEA" },
                   },
                   "& .MuiTabs-indicator": {
-                    background: "linear-gradient(135deg, #667EEA 0%, #764BA2 100%)",
+                    background:
+                      "linear-gradient(135deg, #667EEA 0%, #764BA2 100%)",
                     height: 3,
                     borderRadius: "3px 3px 0 0",
                   },
@@ -993,7 +1456,6 @@ export default function Borrow() {
                   sx={{
                     borderRadius: 2,
                     borderColor: "#E53E3E",
-                    color: "#E53E3E",
                     fontWeight: 600,
                     minWidth: { xs: "100%", md: "auto" },
                     "&:hover": {
@@ -1021,7 +1483,8 @@ export default function Borrow() {
           <LinearProgress
             sx={{
               "& .MuiLinearProgress-bar": {
-                background: "linear-gradient(135deg, #667EEA 0%, #764BA2 100%)",
+                background:
+                  "linear-gradient(135deg, #667EEA 0%, #764BA2 100%)",
               },
             }}
           />
@@ -1032,19 +1495,37 @@ export default function Borrow() {
             <TableHead>
               <TableRow sx={{ backgroundColor: "rgba(102,126,234,0.08)" }}>
                 <TableCell />
-                <TableCell sx={{ fontWeight: 700, color: "#2D3748" }}>ID Phiếu</TableCell>
-                <TableCell sx={{ fontWeight: 700, color: "#2D3748" }}>Độc giả</TableCell>
-                <TableCell sx={{ fontWeight: 700, color: "#2D3748" }}>Thủ thư</TableCell>
-                <TableCell sx={{ fontWeight: 700, color: "#2D3748" }}>Ngày tạo</TableCell>
-                <TableCell sx={{ fontWeight: 700, color: "#2D3748" }}>Hạn trả</TableCell>
-                <TableCell sx={{ fontWeight: 700, color: "#2D3748" }}>Trạng thái</TableCell>
+                <TableCell sx={{ fontWeight: 700, color: "#2D3748" }}>
+                  ID Phiếu
+                </TableCell>
+                <TableCell sx={{ fontWeight: 700, color: "#2D3748" }}>
+                  Độc giả
+                </TableCell>
+                <TableCell sx={{ fontWeight: 700, color: "#2D3748" }}>
+                  Thủ thư
+                </TableCell>
+                <TableCell sx={{ fontWeight: 700, color: "#2D3748" }}>
+                  Ngày tạo
+                </TableCell>
+                <TableCell sx={{ fontWeight: 700, color: "#2D3748" }}>
+                  Hạn trả
+                </TableCell>
+                <TableCell sx={{ fontWeight: 700, color: "#2D3748" }}>
+                  Trạng thái
+                </TableCell>
                 <TableCell sx={{ fontWeight: 700, color: "#2D3748" }}>
                   Trạng thái VP
                 </TableCell>
-                <TableCell align="center" sx={{ fontWeight: 700, color: "#2D3748" }}>
+                <TableCell
+                  align="center"
+                  sx={{ fontWeight: 700, color: "#2D3748" }}
+                >
                   Số đầu mục
                 </TableCell>
-                <TableCell align="right" sx={{ fontWeight: 700, color: "#2D3748" }}>
+                <TableCell
+                  align="right"
+                  sx={{ fontWeight: 700, color: "#2D3748" }}
+                >
                   Thao tác
                 </TableCell>
               </TableRow>
@@ -1054,7 +1535,10 @@ export default function Borrow() {
               {displayRows.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={10} align="center" sx={{ py: 6 }}>
-                    <Typography variant="body1" color="text.secondary">
+                    <Typography
+                      variant="body1"
+                      color="text.secondary"
+                    >
                       {rows.length === 0
                         ? "Không có dữ liệu"
                         : "Không tìm thấy kết quả phù hợp"}
@@ -1073,14 +1557,20 @@ export default function Borrow() {
                     }}
                     onCancel={(slip) => {
                       // phân biệt: nếu đang PENDING => cancelReservation; nếu WAITING_FOR_PICKUP => cancelLoanSlip
-                      if (String(slip.status).toUpperCase() === "PENDING")
+                      if (
+                        String(slip.status).toUpperCase() === "PENDING"
+                      )
                         handleOpenCancel(slip);
                       else handleOpenCancelSlip(slip);
                     }}
                     onPickup={(slip) => handleOpenPickup(slip)}
-                    onSingleReturn={(slip, detail) => handleOpenSingleReturn(slip, detail)}
+                    onSingleReturn={(slip, detail) =>
+                      handleOpenSingleReturn(slip, detail)
+                    }
                     onBulkReturn={(slip) => handleOpenBulkReturn(slip)}
-                    onDeleteDetail={(slip, detail) => handleOpenDeleteDetail(slip, detail)}
+                    onDeleteDetail={(slip, detail) =>
+                      handleOpenDeleteDetail(slip, detail)
+                    }
                     isReturnedTab={tab === "RETURNED"}
                     onViewViolations={handleOpenViolationDialog}
                   />
@@ -1100,8 +1590,8 @@ export default function Borrow() {
             }}
           >
             <Typography variant="body2" color="text.secondary">
-              Tổng: {rows.length} phiếu • Hiển thị: {displayRows.length} • Trang {page}/
-              {totalPages}
+              Tổng: {rows.length} phiếu • Hiển thị: {displayRows.length} •
+              Trang {page}/{totalPages}
             </Typography>
 
             <Pagination
@@ -1112,9 +1602,13 @@ export default function Borrow() {
               showFirstButton
               showLastButton
               sx={{
-                "& .MuiPaginationItem-root": { borderRadius: 2, fontWeight: 600 },
+                "& .MuiPaginationItem-root": {
+                  borderRadius: 2,
+                  fontWeight: 600,
+                },
                 "& .MuiPaginationItem-root.Mui-selected": {
-                  background: "linear-gradient(135deg, #667EEA 0%, #764BA2 100%)",
+                  background:
+                    "linear-gradient(135deg, #667EEA 0%, #764BA2 100%)",
                   color: "white",
                 },
               }}
@@ -1172,8 +1666,7 @@ export default function Borrow() {
         open={openCancel}
         onClose={() => handleCloseCancel()}
         slip={selectedSlipForCancel}
-        librarianId={resolvedLibrarianId}
-        onCancelled={(resp) => {
+        onCancelled={() => {
           handleCloseCancel();
           load();
         }}
@@ -1203,7 +1696,7 @@ export default function Borrow() {
         }}
       />
 
-      {/* Delete single detail (from waiting slip) */}
+      {/* Delete single detail dialog */}
       <DeleteDetailDialog
         open={openDeleteDetail}
         onClose={() => handleCloseDeleteDetail()}
@@ -1216,296 +1709,16 @@ export default function Borrow() {
         }}
       />
 
-      {/* Dialog xem chi tiết vi phạm + thanh toán QR */}
-      <ViolationDetailDialog
+      {/* Violation dialog */}
+      <ViolationDialog
         open={openViolationDialog}
         onClose={handleCloseViolationDialog}
         slip={selectedSlipForViolations}
-        onPay={handlePayViolations}
-        paying={violationPaying}
         payment={violationPayment}
+        paying={violationPaying}
         payError={violationPayError}
+        onPay={handlePayViolations}
       />
     </Box>
-  );
-}
-
-/**
- * CancelReservationDialog (embedded component)
- * Gọi API cancelReservation (DELETE) từ services/loanSlips
- * Dành cho PENDING (phiếu chưa gán bản sao)
- */
-function CancelReservationDialog({ open, onClose, slip, librarianId, onCancelled }) {
-  const [reason, setReason] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-  const slipId = slip?.loanSlipId ?? null;
-
-  useEffect(() => {
-    if (!open) {
-      setReason("");
-      setSubmitting(false);
-    }
-  }, [open]);
-
-  async function handleConfirm() {
-    if (!slipId) return;
-    if (!librarianId) {
-      alert("Không xác định thủ thư (librarianId). Vui lòng đăng nhập lại hoặc liên hệ admin.");
-      return;
-    }
-
-    setSubmitting(true);
-    try {
-      const res = await cancelReservation(slipId, { librarianId, reason });
-      if (res && res.success) {
-        if (onCancelled) onCancelled(res);
-      } else {
-        alert(res?.message || "Hủy phiếu thất bại");
-      }
-    } catch (err) {
-      console.error("cancelReservation error", err);
-      alert(err?.message || "Lỗi khi hủy phiếu");
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  return (
-    <Dialog open={Boolean(open)} onClose={onClose} fullWidth maxWidth="sm">
-      <DialogTitle>Hủy phiếu đặt trước #{slipId ?? ""}</DialogTitle>
-      <DialogContent>
-        <Stack spacing={1} sx={{ mt: 1 }}>
-          <Typography variant="body2" color="text.secondary">
-            Hủy phiếu đặt trước sẽ xóa các bản ghi đặt (LoanDetail) liên quan và gửi thông báo tới độc giả.
-            Vui lòng nhập lý do (tùy chọn) để lưu vào ghi chú phiếu.
-          </Typography>
-          <TextField
-            label="Lý do hủy (tùy chọn)"
-            value={reason}
-            onChange={(e) => setReason(e.target.value)}
-            multiline
-            minRows={3}
-            fullWidth
-            sx={{ mt: 1 }}
-          />
-        </Stack>
-      </DialogContent>
-
-      <DialogActions sx={{ px: 3, pb: 2 }}>
-        <Button onClick={onClose} disabled={submitting}>
-          Đóng
-        </Button>
-        <Button
-          variant="contained"
-          color="error"
-          onClick={handleConfirm}
-          disabled={submitting}
-        >
-          {submitting ? "Đang xử lý..." : "Xác nhận hủy"}
-        </Button>
-      </DialogActions>
-    </Dialog>
-  );
-}
-
-/**
- * Dialog hiển thị chi tiết vi phạm của 1 phiếu + tạo QR thanh toán
- */
-function ViolationDetailDialog({ open, onClose, slip, onPay, paying, payment, payError }) {
-  const slipId = slip?.loanSlipId ?? null;
-
-  // Gom tất cả violation theo từng chi tiết
-  const rows = [];
-  (slip?.details || []).forEach((d) => {
-    const violations = d.Violations || d.violations || [];
-    const copy = d.DocumentCopy;
-    const doc = copy?.Document;
-
-    violations.forEach((v) => {
-      rows.push({
-        loanDetailId: d.loanDetailId,
-        documentTitle: doc?.title || "-",
-        barCode: copy?.barCode || "-",
-        type: v.type,
-        severity: v.severity,
-        description: v.violationDescription,
-        fineAmount: v.fineAmount,
-        paymentStatus: v.paymentStatus,
-        createdAt: v.created_at || v.createdAt,
-      });
-    });
-  });
-
-  const hasData = rows.length > 0;
-  const hasUnpaid = rows.some(
-    (r) => String(r.paymentStatus || "").toUpperCase() !== "PAID"
-  );
-
-  return (
-    <Dialog open={Boolean(open)} onClose={onClose} fullWidth maxWidth="md">
-      <DialogTitle>Vi phạm của phiếu #{slipId ?? ""}</DialogTitle>
-
-      <DialogContent dividers>
-        {!hasData ? (
-          <Typography variant="body2" color="text.secondary">
-            Phiếu này không có vi phạm nào.
-          </Typography>
-        ) : (
-          <>
-            <Table size="small">
-              <TableHead>
-                <TableRow>
-                  <TableCell>#Detail</TableCell>
-                  <TableCell>Tài liệu</TableCell>
-                  <TableCell>Mã vạch</TableCell>
-                  <TableCell>Loại</TableCell>
-                  <TableCell>Mức độ</TableCell>
-                  <TableCell>Mô tả</TableCell>
-                  <TableCell>Tiền phạt</TableCell>
-                  <TableCell>Thanh toán</TableCell>
-                  <TableCell>Ngày tạo</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {rows.map((r, idx) => (
-                  <TableRow key={`${r.loanDetailId}-${idx}`} hover>
-                    <TableCell>
-                      <Typography variant="body2" fontFamily="monospace">
-                        {r.loanDetailId}
-                      </Typography>
-                    </TableCell>
-                    <TableCell>
-                      <Typography
-                        variant="body2"
-                        fontWeight={600}
-                        noWrap
-                        sx={{ maxWidth: 200 }}
-                      >
-                        {r.documentTitle}
-                      </Typography>
-                    </TableCell>
-                    <TableCell>
-                      <Typography variant="body2" fontFamily="monospace">
-                        {r.barCode}
-                      </Typography>
-                    </TableCell>
-                    <TableCell>
-                      <Chip size="small" label={r.type || "-"} sx={{ fontWeight: 600 }} />
-                    </TableCell>
-                    <TableCell>
-                      <Chip size="small" label={r.severity || "-"} sx={{ fontWeight: 600 }} />
-                    </TableCell>
-                    <TableCell>
-                      <Typography variant="caption" color="text.secondary">
-                        {r.description || "-"}
-                      </Typography>
-                    </TableCell>
-                    <TableCell>
-                      <Typography variant="body2" fontWeight={600}>
-                        <Money value={r.fineAmount} />
-                      </Typography>
-                    </TableCell>
-                    <TableCell>
-                      {String(r.paymentStatus || "").toUpperCase() === "PAID" ? (
-                        <Chip
-                          size="small"
-                          color="success"
-                          label="Đã thanh toán"
-                          sx={{ fontWeight: 600 }}
-                        />
-                      ) : (
-                        <Chip
-                          size="small"
-                          color="warning"
-                          label="Chưa thanh toán"
-                          sx={{ fontWeight: 600 }}
-                        />
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <Typography variant="body2">{formatDate(r.createdAt)}</Typography>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-
-            {/* Thanh toán vi phạm */}
-            {hasUnpaid && (
-              <Box sx={{ mt: 2 }}>
-                <Typography variant="subtitle2" sx={{ mb: 1 }}>
-                  Thanh toán các vi phạm chưa thanh toán
-                </Typography>
-
-                {payError && (
-                  <Typography
-                    variant="body2"
-                    color="error"
-                    sx={{ mb: 1 }}
-                  >
-                    {payError}
-                  </Typography>
-                )}
-
-                {payment && payment.checkoutUrl ? (
-                  <Stack
-                    direction={{ xs: "column", md: "row" }}
-                    spacing={2}
-                    alignItems={{ xs: "flex-start", md: "center" }}
-                    sx={{ mt: 1 }}
-                  >
-                    <Box
-                      sx={{
-                        p: 2,
-                        bgcolor: "white",
-                        borderRadius: 2,
-                        border: "1px solid rgba(0,0,0,0.08)",
-                      }}
-                    >
-                      <QRCode
-                        value={payment.checkoutUrl}
-                        size={160}
-                        style={{ display: "block" }}
-                      />
-                    </Box>
-
-                    <Box>
-                      <Typography variant="body2" sx={{ mb: 1 }}>
-                        Số tiền cần thanh toán:{" "}
-                        <strong>
-                          <Money value={payment.amount} />
-                        </strong>
-                      </Typography>
-                      <Button
-                        variant="contained"
-                        href={payment.checkoutUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        sx={{ textTransform: "none", mr: 1, mb: { xs: 1, md: 0 } }}
-                      >
-                        Mở trang thanh toán
-                      </Button>
-                    </Box>
-                  </Stack>
-                ) : (
-                  <Button
-                    variant="contained"
-                    disabled={paying}
-                    onClick={onPay}
-                    sx={{ mt: 1, textTransform: "none" }}
-                  >
-                    {paying ? "Đang tạo QR..." : "Tạo QR thanh toán vi phạm"}
-                  </Button>
-                )}
-              </Box>
-            )}
-          </>
-        )}
-      </DialogContent>
-
-      <DialogActions>
-        <Button onClick={onClose}>Đóng</Button>
-      </DialogActions>
-    </Dialog>
   );
 }

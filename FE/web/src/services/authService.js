@@ -9,10 +9,28 @@ export const login = async (email, password) => {
 };
 
 /**
- * 📝 Register Reader
+ * 📝 Bước 1: Khởi tạo đăng ký – gửi OTP
  */
-export const register = async (userData) => {
-  const response = await api.post("/auth/register", userData);
+export const registerInit = async (email) => {
+  const response = await api.post("/auth/register/init", { email });
+  return response.data;
+};
+
+/**
+ * 📝 Bước 2: Xác thực OTP + tạo Account + Reader
+ */
+export const registerVerify = async (payload) => {
+  // payload: { email, otp, password, fullName, phoneNumber, dateOfBirth, gender, cccd, address }
+  const response = await api.post("/auth/register/verify", payload);
+  return response.data;
+};
+
+/**
+ * 💳 Bước 3: Hoàn tất đăng ký (chọn thẻ FREE/PREMIUM)
+ */
+export const registerComplete = async (payload) => {
+  // payload: { readerId, cardTypeId, action, extraInfo? }
+  const response = await api.post("/auth/register/complete", payload);
   return response.data;
 };
 
@@ -50,7 +68,9 @@ export const completeRegistration = async (payload, token = null) => {
  */
 export const authService = {
   login,
-  register,
+  registerInit,
+  registerVerify,
+  registerComplete,
   logout,
   getCurrentUser,
   completeRegistration,
