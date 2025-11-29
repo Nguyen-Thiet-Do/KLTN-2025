@@ -10,5 +10,6 @@ router.get("/monthly", statisticController.getMonthlyStatistics);
 
 router.get("/category", statisticController.getCategoryStatistics);
 router.get("/top-books", statisticController.getTop5MostBorrowedBooks);
+router.get("/top-readers", statisticController.getTop5Readers);
 
 module.exports = router;

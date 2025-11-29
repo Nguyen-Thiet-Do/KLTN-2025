@@ -33,4 +33,13 @@ const getTop5MostBorrowedBooks = async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 };
-module.exports = { getAllStatistics, getMonthlyStatistics, getCategoryStatistics, getTop5MostBorrowedBooks };
+const getTop5Readers = async (req, res) => {
+  try {
+    const data = await statisticService.getTop5Readers();
+    res.json({ success: true, data });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+module.exports = { getAllStatistics, getMonthlyStatistics, getCategoryStatistics, getTop5MostBorrowedBooks, getTop5Readers };

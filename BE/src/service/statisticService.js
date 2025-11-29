@@ -182,10 +182,29 @@ const getTop5MostBorrowedBooks = async () => {
     throw error;
   }
 };
+const getTop5Readers = async () => {
+  const [rows] = await sequelize.query(`
+    SELECT r.fullName AS reader, COUNT(*) AS total
+    FROM LoanSlips ls
+    JOIN Readers r ON r.readerId = ls.readerId
+    WHERE ls.deleted = FALSE
+    GROUP BY r.readerId, r.fullName
+    ORDER BY total DESC
+    LIMIT 5;
+  `);
+
+  return rows.map(r => ({
+    reader: r.reader,
+    total: parseInt(r.total),
+  }));
+};
+
+
 
 module.exports = {
   getLibraryStatistics,
   getMonthlyLoans,
   getCategoryStatistics,
-  getTop5MostBorrowedBooks
+  getTop5MostBorrowedBooks,
+  getTop5Readers
 };
