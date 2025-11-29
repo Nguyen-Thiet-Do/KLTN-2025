@@ -5,7 +5,7 @@ import ReaderHeader from "../../components/layouts/ReaderHeader";
 import ReaderSidebar from "../../components/layouts/ReaderSidebar";
 import ReaderCard from "../../components/layouts/ReaderCard";
 import ReaderFooter from "../../components/layouts/ReaderFooter";
-import { Box, Typography, Alert, Stack, Paper, Button } from "@mui/material";
+import { Box, Typography, Alert, Stack, Paper, Button,TextField } from "@mui/material";
 import ButtonLoader from "../../components/Loading/ButtonLoader";
 
 const isAbort = (e) =>
@@ -26,6 +26,7 @@ export default function ReaderHome({ type = "all" }) {
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState("");
   const [selectedGenre, setSelectedGenre] = useState(null);
+const [searchQuery, setSearchQuery] = useState("");
 
   // abort + chống race
   const abortRef = useRef(null);
@@ -56,7 +57,7 @@ export default function ReaderHome({ type = "all" }) {
     setHasMore(true);
     setError("");
     setLoading(true);
-  }, [type, selectedGenre]);
+  }, [type, selectedGenre, searchQuery]);
 
   // load page hiện tại
   useEffect(() => {
@@ -71,13 +72,15 @@ export default function ReaderHome({ type = "all" }) {
       try {
         const signal = newSignal();
         const { items: newItems, pagination } = await documentApi.fetchDocuments({
-          type,
-          page,
-          limit: PAGE_SIZE,
-          genreId: selectedGenre ?? null,
-          match: "any",
-          signal,
-        });
+  type,
+  page,
+  limit: PAGE_SIZE,
+  genreId: selectedGenre ?? null,
+  match: "any",
+  search: searchQuery,   // <<< thêm dòng này
+  signal,
+});
+
 
         if (!mounted || myId !== loadIdRef.current) return;
 
@@ -110,7 +113,7 @@ export default function ReaderHome({ type = "all" }) {
       abortRef.current?.abort();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, type, selectedGenre]);
+  }, [page, type, selectedGenre,searchQuery]);
 
   // IntersectionObserver cho lazy load
   useEffect(() => {
@@ -158,6 +161,16 @@ export default function ReaderHome({ type = "all" }) {
                     Đang lọc theo thể loại ID: <strong>{selectedGenre}</strong>
                   </Typography>
                 )}
+                <Box sx={{ minWidth: 260 }}>
+  <TextField
+    fullWidth
+    size="small"
+    placeholder="Tìm theo tên sách…"
+    value={searchQuery}
+    onChange={(e) => setSearchQuery(e.target.value)}
+  />
+</Box>
+
               </Stack>
             </Paper>
 
