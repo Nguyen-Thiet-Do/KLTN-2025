@@ -23,6 +23,7 @@ export default function AdminDashboard() {
   const [monthly, setMonthly] = useState([]);
   const [categories, setCategories] = useState([]);
   const [topBooks, setTopBooks] = useState([]);
+const [topReaders, setTopReaders] = useState([]);
 
   useEffect(() => {
     (async () => {
@@ -30,11 +31,12 @@ export default function AdminDashboard() {
       const monthlyStats = await statisticApi.getMonthly();
       const categoryStats = await statisticApi.getCategory();
       const topBookStats = await statisticApi.getTopBooks();
-
+ const topReaderStats = await statisticApi.getTopReaders();
       setStats(allStats);
       setMonthly(monthlyStats.data);
       setCategories(categoryStats);
       setTopBooks(topBookStats);
+      setTopReaders(topReaderStats);
     })();
   }, []);
 
@@ -51,13 +53,13 @@ export default function AdminDashboard() {
     { label: "Bản sao sách", value: stats.totalCopies },
     { label: "Người đọc", value: stats.totalReaders },
     { label: "Tổng phiếu mượn", value: stats.totalLoans },
-    { label: "Số phiếu mượn tháng này", value: stats.monthlyLoans },
+    // { label: "Số phiếu mượn tháng này", value: stats.monthlyLoans },
 
     // ⭐ Thêm 2 card mới
     { label: "Tổng số cuốn sách được mượn", value: stats.totalBorrowedBooks },
-    { label: "Số cuốn sách được mượn tháng này", value: stats.monthlyBorrowedBooks },
+    // { label: "Số cuốn sách được mượn tháng này", value: stats.monthlyBorrowedBooks },
 
-    { label: "Đang được mượn", value: stats.borrowedCopies },
+    // { label: "Số sách đang được mượn", value: stats.borrowedCopies },
     { label: "Sách quá hạn", value: stats.overdueLoans },
     { label: "Thể loại phổ biến", value: stats.mostPopularGenre || "N/A" },
   ];
@@ -89,7 +91,7 @@ export default function AdminDashboard() {
       <Card elevation={3}>
         <CardContent>
           <Typography variant="h6" mb={2}>
-            Biểu đồ lượt mượn theo tháng ({new Date().getFullYear()})
+            Biểu đồ phiếu mượn theo tháng ({new Date().getFullYear()})
           </Typography>
           <Box sx={{ height: 320 }}>
             <ResponsiveContainer width="100%" height="100%">
@@ -142,6 +144,41 @@ export default function AdminDashboard() {
           </Box>
         </CardContent>
       </Card>
+      {/* Top 5 độc giả mượn nhiều nhất */}
+<Card elevation={3} sx={{ mt: 3 }}>
+  <CardContent>
+    <Typography variant="h6" fontWeight={700} mb={2}>
+      Top 5 độc giả mượn nhiều nhất
+    </Typography>
+
+    <Box sx={{ width: "100%", height: topReaders.length * 50 + 120 }}>
+      <ResponsiveContainer>
+        <BarChart
+          data={topReaders}
+          layout="vertical"
+          margin={{ top: 20, right: 30, left: 120, bottom: 20 }}
+        >
+          <CartesianGrid strokeDasharray="3 3" />
+          <XAxis type="number" />
+          <YAxis
+            dataKey="reader"
+            type="category"
+            width={200}
+            tick={{ fontSize: 13 }}
+          />
+          <Tooltip formatter={(v) => `${v} lượt`} />
+          <Bar
+            dataKey="total"
+            fill="#4fc3f7"
+            barSize={25}
+            radius={[0, 6, 6, 0]}
+          />
+        </BarChart>
+      </ResponsiveContainer>
+    </Box>
+  </CardContent>
+</Card>
+
       {/* Biểu đồ danh mục */}
       <Card elevation={3} sx={{ mt: 3 }}>
         <CardContent>

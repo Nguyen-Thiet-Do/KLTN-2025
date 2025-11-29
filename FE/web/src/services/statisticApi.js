@@ -28,6 +28,11 @@ export const statisticApi = {
   const res = await api.get("/statistics/top-books");
   if (!res.data?.success) throw new Error("Không lấy được top 5 sách");
   return res.data.data;
+},async getTopReaders() {
+  const res = await api.get("/statistics/top-readers");
+  if (!res.data?.success) throw new Error("Không lấy được top độc giả");
+  return res.data.data;
 }
+
 
 };
