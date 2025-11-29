@@ -22,7 +22,7 @@ function escapeHtml(str) {
   if (!str) return '';
   return String(str)
     .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')  
+    .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#039;');
@@ -729,6 +729,21 @@ async function sendReservationCancelledEmail(to, data = {}) {
  * @param {number} data.lostFine       Phạt mất sách
  * @param {number} data.totalFine      Tổng phạt
  */
+/**
+ * Gửi email biên nhận trả tài liệu cho độc giả
+ *
+ * @param {string} to                     Email người nhận
+ * @param {object} data                   Dữ liệu email
+ * @param {string} data.fullName          Tên độc giả
+ * @param {number|string} data.slipId     Mã phiếu mượn
+ * @param {string} data.title             Tên tài liệu
+ * @param {string} data.returnDate        Ngày trả (YYYY-MM-DD)
+ * @param {number} data.overdueFine       Phạt trễ hạn
+ * @param {number} data.damageFine        Phạt hư hỏng
+ * @param {number} data.lostFine          Phạt mất sách
+ * @param {number} data.totalFine         Tổng phạt
+ * @param {number} [data.deductedFromCard] Số tiền đã khấu trừ từ thẻ (nếu có)
+ */
 async function sendReturnReceiptEmail(to, data = {}) {
   if (!to) throw new Error('sendReturnReceiptEmail: missing "to"');
 
@@ -741,12 +756,22 @@ async function sendReturnReceiptEmail(to, data = {}) {
     damageFine = 0,
     lostFine = 0,
     totalFine = 0,
+    deductedFromCard = 0,       // 🔴 mới thêm
     supportEmail = SUPPORT_EMAIL,
     supportPhone = SUPPORT_PHONE,
     year = new Date().getFullYear()
   } = data;
 
-  const subject = `[Book Tech] Biên nhận trả tài liệu — Phiếu #${escapeHtml(String(slipId))}`;
+  const numTotalFine = Number(totalFine) || 0;
+  const numDeductedFromCard = Number(deductedFromCard) || 0;
+  const remainingFromFine =
+    numTotalFine > 0 && numDeductedFromCard > 0
+      ? Math.max(0, numTotalFine - numDeductedFromCard)
+      : 0;
+
+  const subject = `[Book Tech] Biên nhận trả tài liệu — Phiếu #${escapeHtml(
+    String(slipId)
+  )}`;
 
   // Plain text fallback
   const textLines = [
@@ -759,15 +784,67 @@ async function sendReturnReceiptEmail(to, data = {}) {
     `- Phạt trễ hạn: ${Number(overdueFine).toLocaleString('vi-VN')} đ`,
     `- Phạt hư hỏng: ${Number(damageFine).toLocaleString('vi-VN')} đ`,
     `- Phạt mất sách: ${Number(lostFine).toLocaleString('vi-VN')} đ`,
-    `- Tổng: ${Number(totalFine).toLocaleString('vi-VN')} đ`,
+    `- Tổng: ${numTotalFine.toLocaleString('vi-VN')} đ`,
+  ];
+
+  // 🔴 Thêm giải thích khấu trừ thẻ trong text
+  if (numTotalFine > 0 && numDeductedFromCard > 0) {
+    if (numDeductedFromCard >= numTotalFine) {
+      // Trường hợp đang nói: toàn bộ phạt nằm trong khoản thẻ, không cần QR
+      textLines.push(
+        '',
+        `Lưu ý: Toàn bộ số tiền phạt (${numTotalFine.toLocaleString(
+          'vi-VN'
+        )} đ) đã được khấu trừ trực tiếp từ số dư thẻ thư viện của bạn. Bạn không cần thanh toán thêm.`
+      );
+    } else if (remainingFromFine > 0) {
+      // Trường hợp sau này nếu dùng 1 phần thẻ + 1 phần QR
+      textLines.push(
+        '',
+        `Lưu ý: Đã khấu trừ ${numDeductedFromCard.toLocaleString(
+          'vi-VN'
+        )} đ từ số dư thẻ thư viện của bạn. Số còn lại cần thanh toán thêm: ${remainingFromFine.toLocaleString(
+          'vi-VN'
+        )} đ.`
+      );
+    }
+  }
+
+  textLines.push(
     '',
     `Nếu bạn có thắc mắc, vui lòng liên hệ: ${supportEmail} — ${supportPhone}`,
     '',
     'Trân trọng,',
     'Thư viện Book Tech',
     `© ${year} Book Tech Library`
-  ];
+  );
+
   const text = textLines.join('\n');
+
+  // Chuẩn bị đoạn HTML "Lưu ý" (nếu có khấu trừ thẻ)
+  let fineNoteHtml = '';
+  if (numTotalFine > 0 && numDeductedFromCard > 0) {
+    if (numDeductedFromCard >= numTotalFine) {
+      fineNoteHtml = `
+      <p style="margin-top:12px;">
+        <strong>Lưu ý:</strong>
+        Toàn bộ số tiền phạt
+        <strong>${numTotalFine.toLocaleString('vi-VN')} đ</strong>
+        đã được khấu trừ trực tiếp từ số dư thẻ thư viện của bạn.
+        Bạn không cần thanh toán thêm.
+      </p>`;
+    } else if (remainingFromFine > 0) {
+      fineNoteHtml = `
+      <p style="margin-top:12px;">
+        <strong>Lưu ý:</strong>
+        Đã khấu trừ
+        <strong>${numDeductedFromCard.toLocaleString('vi-VN')} đ</strong>
+        từ số dư thẻ thư viện của bạn.
+        Số tiền còn lại cần thanh toán thêm:
+        <strong>${remainingFromFine.toLocaleString('vi-VN')} đ</strong>.
+      </p>`;
+    }
+  }
 
   // HTML content
   const html = `
@@ -779,7 +856,9 @@ async function sendReturnReceiptEmail(to, data = {}) {
       <h2 style="color:#0b5cff; margin-top:0;">Biên nhận trả tài liệu</h2>
       <p>Xin chào <strong>${escapeHtml(fullName)}</strong>,</p>
 
-      <p>Chúng tôi xác nhận bạn đã trả tài liệu thuộc <strong>Phiếu #${escapeHtml(String(slipId))}</strong> vào ngày <strong>${escapeHtml(returnDate)}</strong>.</p>
+      <p>Chúng tôi xác nhận bạn đã trả tài liệu thuộc <strong>Phiếu #${escapeHtml(
+    String(slipId)
+  )}</strong> vào ngày <strong>${escapeHtml(returnDate)}</strong>.</p>
 
       <p><strong>Tên tài liệu:</strong> ${escapeHtml(title)}</p>
 
@@ -799,12 +878,16 @@ async function sendReturnReceiptEmail(to, data = {}) {
         </tr>
         <tr>
           <td style="padding:12px; background:#fff; font-size:16px;"><strong>Tổng</strong></td>
-          <td style="padding:12px; font-size:16px;"><strong>${Number(totalFine).toLocaleString('vi-VN')} đ</strong></td>
+          <td style="padding:12px; font-size:16px;"><strong>${numTotalFine.toLocaleString('vi-VN')} đ</strong></td>
         </tr>
       </table>
 
+      ${fineNoteHtml}
+
       <p style="margin-top:12px;">Nếu bạn cần hỗ trợ hoặc có thắc mắc, vui lòng liên hệ:</p>
-      <p style="font-size:13px; color:#555;">Email: ${escapeHtml(supportEmail)} — SĐT: ${escapeHtml(supportPhone)}</p>
+      <p style="font-size:13px; color:#555;">Email: ${escapeHtml(
+    supportEmail
+  )} — SĐT: ${escapeHtml(supportPhone)}</p>
 
       <hr style="border:none; border-top:1px solid #eee; margin:18px 0;">
       <p style="font-size:12px; color:#999;">Email này được gửi tự động. Vui lòng không trả lời trực tiếp.</p>
@@ -814,9 +897,11 @@ async function sendReturnReceiptEmail(to, data = {}) {
   </html>
   `;
 
-  // Gọi wrapper sendEmail (dùng SendGrid nếu config)
   return sendEmail(to, subject, html, text);
 }
+
+
+
 async function sendRenewalRequestReceivedEmail(to, data = {}) {
   if (!to) throw new Error('sendRenewalRequestReceivedEmail: missing "to"');
   const {
@@ -880,6 +965,8 @@ async function sendRenewalRequestReceivedEmail(to, data = {}) {
 
   return sendEmail(to, subject, html, text);
 }
+
+
 
 module.exports = {
   sendOtpEmail,

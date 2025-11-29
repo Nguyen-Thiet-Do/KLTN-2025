@@ -126,15 +126,16 @@ async function getReaderBorrowSnapshot(readerId, t) {
       : 0;
   }
 
-  // 5) Vi phạm chưa giải quyết (ví dụ: tiền phạt/đền bù chưa thanh toán)
-  const unresolvedViolationCount = await Payment.count({
+  // 5) Vi phạm chưa giải quyết: lấy từ Violation, chỉ tính bản ghi chưa xử lý
+  const unresolvedViolationCount = await Violation.count({
     where: {
       readerId,
-      status: 'PENDING',
-      paymentType: { [Op.not]: 'DEPOSIT' } // deposit không dùng cho mượn, giữ điều kiện an toàn
+      deleted: false,
+      paymentStatus: { [Op.ne]: 'PAID' }   // ❗ nếu đã PAID thì không tính là vi phạm
     },
     transaction: t
   });
+
 
   const activeCount = waitingForPickupCount + borrowingCount;
 
@@ -1432,6 +1433,11 @@ function calculateLostFine(coverPrice) {
  *   + Tính phạt (trễ, hư, mất)
  *   + Tạo Violation
  *   + Trừ thẻ / tạo QR PayOS
+ * - Sau đó:
+ *   + Nếu KHÔNG có QR (phạt đã xử xong, thường là trừ thẻ / không phạt):
+ *       -> gửi notification LOAN_RETURNED + email biên nhận + FCM + socket loanReturned
+ *   + Nếu CÓ QR PENDING:
+ *       -> gửi email + FCM + socket VIOLATION (yêu cầu thanh toán phạt)
  *
  * body: { loanDetailId, returnDate, conditionReturn, isLost = false, note? }
  * rawLibrarianId: có thể là librarianId hoặc accountId (giống bulk)
@@ -1482,7 +1488,7 @@ async function returnSingleItemService(body, rawLibrarianId) {
 
   const loanSlipId = detail.loanSlipId;
 
-  // Gọi lại returnBulkItemsService với 1 item
+  // 1) Gọi lại returnBulkItemsService với 1 item
   const result = await returnBulkItemsService(
     {
       loanSlipId,
@@ -1499,9 +1505,341 @@ async function returnSingleItemService(body, rawLibrarianId) {
     rawLibrarianId
   );
 
-  // result có dạng giống trả phiếu: { loanSlipId, returnDate, fines, deductedFromCard, cardPaymentRecord, qrPaymentRecord, qrPayos, processedItems }
+  // ==========================
+  // 2) GỬI THÔNG BÁO / MAIL / FCM / SOCKET
+  // ==========================
+
+  try {
+    const finalResult = result || {};
+    const processedItems = finalResult.processedItems || [];
+    const itemsCount = processedItems.length || 1;
+
+    const fines = finalResult.fines || {};
+    const totalFineNum = Number(fines.totalFine || 0);
+    const overdueFineNum = Number(fines.totalOverdueFine || 0);
+    const damageFineNum = Number(fines.totalDamageFine || 0);
+    const lostFineNum = Number(fines.totalLostFine || 0);
+    const deductedFromCard = Number(finalResult.deductedFromCard || 0);
+    const qrPaymentRecord = finalResult.qrPaymentRecord || null;
+
+    const money = (v) => Number(v || 0).toLocaleString('vi-VN');
+
+    // Lấy slip + độc giả + email / accountId
+    const slip = await LoanSlip.findByPk(loanSlipId, {
+      include: [
+        {
+          model: Reader,
+          as: 'Reader',
+          include: [
+            {
+              model: Account,
+              attributes: ['email', 'accountId']
+            }
+          ]
+        }
+      ]
+    });
+
+    if (!slip) return result;
+
+    const readerId = slip.readerId;
+    const readerName = slip.Reader?.fullName || 'Độc giả';
+    const readerEmail =
+      slip?.Reader?.Account?.email ||
+      slip?.Reader?.account?.email ||
+      null;
+
+    // ========== CASE 1: KHÔNG CÓ QR -> TRẢ XONG HOÀN TOÀN ==========
+    if (!qrPaymentRecord) {
+      const title = `Phiếu #${loanSlipId} — Đã trả`;
+      const content =
+        totalFineNum > 0
+          ? deductedFromCard > 0
+            ? `Bạn đã trả tài liệu. Tổng tiền phạt: ${money(
+              totalFineNum
+            )}đ, trong đó đã khấu trừ ${money(
+              deductedFromCard
+            )}đ từ số dư thẻ.`
+            : `Bạn đã trả tài liệu. Tổng tiền phạt: ${money(
+              totalFineNum
+            )}đ.`
+          : `Bạn đã trả tài liệu, không phát sinh tiền phạt.`;
+
+      // 1) Notification
+      let notificationId = null;
+      try {
+        const notif = await createNotificationSafe(
+          {
+            readerId,
+            type: 'LOAN_RETURNED',
+            title,
+            content,
+            priority: totalFineNum > 0 ? 'HIGH' : 'NORMAL',
+            link: `/loan/${loanSlipId}`,
+            isRead: 0
+          },
+          null
+        );
+        if (notif) {
+          notificationId = notif.notificationID || notif.id || null;
+        }
+      } catch (nerr) {
+        console.warn(
+          'returnSingleItemService: create LOAN_RETURNED notification failed',
+          nerr?.message || nerr
+        );
+      }
+
+      // 2) EMAIL biên nhận trả
+      try {
+        const finalEmail =
+          readerEmail || process.env.ADMIN_NOTIFICATION_EMAIL || null;
+        if (finalEmail && mailService && typeof mailService.sendReturnReceiptEmail === 'function') {
+          const firstTitle =
+            processedItems.length === 1
+              ? processedItems[0].title
+              : processedItems.length > 1
+                ? `${processedItems.length} tài liệu`
+                : 'Tài liệu';
+
+          await mailService.sendReturnReceiptEmail(finalEmail, {
+            fullName: readerName,
+            slipId: loanSlipId,
+            title: firstTitle,
+            returnDate,
+            overdueFine: overdueFineNum,
+            damageFine: damageFineNum,
+            lostFine: lostFineNum,
+            totalFine: totalFineNum,
+            deductedFromCard,
+            libraryName: process.env.LIBRARY_NAME || 'Thư viện'
+          });
+
+          if (notificationId && Notification) {
+            const pk = Notification.primaryKeyAttribute || 'notificationID';
+            const where = {};
+            where[pk] = notificationId;
+            try {
+              await Notification.update(
+                { emailAt: new Date() },
+                { where }
+              );
+            } catch (updErr) {
+              console.warn(
+                'returnSingleItemService: cannot update notification.emailAt',
+                updErr?.message || updErr
+              );
+            }
+          }
+        }
+      } catch (mailErr) {
+        console.error(
+          'returnSingleItemService: sendReturnReceiptEmail failed',
+          mailErr?.message || mailErr
+        );
+      }
+
+      // 3) FCM
+      try {
+        if (readerId && typeof sendFcmToReader === 'function') {
+          const payload = buildFcmPayload({
+            title,
+            body: content,
+            data: {
+              type: 'LOAN_RETURNED',
+              slipId: String(loanSlipId),
+              itemsCount: String(itemsCount),
+              totalFine: String(totalFineNum),
+              deductedFromCard: String(deductedFromCard),
+              notificationId: notificationId ? String(notificationId) : '',
+              link: `/loan/${loanSlipId}`
+            }
+          });
+          await sendFcmToReader(readerId, payload);
+        }
+      } catch (fcmErr) {
+        console.error(
+          'returnSingleItemService: send FCM failed',
+          fcmErr?.message || fcmErr
+        );
+      }
+
+      // 4) SOCKET.IO
+      try {
+        let targetUserId = readerId;
+        try {
+          const rr = await Reader.findByPk(readerId, {
+            attributes: ['accountId']
+          });
+          if (rr?.accountId) targetUserId = rr.accountId;
+        } catch (e) {
+          // ignore
+        }
+
+        const socketData = {
+          type: 'LOAN_RETURNED',
+          slipId: String(loanSlipId),
+          itemsCount: String(itemsCount),
+          totalFine: String(totalFineNum),
+          deductedFromCard: String(deductedFromCard),
+          notificationId: notificationId ? String(notificationId) : '',
+          link: `/loan/${loanSlipId}`
+        };
+
+        if (typeof emitToUser === 'function') {
+          emitToUser(targetUserId, 'loanReturned', socketData);
+          console.log(
+            '✅ returnSingleItemService: Socket loanReturned emitted',
+            { targetUserId, socketData }
+          );
+        }
+      } catch (socketErr) {
+        console.error(
+          'returnSingleItemService: send socket failed',
+          socketErr?.message || socketErr
+        );
+      }
+
+      return result;
+    }
+
+    // ========== CASE 2: CÓ QR PENDING -> GỬI THÔNG BÁO VIOLATION ==========
+    const amount = Number(qrPaymentRecord.amount || 0);
+    const checkoutUrl = qrPaymentRecord.checkoutUrl || qrPaymentRecord.qrCode || null;
+
+    const title = `Phiếu #${loanSlipId} — Cần thanh toán tiền phạt`;
+    const content = `Bạn cần thanh toán ${money(
+      amount
+    )}đ để hoàn tất trả tài liệu.`;
+
+    // Notification (đoạn tạo notification chính cho QR đã làm trong returnBulkItemsService,
+    // ở đây chủ yếu lo mail + FCM + socket, nên KHÔNG tạo thêm để tránh trùng)
+    let notificationId = null;
+
+    // EMAIL
+    try {
+      const finalEmail =
+        readerEmail || process.env.ADMIN_NOTIFICATION_EMAIL || null;
+
+      if (finalEmail && mailService && typeof mailService.sendEmail === 'function') {
+        const libraryName = process.env.LIBRARY_NAME || 'Thư viện';
+        const supportEmail =
+          process.env.SUPPORT_EMAIL ||
+          process.env.SMTP_FROM ||
+          'support@example.com';
+        const supportPhone = process.env.SUPPORT_PHONE || '0000 000 000';
+        const year = new Date().getFullYear();
+
+        const subject = `[${libraryName}] Thanh toán tiền phạt — Phiếu #${loanSlipId}`;
+
+        const textLines = [
+          `Kính gửi ${readerName},`,
+          '',
+          `Hệ thống đã ghi nhận việc trả tài liệu thuộc phiếu #${loanSlipId}.`,
+          `Tuy nhiên bạn cần thanh toán thêm ${money(amount)}đ tiền phạt.`,
+          checkoutUrl ? `Bạn có thể thanh toán qua đường dẫn: ${checkoutUrl}` : '',
+          '',
+          `Nếu bạn đã thanh toán, vui lòng bỏ qua email này hoặc liên hệ thư viện để được hỗ trợ.`,
+          '',
+          `Trân trọng,`,
+          libraryName,
+          `Email hỗ trợ: ${supportEmail}`,
+          `Số điện thoại: ${supportPhone}`
+        ];
+        const text = textLines.join('\n');
+
+        const html = `
+          <p>Kính gửi ${readerName},</p>
+          <p>Hệ thống đã ghi nhận việc trả tài liệu thuộc phiếu <b>#${loanSlipId}</b>.</p>
+          <p>Bạn cần thanh toán thêm <b>${money(
+          amount
+        )}đ</b> tiền phạt để hoàn tất.</p>
+          ${checkoutUrl
+            ? `<p>Vui lòng thanh toán tại đường dẫn sau: <a href="${checkoutUrl}" target="_blank">${checkoutUrl}</a></p>`
+            : ''
+          }
+          <p>Nếu bạn đã thanh toán, vui lòng bỏ qua email này hoặc liên hệ thư viện để được hỗ trợ.</p>
+          <p>Trân trọng,<br/>${libraryName}</p>
+          <hr/>
+          <p>Email hỗ trợ: ${supportEmail}<br/>Số điện thoại: ${supportPhone}<br/>&copy; ${year} ${libraryName}</p>
+        `;
+
+        await mailService.sendEmail(finalEmail, subject, html, text);
+      }
+    } catch (mailErr) {
+      console.error(
+        'returnSingleItemService[QR]: send fine email failed',
+        mailErr?.message || mailErr
+      );
+    }
+
+    // FCM
+    try {
+      if (readerId && typeof sendFcmToReader === 'function') {
+        const payload = buildFcmPayload({
+          title,
+          body: content,
+          data: {
+            type: 'VIOLATION',
+            slipId: String(loanSlipId),
+            amount: String(amount),
+            notificationId: notificationId ? String(notificationId) : '',
+            link: checkoutUrl || ''
+          }
+        });
+        await sendFcmToReader(readerId, payload);
+      }
+    } catch (fcmErr) {
+      console.error(
+        'returnSingleItemService[QR]: send FCM failed',
+        fcmErr?.message || fcmErr
+      );
+    }
+
+    // SOCKET
+    try {
+      let targetUserId = readerId;
+      try {
+        const rr = await Reader.findByPk(readerId, {
+          attributes: ['accountId']
+        });
+        if (rr?.accountId) targetUserId = rr.accountId;
+      } catch (e) {
+        // ignore
+      }
+
+      if (targetUserId && typeof emitToUser === 'function') {
+        const socketData = {
+          type: 'VIOLATION',
+          slipId: String(loanSlipId),
+          amount: String(amount),
+          notificationId: notificationId ? String(notificationId) : '',
+          link: checkoutUrl || ''
+        };
+
+        emitToUser(targetUserId, 'violationPaymentRequired', socketData);
+        console.log(
+          '✅ returnSingleItemService[QR]: Socket violationPaymentRequired emitted',
+          { targetUserId, socketData }
+        );
+      }
+    } catch (socketErr) {
+      console.error(
+        'returnSingleItemService[QR]: send socket failed',
+        socketErr?.message || socketErr
+      );
+    }
+  } catch (outerErr) {
+    console.error(
+      'returnSingleItemService: post-return notifications failed',
+      outerErr?.message || outerErr
+    );
+  }
+
+  // Giữ nguyên format trả về cho FE
   return result;
 }
+
 
 
 /**
@@ -1709,8 +2047,196 @@ async function initBulkReturnPaymentService(body, rawLibrarianId) {
   const needExternalPay = Number(paymentPreview.needExternalPay || 0);
 
   // Nếu không có tiền phạt hoặc phần thiếu = 0 -> TRẢ LUÔN, KHÔNG CẦN QR
+  // Nếu không có tiền phạt hoặc phần thiếu = 0 -> TRẢ LUÔN, KHÔNG CẦN QR
   if (totalFine <= 0 || needExternalPay <= 0) {
     const finalResult = await returnBulkItemsService(body, rawLibrarianId);
+
+    // ==========================
+    // GỬI THÔNG BÁO: TRẢ PHIẾU
+    // ==========================
+    try {
+      // lấy slip + độc giả + email
+      const slip = await LoanSlip.findByPk(loanSlipId, {
+        include: [
+          {
+            model: Reader,
+            as: 'Reader',
+            include: [
+              {
+                model: Account,
+                attributes: ['email']
+              }
+            ]
+          }
+        ]
+      });
+
+      if (slip) {
+        const readerId = slip.readerId;
+        const readerName = slip.Reader?.fullName || 'Độc giả';
+        const readerEmail =
+          slip?.Reader?.Account?.email ||
+          slip?.Reader?.account?.email ||
+          null;
+
+        const itemsCount = (finalResult?.processedItems || []).length;
+        const fineSummary = finalResult?.fines || {};
+        const totalFineNum = Number(fineSummary.totalFine || 0);
+        const hasFine = totalFineNum > 0;
+
+        const money = (v) => Number(v || 0).toLocaleString('vi-VN');
+        const title = `Phiếu #${loanSlipId} — Đã trả`;
+        const content = hasFine
+          ? `Bạn đã trả ${itemsCount} tài liệu. Tổng tiền phạt: ${money(totalFineNum)}đ.`
+          : `Bạn đã trả ${itemsCount} tài liệu, không phát sinh tiền phạt.`;
+
+        // 1) Notification trong DB
+        let notificationId = null;
+        try {
+          const notif = await createNotificationSafe(
+            {
+              readerId,
+              type: 'LOAN_RETURNED',
+              title,
+              content,
+              priority: hasFine ? 'HIGH' : 'NORMAL',
+              link: `/loan/${loanSlipId}`,
+              isRead: 0
+            },
+            null
+          );
+          if (notif) {
+            notificationId = notif.notificationID || notif.id || null;
+          }
+        } catch (nerr) {
+          console.warn(
+            'initBulkReturnPaymentService: create LOAN_RETURNED notification failed',
+            nerr?.message || nerr
+          );
+        }
+
+        // 2) EMAIL biên nhận trả (có/không có phạt đều gửi được)
+        try {
+          const finalEmail =
+            readerEmail || process.env.ADMIN_NOTIFICATION_EMAIL || null;
+          if (finalEmail) {
+            const processed = finalResult?.processedItems || [];
+            const firstTitle =
+              processed.length === 1
+                ? processed[0].title
+                : processed.length > 1
+                  ? `${processed.length} tài liệu`
+                  : 'Tài liệu';
+
+            await mailService.sendReturnReceiptEmail(finalEmail, {
+              fullName: readerName,
+              slipId: loanSlipId,
+              title: firstTitle,
+              returnDate,
+              overdueFine: Number(fineSummary.overdueFine || 0),
+              damageFine: Number(fineSummary.damageFine || 0),
+              lostFine: Number(fineSummary.lostFine || 0),
+              totalFine: totalFineNum,
+              libraryName: process.env.LIBRARY_NAME || 'Thư viện'
+            });
+
+            // cập nhật emailAt cho notification nếu có
+            if (notificationId && Notification) {
+              const pk = Notification.primaryKeyAttribute || 'notificationID';
+              const where = {};
+              where[pk] = notificationId;
+              try {
+                await Notification.update(
+                  { emailAt: new Date() },
+                  { where }
+                );
+              } catch (updErr) {
+                console.warn(
+                  'initBulkReturnPaymentService: cannot update notification.emailAt',
+                  updErr?.message || updErr
+                );
+              }
+            }
+          }
+        } catch (mailErr) {
+          console.error(
+            'initBulkReturnPaymentService: sendReturnReceiptEmail failed',
+            mailErr?.message || mailErr
+          );
+        }
+
+        // 3) FCM
+        try {
+          if (readerId && typeof sendFcmToReader === 'function') {
+            const payload = buildFcmPayload({
+              title,
+              body: content,
+              data: {
+                type: 'LOAN_RETURNED',
+                slipId: String(loanSlipId),
+                itemsCount: String(itemsCount),
+                totalFine: String(totalFineNum),
+                notificationId: notificationId ? String(notificationId) : '',
+                link: `/loan/${loanSlipId}`
+              }
+            });
+            await sendFcmToReader(readerId, payload);
+          }
+        } catch (fcmErr) {
+          console.error(
+            'initBulkReturnPaymentService: send FCM failed',
+            fcmErr?.message || fcmErr
+          );
+        }
+
+        // 4) SOCKET.IO
+        try {
+          let targetUserId = readerId;
+          try {
+            const rr = await Reader.findByPk(readerId, {
+              attributes: ['accountId']
+            });
+            if (rr?.accountId) targetUserId = rr.accountId;
+          } catch (e) {
+            // ignore
+          }
+
+          const socketData = {
+            type: 'LOAN_RETURNED',
+            slipId: String(loanSlipId),
+            itemsCount: String(itemsCount),
+            totalFine: String(totalFineNum),
+            notificationId: notificationId ? String(notificationId) : '',
+            link: `/loan/${loanSlipId}`
+          };
+
+          if (typeof emitToUser === 'function') {
+            // event name: loanReturned (FE nghe event này)
+            emitToUser(targetUserId, 'loanReturned', socketData);
+            console.log('✅ initBulkReturnPaymentService: Socket loanReturned emitted', {
+              targetUserId,
+              socketData
+            });
+          } else {
+            console.warn(
+              'initBulkReturnPaymentService: emitToUser không khả dụng, bỏ qua socket'
+            );
+          }
+        } catch (socketErr) {
+          console.error(
+            'initBulkReturnPaymentService: send socket failed',
+            socketErr?.message || socketErr
+          );
+        }
+      }
+    } catch (notifyErr) {
+      console.error(
+        'initBulkReturnPaymentService: notifications after bulk return failed',
+        notifyErr?.message || notifyErr
+      );
+    }
+
+    // luôn trả về kết quả cũ cho FE (kể cả nếu gửi thông báo bị lỗi)
     return {
       success: true,
       needPayment: false,
@@ -1718,15 +2244,27 @@ async function initBulkReturnPaymentService(body, rawLibrarianId) {
       finalResult
     };
   }
-
   // CÓ PHẦN THIẾU -> tạo Payment PENDING + QR
-  return await sequelize.transaction(async (t) => {
+  // CÓ PHẦN THIẾU -> tạo Payment PENDING + QR + gửi notify/FCM/socket/mail
+  const txResult = await sequelize.transaction(async (t) => {
     // Chuẩn hóa librarianId (FE có thể gửi accountId)
     const resolvedLibrarianId = await resolveLibrarianIdFlexible(rawLibrarianId, t);
 
     const slip = await LoanSlip.findByPk(loanSlipId, {
       transaction: t,
-      lock: t.LOCK.UPDATE
+      lock: t.LOCK.UPDATE,
+      include: [
+        {
+          model: Reader,
+          as: 'Reader',
+          include: [
+            {
+              model: Account,
+              attributes: ['email', 'accountId']
+            }
+          ]
+        }
+      ]
     });
     if (!slip) {
       const e = new Error('Không tìm thấy LoanSlip');
@@ -1735,6 +2273,7 @@ async function initBulkReturnPaymentService(body, rawLibrarianId) {
     }
 
     const amount = needExternalPay;
+    const money = (v) => Number(v || 0).toLocaleString('vi-VN');
 
     // Mô tả cho PayOS phải <= 25 ký tự
     let description = `Fine slip #${slip.loanSlipId}`;
@@ -1762,7 +2301,7 @@ async function initBulkReturnPaymentService(body, rawLibrarianId) {
     const payResp = await payosService.createPaymentLink({
       amount,
       description,
-      orderCode: `fine_${loanSlipId}_${paymentRecord.paymentId}`,
+      orderCode: `fine_${loanSlipId}_${paymentRecord.paymentId || paymentRecord.id}`,
       returnUrl: process.env.PAY_RETURN_URL,
       cancelUrl: process.env.PAY_CANCEL_URL
     });
@@ -1774,14 +2313,30 @@ async function initBulkReturnPaymentService(body, rawLibrarianId) {
       rawResponse: JSON.stringify(payResp || {})
     }, { transaction: t });
 
-    // Gửi thông báo (optional)
-    await createNotificationSafe({
-      readerId: slip.readerId,
-      type: 'VIOLATION',
-      title: 'Cần thanh toán tiền phạt',
-      content: `Bạn cần thanh toán ${Number(amount).toLocaleString('vi-VN')}đ để hoàn tất trả phiếu #${slip.loanSlipId}.`,
-      link: paymentRecord.checkoutUrl || null
-    }, t);
+    const notifTitle = `Phiếu #${slip.loanSlipId} — Cần thanh toán tiền phạt`;
+    const notifContent = `Bạn cần thanh toán ${money(amount)}đ để hoàn tất trả phiếu #${slip.loanSlipId}.`;
+
+    // Notification trong DB
+    let notificationId = null;
+    try {
+      const notif = await createNotificationSafe({
+        readerId: slip.readerId,
+        type: 'VIOLATION',
+        title: notifTitle,
+        content: notifContent,
+        priority: 'HIGH',
+        link: paymentRecord.checkoutUrl || null,
+        isRead: 0
+      }, t);
+      if (notif) {
+        notificationId = notif.notificationID || notif.id || null;
+      }
+    } catch (nerr) {
+      console.warn(
+        'initBulkReturnPaymentService[QR]: create VIOLATION notification failed',
+        nerr?.message || nerr
+      );
+    }
 
     return {
       success: true,
@@ -1793,10 +2348,185 @@ async function initBulkReturnPaymentService(body, rawLibrarianId) {
         amount,
         checkoutUrl: payResp.checkoutUrl,
         qrCode: payResp.qrCode
+      },
+      notifyMeta: {
+        readerId: slip.readerId,
+        readerName: slip.Reader?.fullName || 'Độc giả',
+        readerEmail:
+          slip?.Reader?.Account?.email ||
+          slip?.Reader?.account?.email ||
+          null,
+        notificationId
       }
     };
   });
+
+  // ===== Sau khi transaction commit: gửi MAIL + FCM + SOCKET =====
+  const money = (v) => Number(v || 0).toLocaleString('vi-VN');
+  const { notifyMeta, payment } = txResult || {};
+  const readerId = notifyMeta?.readerId;
+  const readerName = notifyMeta?.readerName || 'Độc giả';
+  const readerEmail = notifyMeta?.readerEmail || null;
+  const notificationId = notifyMeta?.notificationId || null;
+  const amount = payment?.amount || needExternalPay;
+  const checkoutUrl = payment?.checkoutUrl || null;
+
+  const title = `Phiếu #${loanSlipId} — Cần thanh toán tiền phạt`;
+  const content = `Bạn cần thanh toán ${money(amount)}đ để hoàn tất trả phiếu #${loanSlipId}.`;
+
+  // 1) EMAIL: gửi mail yêu cầu thanh toán phạt
+  try {
+    const finalEmail =
+      readerEmail || process.env.ADMIN_NOTIFICATION_EMAIL || null;
+
+    if (finalEmail && mailService && typeof mailService.sendEmail === 'function') {
+      const libraryName = process.env.LIBRARY_NAME || 'Thư viện Book Tech';
+      const supportEmail = process.env.SUPPORT_EMAIL || process.env.SMTP_FROM || 'support@example.com';
+      const supportPhone = process.env.SUPPORT_PHONE || '0000 000 000';
+      const year = new Date().getFullYear();
+
+      const subject = `[${libraryName}] Thanh toán tiền phạt — Phiếu #${loanSlipId}`;
+
+      const textLines = [
+        `Kính gửi ${readerName},`,
+        '',
+        `Bạn đang có khoản tiền phạt cần thanh toán để hoàn tất trả Phiếu mượn #${loanSlipId}.`,
+        `Số tiền cần thanh toán: ${money(amount)} đ.`,
+        checkoutUrl ? `Link thanh toán: ${checkoutUrl}` : '',
+        '',
+        'Sau khi thanh toán thành công, hệ thống sẽ tự động xác nhận và hoàn tất việc trả phiếu.',
+        '',
+        `Nếu có thắc mắc, vui lòng liên hệ: ${supportEmail} — ${supportPhone}`,
+        '',
+        `Trân trọng,`,
+        libraryName
+      ];
+      const text = textLines.join('\n');
+
+      const html = `
+      <!doctype html>
+      <html>
+      <head><meta charset="utf-8"></head>
+      <body style="font-family:Arial, sans-serif; color:#333;">
+        <div style="max-width:720px; margin:12px auto; padding:18px; border:1px solid #eee; border-radius:8px;">
+          <h2 style="color:#0b5cff; margin-top:0;">Yêu cầu thanh toán tiền phạt — Phiếu #${loanSlipId}</h2>
+          <p>Xin chào <strong>${readerName}</strong>,</p>
+          <p>Bạn đang có khoản tiền phạt cần thanh toán để hoàn tất trả phiếu mượn <strong>#${loanSlipId}</strong>.</p>
+
+          <p><strong>Số tiền cần thanh toán:</strong> ${money(amount)} đ</p>
+          ${checkoutUrl
+          ? `<p>Bạn có thể thanh toán trực tuyến qua liên kết sau:</p>
+                 <p><a href="${checkoutUrl}" target="_blank" rel="noopener">${checkoutUrl}</a></p>`
+          : ''
+        }
+
+          <p>Sau khi thanh toán thành công, hệ thống sẽ tự động xác nhận và cập nhật trạng thái phiếu.</p>
+
+          <hr style="border:none; border-top:1px solid #eee; margin:18px 0;">
+          <p style="font-size:13px; color:#555;">Hỗ trợ: ${supportEmail} | ${supportPhone}</p>
+          <p style="font-size:12px; color:#999;">Đây là email tự động. Vui lòng không trả lời trực tiếp.<br>&copy; ${year} ${libraryName}</p>
+        </div>
+      </body>
+      </html>
+      `;
+
+      await mailService.sendEmail(finalEmail, subject, html, text);
+
+      // update emailAt cho notification nếu có
+      if (notificationId && Notification) {
+        const pk = Notification.primaryKeyAttribute || 'notificationID';
+        const where = {};
+        where[pk] = notificationId;
+        try {
+          await Notification.update(
+            { emailAt: new Date() },
+            { where }
+          );
+        } catch (updErr) {
+          console.warn(
+            'initBulkReturnPaymentService[QR]: cannot update notification.emailAt',
+            updErr?.message || updErr
+          );
+        }
+      }
+    }
+  } catch (mailErr) {
+    console.error(
+      'initBulkReturnPaymentService[QR]: send fine payment email failed',
+      mailErr?.message || mailErr
+    );
+  }
+
+  // 2) FCM
+  try {
+    if (readerId && typeof sendFcmToReader === 'function') {
+      const payload = buildFcmPayload({
+        title,
+        body: content,
+        data: {
+          type: 'VIOLATION',
+          slipId: String(loanSlipId),
+          amount: String(amount),
+          notificationId: notificationId ? String(notificationId) : '',
+          link: checkoutUrl || ''
+        }
+      });
+      await sendFcmToReader(readerId, payload);
+    }
+  } catch (fcmErr) {
+    console.error(
+      'initBulkReturnPaymentService[QR]: send FCM failed',
+      fcmErr?.message || fcmErr
+    );
+  }
+
+  // 3) SOCKET.IO
+  try {
+    let targetUserId = null;
+
+    if (readerId) {
+      try {
+        const rr = await Reader.findByPk(readerId, {
+          attributes: ['accountId']
+        });
+        if (rr?.accountId) targetUserId = rr.accountId;
+      } catch (e) {
+        console.warn(
+          'initBulkReturnPaymentService[QR]: cannot load reader.accountId',
+          e?.message || e
+        );
+      }
+    }
+
+    if (targetUserId && typeof emitToUser === 'function') {
+      const socketData = {
+        type: 'VIOLATION',
+        slipId: String(loanSlipId),
+        amount: String(amount),
+        notificationId: notificationId ? String(notificationId) : '',
+        link: checkoutUrl || ''
+      };
+
+      // FE nghe event này để show popup "Cần thanh toán tiền phạt"
+      emitToUser(targetUserId, 'violationPaymentRequired', socketData);
+      console.log(
+        '✅ initBulkReturnPaymentService[QR]: Socket violationPaymentRequired emitted',
+        { targetUserId, socketData }
+      );
+    } else if (!targetUserId) {
+      console.warn('initBulkReturnPaymentService[QR]: no targetUserId to emit socket');
+    }
+  } catch (socketErr) {
+    console.error(
+      'initBulkReturnPaymentService[QR]: send socket failed',
+      socketErr?.message || socketErr
+    );
+  }
+
+  // cuối cùng vẫn trả về cho FE đúng y như cũ (thêm notifyMeta FE bỏ qua cũng được)
+  return txResult;
 }
+
 
 
 
@@ -1805,13 +2535,14 @@ async function initBulkReturnPaymentService(body, rawLibrarianId) {
  * BƯỚC 2: CONFIRM sau khi đã thanh toán QR
  * body: { loanSlipId, returnDate, items, paymentId, orderCode?, librarianId? }
  * rawLibrarianId: id FE gửi lên (có thể là accountId hoặc librarianId)
- * 
+ *
  * Flow:
  *  - Nếu Payment chưa COMPLETED -> inquiry PayOS để chắc chắn đã thanh toán
  *  - Sau đó:
  *      + update Payment.status = COMPLETED (nếu chưa)
  *      + gọi returnBulkItemsService -> update LoanSlip / LoanDetail / tạo Violation
  *      + đồng bộ Violation.paymentStatus = 'PAID' cho các loanDetailId vừa xử lý
+ *  - Cuối cùng: gửi notification + email + FCM + socket cho độc giả
  */
 async function confirmBulkReturnAfterPaymentService(body, rawLibrarianId) {
   const {
@@ -1886,7 +2617,7 @@ async function confirmBulkReturnAfterPaymentService(body, rawLibrarianId) {
   }
 
   // 3) Đến đây coi như THANH TOÁN OK -> update Payment + xử lý trả phiếu + sync Violation
-  return await sequelize.transaction(async (t) => {
+  const txResult = await sequelize.transaction(async (t) => {
     // 3.1) Nếu Payment chưa COMPLETED thì cập nhật
     if (!isAlreadyCompleted) {
       await payment.update(
@@ -1908,7 +2639,6 @@ async function confirmBulkReturnAfterPaymentService(body, rawLibrarianId) {
     );
 
     // 3.3) ĐỒNG BỘ VIOLATION.paymentStatus = 'PAID'
-    // finalResult.processedItems: mảng các item đã xử lý, mỗi item có loanDetailId
     const processedItems = finalResult?.processedItems || finalResult?.items || [];
     const loanDetailIds = processedItems
       .map((it) => it.loanDetailId)
@@ -1940,7 +2670,191 @@ async function confirmBulkReturnAfterPaymentService(body, rawLibrarianId) {
       },
     };
   });
+
+  // ==========================
+  // SAU KHI TRẢ + THANH TOÁN OK
+  // ==========================
+
+  const finalResult = txResult?.finalResult || {};
+  const processed = finalResult?.processedItems || finalResult?.items || [];
+  const itemsCount = processed.length;
+
+  const fineSummary = finalResult?.fines || {};
+  const totalFineNum = Number(fineSummary.totalFine || 0);
+  const overdueFineNum = Number(fineSummary.totalOverdueFine || 0);
+  const damageFineNum = Number(fineSummary.totalDamageFine || 0);
+  const lostFineNum = Number(fineSummary.totalLostFine || 0);
+
+  const money = (v) => Number(v || 0).toLocaleString('vi-VN');
+
+  // Lấy thông tin slip + độc giả + account để gửi notify/mail/FCM/socket
+  let slip = null;
+  try {
+    slip = await LoanSlip.findByPk(loanSlipId, {
+      include: [
+        {
+          model: Reader,
+          as: 'Reader',
+          include: [{ model: Account, attributes: ['email', 'accountId'] }]
+        }
+      ]
+    });
+  } catch (err) {
+    console.warn(
+      '⚠ confirmBulkReturnAfterPaymentService: load LoanSlip failed',
+      err?.message || err
+    );
+  }
+
+  const readerId = slip?.readerId || payment.readerId || null;
+  const readerName = slip?.Reader?.fullName || 'Độc giả';
+  const readerEmail = slip?.Reader?.Account?.email || null;
+
+  // ========== 3.1 Notification ==========
+  let notificationId = null;
+  try {
+    if (readerId) {
+      const notif = await createNotificationSafe({
+        readerId,
+        type: 'LOAN_RETURNED',
+        title: `Phiếu #${loanSlipId} — Đã trả & đã thanh toán`,
+        content: totalFineNum > 0
+          ? `Bạn đã trả ${itemsCount} tài liệu. Đã thanh toán ${money(totalFineNum)}đ tiền phạt.`
+          : `Bạn đã trả ${itemsCount} tài liệu thành công.`,
+        priority: totalFineNum > 0 ? 'HIGH' : 'NORMAL',
+        link: `/loan/${loanSlipId}`,
+        isRead: 0
+      });
+      if (notif) {
+        notificationId = notif.notificationID || notif.id || null;
+      }
+    }
+  } catch (err) {
+    console.warn(
+      '⚠ confirmBulkReturnAfterPaymentService: create notification failed',
+      err?.message || err
+    );
+  }
+
+  // ========== 3.2 Email biên nhận trả ==========
+  try {
+    if (readerEmail && mailService && typeof mailService.sendReturnReceiptEmail === 'function') {
+      const firstTitle =
+        processed.length === 1
+          ? processed[0].title
+          : processed.length > 1
+            ? `${processed.length} tài liệu`
+            : 'Tài liệu';
+
+      await mailService.sendReturnReceiptEmail(readerEmail, {
+        fullName: readerName,
+        slipId: loanSlipId,
+        title: firstTitle,
+        returnDate,
+        overdueFine: overdueFineNum,
+        damageFine: damageFineNum,
+        lostFine: lostFineNum,
+        totalFine: totalFineNum,
+        deductedFromCard: 0 // path này thanh toán bằng QR nên khấu trừ thẻ = 0
+      });
+
+      // cập nhật emailAt cho notification nếu có
+      if (notificationId && Notification) {
+        try {
+          const pk = Notification.primaryKeyAttribute || 'notificationID';
+          const where = {};
+          where[pk] = notificationId;
+          await Notification.update({ emailAt: new Date() }, { where });
+        } catch (updErr) {
+          console.warn(
+            '⚠ confirmBulkReturnAfterPaymentService: cannot update notification.emailAt',
+            updErr?.message || updErr
+          );
+        }
+      }
+    }
+  } catch (err) {
+    console.error(
+      '❌ confirmBulkReturnAfterPaymentService: sendReturnReceiptEmail failed',
+      err?.message || err
+    );
+  }
+
+  // ========== 3.3 FCM ==========
+  try {
+    if (readerId && typeof sendFcmToReader === 'function') {
+      const payload = buildFcmPayload({
+        title: `Hoàn tất trả phiếu #${loanSlipId}`,
+        body: totalFineNum > 0
+          ? `Đã trả xong và thanh toán ${money(totalFineNum)}đ tiền phạt.`
+          : `Bạn đã trả ${itemsCount} tài liệu thành công.`,
+        data: {
+          type: 'LOAN_RETURNED',
+          slipId: String(loanSlipId),
+          totalFine: String(totalFineNum),
+          notificationId: notificationId ? String(notificationId) : '',
+          link: `/loan/${loanSlipId}`
+        }
+      });
+
+      await sendFcmToReader(readerId, payload);
+    }
+  } catch (err) {
+    console.error(
+      '❌ confirmBulkReturnAfterPaymentService: send FCM failed',
+      err?.message || err
+    );
+  }
+
+  // ========== 3.4 SOCKET.IO ==========
+  try {
+    let targetUserId = null;
+    if (readerId) {
+      try {
+        const rd = await Reader.findByPk(readerId, {
+          attributes: ['accountId']
+        });
+        if (rd?.accountId) targetUserId = rd.accountId;
+      } catch (e) {
+        console.warn(
+          '⚠ confirmBulkReturnAfterPaymentService: cannot load reader.accountId',
+          e?.message || e
+        );
+      }
+    }
+
+    if (targetUserId && typeof emitToUser === 'function') {
+      const socketData = {
+        type: 'LOAN_RETURNED',
+        slipId: String(loanSlipId),
+        itemsCount: String(itemsCount),
+        totalFine: String(totalFineNum),
+        notificationId: notificationId ? String(notificationId) : '',
+        link: `/loan/${loanSlipId}`
+      };
+
+      emitToUser(targetUserId, 'loanReturned', socketData);
+      console.log(
+        '✅ confirmBulkReturnAfterPaymentService: Socket loanReturned emitted',
+        { targetUserId, socketData }
+      );
+    } else if (!targetUserId) {
+      console.warn(
+        '⚠ confirmBulkReturnAfterPaymentService: no targetUserId to emit socket'
+      );
+    }
+  } catch (err) {
+    console.error(
+      '❌ confirmBulkReturnAfterPaymentService: send socket failed',
+      err?.message || err
+    );
+  }
+
+  // Giữ format trả về như cũ cho FE
+  return txResult;
 }
+
+
 
 
 /**

@@ -479,14 +479,19 @@ async function verifyOtpAndCreateAccountService(payload) {
   });
 
   if (ex) {
-    throw Object.assign(new Error('EMAIL_EXISTS'), { statusCode: 409 });
+    throw Object.assign(new Error('Email đăng ký đã tồn tại'), { statusCode: 409 });
   }
 
   if (cccd) {
     const er = await Reader.findOne({ where: { cccd } });
     if (er) {
-      throw Object.assign(new Error('CCCD_EXISTS'), { statusCode: 409 });
+      throw Object.assign(new Error('Căn cước công dân dã tồn tại'), { statusCode: 409 });
     }
+  }
+  // === PHONE NUMBER ===
+  if (phoneNumber) {
+    const existPhone = await Account.findOne({ where: { phoneNumber } });
+    if (existPhone) throw Object.assign(new Error('Số Điện thoại đã tồn tại'), { statusCode: 409 });
   }
 
   const tx = await sequelize.transaction();
