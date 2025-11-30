@@ -56,6 +56,7 @@ const port = process.env.PORT || 8080;
 const cartRoutes = require("./route/cartRoutes");
 const favoriteRoutes = require("./route/favoriteRoutes");
 const paymentRoutes = require('./route/payment');
+const chatRoutes = require("./route/chat.route");
 
 // ============================================================
 // CORS CONFIGURATION
@@ -119,6 +120,7 @@ app.use("/api/cart", cartRoutes);
 app.use("/api/favorite", favoriteRoutes);
 app.use("/api/auth/forgot", forgotRoute);
 app.use('/api', paymentRoutes);
+app.use("/api/chat", chatRoutes);
 // ============================================================
 // HEALTH CHECK
 // ============================================================

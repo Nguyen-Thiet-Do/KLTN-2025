@@ -4,3 +4,4 @@ FE/
 
 src/config/fcmKey.json
 src/config/google-services.json
+src/config/dialogflowKey.json
