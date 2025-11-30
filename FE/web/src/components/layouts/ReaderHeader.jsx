@@ -4,6 +4,8 @@ import { useAuth } from "../../contexts/AuthContext";
 import { useCart } from "../../contexts/CartContext";
 import { useFavorite } from "../../contexts/FavoriteContext";
 import { useNotification } from "../../contexts/NotificationContext";
+import ChatWindow from "../../pages/chat/ChatWindow";
+
 
 import {
   AppBar,
@@ -34,6 +36,7 @@ import {
   ShoppingCartOutlined, 
   FavoriteBorder ,     // CART ICON ADDED
 } from "@mui/icons-material";
+import ChatBubbleOutlineIcon from "@mui/icons-material/ChatBubbleOutline";
 
 export default function ReaderHeader() {
   const { pathname } = useLocation();
@@ -43,6 +46,7 @@ export default function ReaderHeader() {
   const [anchorEl, setAnchorEl] = useState(null);
   const [elevated, setElevated] = useState(false);
   const [searchValue, setSearchValue] = useState("");
+const [openChat, setOpenChat] = useState(false);
 
   const maxContentWidth = 1280;
 const { count } = useCart();
@@ -246,6 +250,13 @@ const { unreadCount } = useNotification();
     </Badge>
   </IconButton>
 </Tooltip>
+<Tooltip title="Chat hỗ trợ">
+  <IconButton size="small" onClick={() => setOpenChat(true)}>
+    <Badge color="error" variant="dot">
+      <ChatBubbleOutlineIcon />
+    </Badge>
+  </IconButton>
+</Tooltip>
 
           {/* END CART ICON */}
 
@@ -363,7 +374,9 @@ const { unreadCount } = useNotification();
     </Box>
   );
 
-  return (
+
+return (
+  <>
     <AppBar
       position="sticky"
       elevation={elevated ? 4 : 0}
@@ -372,8 +385,6 @@ const { unreadCount } = useNotification();
         backdropFilter: "saturate(180%) blur(10px)",
         backgroundColor: "rgba(255,255,255,0.95)",
         borderBottom: (t) => `1px solid ${t.palette.divider}`,
-        transition: (t) =>
-          t.transitions.create(["box-shadow", "background-color"]),
       }}
     >
       <Box
@@ -401,5 +412,38 @@ const { unreadCount } = useNotification();
         </Toolbar>
       </Box>
     </AppBar>
-  );
+
+    {/* ------------ CHAT WINDOW SHOULD BE HERE ------------ */}
+    {openChat && (
+      <Box
+        sx={{
+          position: "fixed",
+          bottom: 20,
+          right: 20,
+          width: 360,
+          height: 480,
+          bgcolor: "white",
+          borderRadius: 2,
+          boxShadow: "0 8px 32px rgba(0,0,0,0.2)",
+          zIndex: 2000,
+          overflow: "hidden",
+        }}
+      >
+        <ChatWindow />
+        <IconButton
+          onClick={() => setOpenChat(false)}
+          sx={{
+            position: "absolute",
+            top: 8,
+            right: 8,
+            bgcolor: "rgba(0,0,0,0.05)",
+          }}
+        >
+          ✕
+        </IconButton>
+      </Box>
+    )}
+  </>
+);
 }
+
