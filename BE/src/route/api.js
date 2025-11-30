@@ -1543,7 +1543,41 @@ routeApi.get('/', (req, res) => {
     }
   ]
 },
-
+{
+  group: 'Chatbot Support',
+  icon: '💬',
+  routes: [
+    {
+      method: 'POST',
+      path: '/api/chat/chat',
+      description: 'Gửi tin nhắn đến chatbot (Dialogflow)',
+      detailedDescription:
+        'Endpoint nhận câu hỏi của người dùng và chuyển đến Dialogflow để xử lý. Trả về câu trả lời phù hợp dựa trên các intent đã train.',
+      auth: false,
+      body: {
+        message: 'string (required) — nội dung tin nhắn người dùng'
+      },
+      response: {
+        success: {
+          reply: 'string — câu trả lời chatbot'
+        },
+        error: {
+          'MISSING_MESSAGE': 'Không có tin nhắn để xử lý',
+          'DIALOGFLOW_ERROR': 'Không thể gửi yêu cầu đến Dialogflow'
+        }
+      },
+      example: {
+        request: {
+          message: 'Quy định mượn sách là gì?'
+        },
+        response: {
+          reply: 'Mỗi độc giả được mượn tối đa 3 quyển và thời hạn mượn là 30 ngày.'
+        }
+      }
+    }
+  ]
+}
+,
       {
         group: 'Test',
         icon: '🧪',
