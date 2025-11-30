@@ -9,7 +9,7 @@ import Newspaper from "../pages/Documents/Newspapers/Newspaper";
 import Magazine from "../pages/Documents/Magazines/Magazine";
 
 import AdminDashboard from "../pages/AdminDashboard/AdminDashboard";
-
+import Reports from "../pages/AdminDashboard/Reports";
 export const adminRoutes = {
   path: "/admin",
   element: <ProtectedRoute allowedRoles={[1]} />,
@@ -24,6 +24,7 @@ export const adminRoutes = {
         { path: "documents/newspapers", element: <Newspaper/> },
         { path: "documents/magazines", element: <Magazine/>  },
         { path: "dashboard", element: <AdminDashboard /> }, 
+         { path: "reports", element: <Reports /> },
         { path: "borrow", element: <Borrow /> },
       ],
     },

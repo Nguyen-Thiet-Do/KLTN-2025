@@ -1,5 +1,5 @@
 // menu.ts/js
-import { FaBookReader, FaUserTie, FaBook, FaExchangeAlt, FaChartBar, FaBookOpen, FaNewspaper, FaBookmark } from "react-icons/fa";
+import { FaBookReader, FaUserTie, FaBook, FaExchangeAlt, FaChartBar, FaBookOpen, FaNewspaper, FaBookmark , FaClipboardList } from "react-icons/fa";
 
 export const adminMenuItems = [
   { path: "/admin/readers", icon: FaBookReader, label: "Độc giả" },
@@ -18,4 +18,6 @@ export const adminMenuItems = [
 
   { path: "/admin/borrow", icon: FaExchangeAlt, label: "Mượn trả" },
   { path: "/admin/dashboard", icon: FaChartBar, label: "Thống kê" },
+
+  { path: "/admin/reports", icon: FaClipboardList, label: "Báo cáo" },
 ];
