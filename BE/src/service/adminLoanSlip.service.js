@@ -3628,10 +3628,12 @@ async function removeLoanDetailService({ slipId, loanDetailId, reason, librarian
 
     if (!slip) { const e = new Error('Không tìm thấy phiếu'); e.status = 404; throw e; }
 
-    const target = (slip.details || []).find(d => String(d.loanDetailId || d.id) === String(loanDetailId));
+    const target = (slip.details || []).find(
+      (d) => String(d.loanDetailId || d.id) === String(loanDetailId)
+    );
     if (!target) { const e = new Error('Không tìm thấy tài liệu trong phiếu'); e.status = 404; throw e; }
 
-    // lưu lý do
+    // lưu lý do vào note của LoanDetail (lý do thủ thư xoá)
     target.note = reason || null;
     await target.save({ transaction: t });
 
@@ -3645,7 +3647,10 @@ async function removeLoanDetailService({ slipId, loanDetailId, reason, librarian
     // trả bản sao về AVAILABLE nếu cần
     try {
       if (target.documentCopyId) {
-        await DocumentCopy.update({ status: 'AVAILABLE' }, { where: { documentCopyId: target.documentCopyId }, transaction: t });
+        await DocumentCopy.update(
+          { status: 'AVAILABLE' },
+          { where: { documentCopyId: target.documentCopyId }, transaction: t }
+        );
       }
     } catch (err) {
       console.warn('removeLoanDetailService: cannot set DocumentCopy AVAILABLE', err?.message || err);
@@ -3655,7 +3660,35 @@ async function removeLoanDetailService({ slipId, loanDetailId, reason, librarian
     await target.destroy({ transaction: t });
 
     // đếm còn lại
-    const remain = await LoanDetail.count({ where: { loanSlipId: slipId }, transaction: t });
+    const remain = await LoanDetail.count({
+      where: { loanSlipId: slipId },
+      transaction: t
+    });
+
+    // ✅ CLEAN LoanSlip.note: bỏ dòng READER_CANCEL_DETAIL_REQUEST của detail này (nếu có)
+    if (slip.note) {
+      const oldNote = String(slip.note);
+      const lines = oldNote.split('\n');
+
+      const idToken = `loanDetailId=${loanDetailId}`;
+      const filteredLines = lines.filter((line) => {
+        // chỉ xử lý các dòng request huỷ detail
+        if (!line.includes('[READER_CANCEL_DETAIL_REQUEST')) return true;
+
+        // nếu dòng không phải của loanDetailId hiện tại thì giữ lại
+        if (!line.includes(idToken)) return true;
+
+        // đúng dòng request huỷ của detail này -> loại bỏ
+        return false;
+      });
+
+      const newNote = filteredLines.join('\n').trim() || null;
+
+      if (newNote !== oldNote) {
+        slip.note = newNote;
+        await slip.save({ transaction: t });
+      }
+    }
 
     // tạo notification không làm lỗi transaction
     let createdNotification = null;
@@ -3680,7 +3713,9 @@ async function removeLoanDetailService({ slipId, loanDetailId, reason, librarian
       fullName: slip.Reader?.fullName || slip.reader?.fullName || 'Độc giả',
       removedItem,
       librarianId,
-      notificationId: createdNotification ? (createdNotification.notificationID || createdNotification.id || null) : null
+      notificationId: createdNotification
+        ? (createdNotification.notificationID || createdNotification.id || null)
+        : null
     };
   }); // end tx
 
@@ -3724,13 +3759,8 @@ async function removeLoanDetailService({ slipId, loanDetailId, reason, librarian
     console.error('removeLoanDetailService: send FCM failed', fcmErr?.message || fcmErr);
   }
 
-  // -----------------------------
   // SOCKET.IO EMIT (non-critical)
-  // -----------------------------
   try {
-    // đảm bảo emitToUser đã được import ở đầu file:
-    // const { emitToUser } = require('../config/socket');
-
     let targetUserId = txResult.readerId;
     try {
       const rr = await Reader.findByPk(txResult.readerId, { attributes: ['accountId'] });
@@ -3757,16 +3787,18 @@ async function removeLoanDetailService({ slipId, loanDetailId, reason, librarian
     }
   } catch (socketErr) {
     console.error('removeLoanDetailService: send socket failed', socketErr?.message || socketErr);
-    // không throw — socket lỗi không ảnh hưởng đến kết quả
   }
 
   return {
     deletedSlip: txResult.deletedSlip,
-    message: txResult.deletedSlip ? "Đã xóa mục cuối → phiếu đã bị xoá" : "Đã xoá 1 tài liệu khỏi phiếu",
+    message: txResult.deletedSlip
+      ? 'Đã xóa mục cuối → phiếu đã bị xoá'
+      : 'Đã xoá 1 tài liệu khỏi phiếu',
     slipId,
     notificationId: txResult.notificationId || null
   };
 }
+
 
 
 

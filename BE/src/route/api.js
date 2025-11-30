@@ -370,177 +370,177 @@ routeApi.get('/', (req, res) => {
         ]
       },
       {
-  group: 'Forgot Password',
-  icon: '📧',
-  routes: [
-    {
-      method: 'POST',
-      path: '/api/auth/forgot/send-otp',
-      description: 'Gửi mã OTP khôi phục mật khẩu đến email người dùng',
-      auth: false,
-      body: {
-        email: 'string (required)'
+        group: 'Forgot Password',
+        icon: '📧',
+        routes: [
+          {
+            method: 'POST',
+            path: '/api/auth/forgot/send-otp',
+            description: 'Gửi mã OTP khôi phục mật khẩu đến email người dùng',
+            auth: false,
+            body: {
+              email: 'string (required)'
+            },
+            response: {
+              success: { success: true },
+              error: {
+                'ACCOUNT_NOT_FOUND': 'Email không tồn tại'
+              }
+            }
+          },
+          {
+            method: 'POST',
+            path: '/api/auth/forgot/verify-otp',
+            description: 'Xác thực OTP để tiếp tục quá trình đặt lại mật khẩu',
+            auth: false,
+            body: {
+              email: 'string (required)',
+              otp: 'string (required)'
+            },
+            response: {
+              success: { success: true },
+              error: {
+                'OTP_INVALID': 'OTP không hợp lệ',
+                'OTP_EXPIRED': 'OTP đã hết hạn'
+              }
+            }
+          },
+          {
+            method: 'POST',
+            path: '/api/auth/forgot/reset-password',
+            description: 'Đặt lại mật khẩu cho tài khoản sau khi xác thực OTP',
+            auth: false,
+            body: {
+              email: 'string (required)',
+              newPassword: 'string (required)'
+            },
+            response: {
+              success: { success: true, message: 'Đặt lại mật khẩu thành công' },
+              error: {
+                'ACCOUNT_NOT_FOUND': 'Email không tồn tại',
+                'INVALID_PASSWORD': 'Mật khẩu không hợp lệ'
+              }
+            }
+          }
+        ]
       },
-      response: {
-        success: { success: true },
-        error: {
-          'ACCOUNT_NOT_FOUND': 'Email không tồn tại'
-        }
-      }
-    },
-    {
-      method: 'POST',
-      path: '/api/auth/forgot/verify-otp',
-      description: 'Xác thực OTP để tiếp tục quá trình đặt lại mật khẩu',
-      auth: false,
-      body: {
-        email: 'string (required)',
-        otp: 'string (required)'
-      },
-      response: {
-        success: { success: true },
-        error: {
-          'OTP_INVALID': 'OTP không hợp lệ',
-          'OTP_EXPIRED': 'OTP đã hết hạn'
-        }
-      }
-    },
-    {
-      method: 'POST',
-      path: '/api/auth/forgot/reset-password',
-      description: 'Đặt lại mật khẩu cho tài khoản sau khi xác thực OTP',
-      auth: false,
-      body: {
-        email: 'string (required)',
-        newPassword: 'string (required)'
-      },
-      response: {
-        success: { success: true, message: 'Đặt lại mật khẩu thành công' },
-        error: {
-          'ACCOUNT_NOT_FOUND': 'Email không tồn tại',
-          'INVALID_PASSWORD': 'Mật khẩu không hợp lệ'
-        }
-      }
-    }
-  ]
-},
 
-   {
-  group: 'Profile',
-  icon: '👤',
-  routes: [
-    {
-      method: 'GET',
-      path: '/api/profile/me',
-      description: 'Lấy thông tin cá nhân của độc giả hiện tại (bao gồm cả thông tin tài khoản đi kèm)',
-      auth: true,
-      role: 'Reader (roleId = 3)',
-      response: {
-        success: 'boolean',
-        reader: {
-          readerId: 'number',
-          accountId: 'number',
-          roleId: 'number',
-          fullName: 'string',
-          dateOfBirth: 'date (YYYY-MM-DD)',
-          gender: 'string | null',
-          cccd: 'string | null',
-          address: 'string | null',
-          totalBorrow: 'number',
-          note: 'string | null',
-          deleted: 'boolean',
-          created_at: 'datetime',
-          updated_at: 'datetime',
+      {
+        group: 'Profile',
+        icon: '👤',
+        routes: [
+          {
+            method: 'GET',
+            path: '/api/profile/me',
+            description: 'Lấy thông tin cá nhân của độc giả hiện tại (bao gồm cả thông tin tài khoản đi kèm)',
+            auth: true,
+            role: 'Reader (roleId = 3)',
+            response: {
+              success: 'boolean',
+              reader: {
+                readerId: 'number',
+                accountId: 'number',
+                roleId: 'number',
+                fullName: 'string',
+                dateOfBirth: 'date (YYYY-MM-DD)',
+                gender: 'string | null',
+                cccd: 'string | null',
+                address: 'string | null',
+                totalBorrow: 'number',
+                note: 'string | null',
+                deleted: 'boolean',
+                created_at: 'datetime',
+                updated_at: 'datetime',
 
-          email: 'string',
-          phoneNumber: 'string | null',
-          status: 'active | locked | inactive',
-          roleId_account: 'number',
-          created_at_account: 'datetime',
-          updated_at_account: 'datetime',
+                email: 'string',
+                phoneNumber: 'string | null',
+                status: 'active | locked | inactive',
+                roleId_account: 'number',
+                created_at_account: 'datetime',
+                updated_at_account: 'datetime',
 
-          account: 'object | null',
-          memberCard: 'object | null',
-          loanCounts: '{ pending, waitingPickup, borrowing, activeTotal }',
-          returnedCount: 'number'
-        }
+                account: 'object | null',
+                memberCard: 'object | null',
+                loanCounts: '{ pending, waitingPickup, borrowing, activeTotal }',
+                returnedCount: 'number'
+              }
+            }
+          },
+
+          {
+            method: 'PUT',
+            path: '/api/profile/me',
+            description: 'Cập nhật thông tin cá nhân của độc giả (chỉ cập nhật bảng Readers, không cập nhật tài khoản)',
+            auth: true,
+            role: 'Reader (roleId = 3)',
+            body: {
+              fullName: 'string (optional)',
+              gender: 'string (optional)',
+              dateOfBirth: 'date (optional, YYYY-MM-DD)',
+              address: 'string (optional)',
+              cccd: 'string (optional)',
+              note: 'string (optional)'
+            },
+            response: {
+              success: 'boolean',
+              message: 'string',
+              reader: 'object (cấu trúc giống GET /api/profile/me)'
+            }
+          },
+
+          {
+            method: 'PUT',
+            path: '/api/profile/account',
+            description: 'Cập nhật thông tin tài khoản (email, phoneNumber, password)',
+            auth: true,
+            role: 'Reader (roleId = 3)',
+            body: {
+              email: 'string (optional)',
+              phoneNumber: 'string (optional)',
+              password: 'string (optional - mật khẩu mới)'
+            },
+            response: {
+              success: 'boolean',
+              message: 'string',
+              account: {
+                accountId: 'number',
+                email: 'string',
+                phoneNumber: 'string | null',
+                roleId: 'number',
+                status: 'string',
+                created_at: 'datetime',
+                updated_at: 'datetime'
+              }
+            }
+          },
+
+          {
+            method: 'PUT',
+            path: '/api/profile/full',
+            description: 'Cập nhật đầy đủ thông tin độc giả + tài khoản (Reader + Account) cùng lúc',
+            auth: true,
+            role: 'Reader (roleId = 3)',
+            body: {
+              fullName: 'string (optional)',
+              gender: 'string (optional)',
+              dateOfBirth: 'date (optional)',
+              address: 'string (optional)',
+              cccd: 'string (optional)',
+              note: 'string (optional)',
+
+              email: 'string (optional)',
+              phoneNumber: 'string (optional)',
+              password: 'string (optional)'
+            },
+            response: {
+              success: 'boolean',
+              message: 'string',
+              profile: 'object (cấu trúc giống GET /api/profile/me — đầy đủ Reader + Account + MemberCard + loanCounts)'
+            }
+          }
+        ]
       }
-    },
-
-    {
-      method: 'PUT',
-      path: '/api/profile/me',
-      description: 'Cập nhật thông tin cá nhân của độc giả (chỉ cập nhật bảng Readers, không cập nhật tài khoản)',
-      auth: true,
-      role: 'Reader (roleId = 3)',
-      body: {
-        fullName: 'string (optional)',
-        gender: 'string (optional)',
-        dateOfBirth: 'date (optional, YYYY-MM-DD)',
-        address: 'string (optional)',
-        cccd: 'string (optional)',
-        note: 'string (optional)'
-      },
-      response: {
-        success: 'boolean',
-        message: 'string',
-        reader: 'object (cấu trúc giống GET /api/profile/me)'
-      }
-    },
-
-    {
-      method: 'PUT',
-      path: '/api/profile/account',
-      description: 'Cập nhật thông tin tài khoản (email, phoneNumber, password)',
-      auth: true,
-      role: 'Reader (roleId = 3)',
-      body: {
-        email: 'string (optional)',
-        phoneNumber: 'string (optional)',
-        password: 'string (optional - mật khẩu mới)'
-      },
-      response: {
-        success: 'boolean',
-        message: 'string',
-        account: {
-          accountId: 'number',
-          email: 'string',
-          phoneNumber: 'string | null',
-          roleId: 'number',
-          status: 'string',
-          created_at: 'datetime',
-          updated_at: 'datetime'
-        }
-      }
-    },
-
-    {
-      method: 'PUT',
-      path: '/api/profile/full',
-      description: 'Cập nhật đầy đủ thông tin độc giả + tài khoản (Reader + Account) cùng lúc',
-      auth: true,
-      role: 'Reader (roleId = 3)',
-      body: {
-        fullName: 'string (optional)',
-        gender: 'string (optional)',
-        dateOfBirth: 'date (optional)',
-        address: 'string (optional)',
-        cccd: 'string (optional)',
-        note: 'string (optional)',
-
-        email: 'string (optional)',
-        phoneNumber: 'string (optional)',
-        password: 'string (optional)'
-      },
-      response: {
-        success: 'boolean',
-        message: 'string',
-        profile: 'object (cấu trúc giống GET /api/profile/me — đầy đủ Reader + Account + MemberCard + loanCounts)'
-      }
-    }
-  ]
-}
-,
+      ,
 
       {
         group: 'Documents of Reader',
@@ -1300,6 +1300,23 @@ routeApi.get('/', (req, res) => {
               items: 'array [{ documentId:number}] (required)',
               note: 'string (optional)'
             }
+          },
+          {
+            method: 'POST',
+            path: '/api/loans/reader/loans/:loanSlipId/cancel-request',
+            description:
+              'Độc giả gửi yêu cầu huỷ phiếu đặt trước / phiếu đang chờ đến lấy. ' +
+              'PENDING: có thể huỷ thẳng phiếu hoặc 1 dòng; WAITING_FOR_PICKUP: chỉ ghi yêu cầu vào note để thủ thư xử lý.',
+            auth: true,
+            role: 'Reader (roleId = 3)',
+            params: {
+              loanSlipId: 'number (required, id phiếu mượn)'
+            },
+            body: {
+              reason: 'string (optional, lý do huỷ)',
+              loanDetailId:
+                'number (optional, nếu truyền thì chỉ yêu cầu huỷ 1 tài liệu cụ thể trong phiếu)'
+            }
           }
         ]
       },
@@ -1464,120 +1481,120 @@ routeApi.get('/', (req, res) => {
         ]
       },
       {
-  group: 'Cart',
-  icon: '🛒',
-  routes: [
-    {
-      method: 'GET',
-      path: '/api/cart',
-      description: 'Lấy giỏ sách của độc giả hiện tại',
-      auth: true,
-      role: 'Reader (roleId = 3)'
-    },
-    {
-      method: 'POST',
-      path: '/api/cart/add',
-      description: 'Thêm tài liệu vào giỏ',
-      auth: true,
-      role: 'Reader (roleId = 3)',
-      body: {
-        documentId: 'number (required)'
-      }
-    },
-    {
-      method: 'DELETE',
-      path: '/api/cart/:documentId',
-      description: 'Xoá 1 tài liệu khỏi giỏ',
-      auth: true,
-      role: 'Reader (roleId = 3)',
-      params: {
-        documentId: 'number'
-      }
-    },
-    {
-      method: 'DELETE',
-      path: '/api/cart',
-      description: 'Xoá toàn bộ giỏ sách',
-      auth: true,
-      role: 'Reader (roleId = 3)'
-    }
-  ]
-},
-{
-  group: 'Favorite',
-  icon: '❤️',
-  routes: [
-    {
-      method: 'GET',
-      path: '/api/favorite',
-      description: 'Lấy danh sách tài liệu yêu thích của độc giả',
-      auth: true,
-      role: 'Reader (roleId = 3)'
-    },
-    {
-      method: 'POST',
-      path: '/api/favorite/add',
-      description: 'Thêm tài liệu vào danh sách yêu thích',
-      auth: true,
-      role: 'Reader (roleId = 3)',
-      body: {
-        documentId: 'number (required)'
-      }
-    },
-    {
-      method: 'DELETE',
-      path: '/api/favorite/:documentId',
-      description: 'Xóa 1 tài liệu khỏi danh sách yêu thích',
-      auth: true,
-      role: 'Reader (roleId = 3)',
-      params: {
-        documentId: 'number'
-      }
-    },
-    {
-      method: 'DELETE',
-      path: '/api/favorite',
-      description: 'Xóa toàn bộ danh sách yêu thích',
-      auth: true,
-      role: 'Reader (roleId = 3)'
-    }
-  ]
-},
-{
-  group: 'Chatbot Support',
-  icon: '💬',
-  routes: [
-    {
-      method: 'POST',
-      path: '/api/chat/chat',
-      description: 'Gửi tin nhắn đến chatbot (Dialogflow)',
-      detailedDescription:
-        'Endpoint nhận câu hỏi của người dùng và chuyển đến Dialogflow để xử lý. Trả về câu trả lời phù hợp dựa trên các intent đã train.',
-      auth: false,
-      body: {
-        message: 'string (required) — nội dung tin nhắn người dùng'
+        group: 'Cart',
+        icon: '🛒',
+        routes: [
+          {
+            method: 'GET',
+            path: '/api/cart',
+            description: 'Lấy giỏ sách của độc giả hiện tại',
+            auth: true,
+            role: 'Reader (roleId = 3)'
+          },
+          {
+            method: 'POST',
+            path: '/api/cart/add',
+            description: 'Thêm tài liệu vào giỏ',
+            auth: true,
+            role: 'Reader (roleId = 3)',
+            body: {
+              documentId: 'number (required)'
+            }
+          },
+          {
+            method: 'DELETE',
+            path: '/api/cart/:documentId',
+            description: 'Xoá 1 tài liệu khỏi giỏ',
+            auth: true,
+            role: 'Reader (roleId = 3)',
+            params: {
+              documentId: 'number'
+            }
+          },
+          {
+            method: 'DELETE',
+            path: '/api/cart',
+            description: 'Xoá toàn bộ giỏ sách',
+            auth: true,
+            role: 'Reader (roleId = 3)'
+          }
+        ]
       },
-      response: {
-        success: {
-          reply: 'string — câu trả lời chatbot'
-        },
-        error: {
-          'MISSING_MESSAGE': 'Không có tin nhắn để xử lý',
-          'DIALOGFLOW_ERROR': 'Không thể gửi yêu cầu đến Dialogflow'
-        }
+      {
+        group: 'Favorite',
+        icon: '❤️',
+        routes: [
+          {
+            method: 'GET',
+            path: '/api/favorite',
+            description: 'Lấy danh sách tài liệu yêu thích của độc giả',
+            auth: true,
+            role: 'Reader (roleId = 3)'
+          },
+          {
+            method: 'POST',
+            path: '/api/favorite/add',
+            description: 'Thêm tài liệu vào danh sách yêu thích',
+            auth: true,
+            role: 'Reader (roleId = 3)',
+            body: {
+              documentId: 'number (required)'
+            }
+          },
+          {
+            method: 'DELETE',
+            path: '/api/favorite/:documentId',
+            description: 'Xóa 1 tài liệu khỏi danh sách yêu thích',
+            auth: true,
+            role: 'Reader (roleId = 3)',
+            params: {
+              documentId: 'number'
+            }
+          },
+          {
+            method: 'DELETE',
+            path: '/api/favorite',
+            description: 'Xóa toàn bộ danh sách yêu thích',
+            auth: true,
+            role: 'Reader (roleId = 3)'
+          }
+        ]
       },
-      example: {
-        request: {
-          message: 'Quy định mượn sách là gì?'
-        },
-        response: {
-          reply: 'Mỗi độc giả được mượn tối đa 3 quyển và thời hạn mượn là 30 ngày.'
-        }
+      {
+        group: 'Chatbot Support',
+        icon: '💬',
+        routes: [
+          {
+            method: 'POST',
+            path: '/api/chat/chat',
+            description: 'Gửi tin nhắn đến chatbot (Dialogflow)',
+            detailedDescription:
+              'Endpoint nhận câu hỏi của người dùng và chuyển đến Dialogflow để xử lý. Trả về câu trả lời phù hợp dựa trên các intent đã train.',
+            auth: false,
+            body: {
+              message: 'string (required) — nội dung tin nhắn người dùng'
+            },
+            response: {
+              success: {
+                reply: 'string — câu trả lời chatbot'
+              },
+              error: {
+                'MISSING_MESSAGE': 'Không có tin nhắn để xử lý',
+                'DIALOGFLOW_ERROR': 'Không thể gửi yêu cầu đến Dialogflow'
+              }
+            },
+            example: {
+              request: {
+                message: 'Quy định mượn sách là gì?'
+              },
+              response: {
+                reply: 'Mỗi độc giả được mượn tối đa 3 quyển và thời hạn mượn là 30 ngày.'
+              }
+            }
+          }
+        ]
       }
-    }
-  ]
-}
-,
+      ,
       {
         group: 'Test',
         icon: '🧪',

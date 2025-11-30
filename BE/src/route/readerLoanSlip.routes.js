@@ -10,4 +10,12 @@ router.get('/loans/my', requireAuth, requireRole([3]), controller.getMyLoanHisto
 // Độc giả (roleId 3): đặt mượn trước tài liệu
 router.post('/loans/reserve', requireAuth, requireRole([3]), reserveCtrl.reserveLoanForReader);
 
+// Độc giả yêu cầu huỷ phiếu (PENDING -> huỷ luôn, WAITING -> chỉ ghi request)
+router.post(
+    '/loans/:loanSlipId/cancel-request',
+    requireAuth,
+    requireRole([3]),
+    reserveCtrl.requestCancelLoanSlip
+);
+
 module.exports = router;

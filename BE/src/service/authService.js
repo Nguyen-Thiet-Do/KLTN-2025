@@ -383,14 +383,18 @@ function _saveOtp(email, otp, ttl = 10 * 60 * 1000, meta = {}) {
   console.log(`   Expires: ${new Date(expiresAt).toISOString()}`);
 }
 
-function _verifyOtp(email, otp) {
+function _verifyOtp(email, otp, options = {}) {
+  const { consume = true } = options; // mặc định vẫn "ăn" OTP như cũ
+
   const normalizedEmail = String(email).toLowerCase().trim();
   const row = OTP_STORE.get(normalizedEmail);
 
   console.log(`🔍 Verifying OTP for: ${normalizedEmail}`);
   console.log(`   Stored OTP: ${row?.otp || 'NOT_FOUND'}`);
   console.log(`   Input OTP: ${otp}`);
-  console.log(`   Expires at: ${row ? new Date(row.expiresAt).toISOString() : 'N/A'}`);
+  console.log(
+    `   Expires at: ${row ? new Date(row.expiresAt).toISOString() : 'N/A'}`
+  );
 
   if (!row) {
     console.log('❌ OTP not found in store');
@@ -407,12 +411,19 @@ function _verifyOtp(email, otp) {
   const inputOtp = String(otp).trim();
 
   if (storedOtp !== inputOtp) {
-    console.log(`❌ OTP mismatch: stored="${storedOtp}" vs input="${inputOtp}"`);
+    console.log(
+      `❌ OTP mismatch: stored="${storedOtp}" vs input="${inputOtp}"`
+    );
     return false;
   }
 
-  console.log('✅ OTP valid - deleting from store');
-  OTP_STORE.delete(normalizedEmail);
+  if (consume) {
+    console.log('✅ OTP valid - deleting from store');
+    OTP_STORE.delete(normalizedEmail);
+  } else {
+    console.log('✅ OTP valid - keep in store (no consume)');
+  }
+
   return true;
 }
 
@@ -458,87 +469,109 @@ async function verifyOtpAndCreateAccountService(payload) {
     dateOfBirth,
     gender,
     cccd,
-    address
+    address,
   } = payload;
 
   if (!email || !otp || !password || !fullName) {
     throw Object.assign(new Error('MISSING_FIELDS'), { statusCode: 400 });
   }
 
-  const normalizedEmail = email.toLowerCase().trim();
+  const normalizedEmail = String(email).toLowerCase().trim();
 
-  if (!_verifyOtp(normalizedEmail, otp)) {
-    throw Object.assign(new Error('OTP_INVALID_OR_EXPIRED'), { statusCode: 400 });
+  // ✅ BƯỚC 1: chỉ verify, CHƯA xóa OTP
+  const isValidOtp = _verifyOtp(normalizedEmail, otp, { consume: false });
+  if (!isValidOtp) {
+    throw Object.assign(new Error('OTP_INVALID_OR_EXPIRED'), {
+      statusCode: 400,
+    });
   }
 
-  const ex = await Account.findOne({
-    where: sequelize.where(
-      sequelize.fn('LOWER', sequelize.col('email')),
-      normalizedEmail
-    )
+  // ✅ BƯỚC 2: kiểm tra trùng email / CCCD / phone
+  const existedAccount = await Account.findOne({
+    where: { email: normalizedEmail.toLowerCase() },
   });
-
-  if (ex) {
-    throw Object.assign(new Error('Email đăng ký đã tồn tại'), { statusCode: 409 });
+  if (existedAccount) {
+    throw Object.assign(new Error('EMAIL_EXISTS'), { statusCode: 409 });
   }
 
+  let existedReader = null;
   if (cccd) {
-    const er = await Reader.findOne({ where: { cccd } });
-    if (er) {
-      throw Object.assign(new Error('Căn cước công dân dã tồn tại'), { statusCode: 409 });
-    }
+    existedReader = await Reader.findOne({ where: { cccd } });
   }
-  // === PHONE NUMBER ===
+  if (existedReader) {
+    throw Object.assign(new Error('CCCD_EXISTS'), { statusCode: 409 });
+  }
+
+  let existedPhone = null;
   if (phoneNumber) {
-    const existPhone = await Account.findOne({ where: { phoneNumber } });
-    if (existPhone) throw Object.assign(new Error('Số Điện thoại đã tồn tại'), { statusCode: 409 });
+    existedPhone = await Account.findOne({ where: { phoneNumber } });
   }
+  if (existedPhone) {
+    throw Object.assign(new Error('PHONE_EXISTS'), { statusCode: 409 });
+  }
+
+  if (password.length < 6) {
+    throw Object.assign(new Error('WEAK_PASSWORD'), { statusCode: 400 });
+  }
+
+  const hashedPassword = await bcrypt.hash(password, 10);
 
   const tx = await sequelize.transaction();
-
   try {
-    const saltRounds = Number(process.env.BCRYPT_SALT_ROUNDS) || 10;
-    const passwordHash = await bcrypt.hash(password, saltRounds);
+    // ✅ BƯỚC 3: tạo Account
+    const account = await Account.create(
+      {
+        email: normalizedEmail,
+        password: hashedPassword,
+        phoneNumber: phoneNumber || null,
+        roleId: 3, // role Reader
+        status: 'ACTIVE',
+      },
+      { transaction: tx }
+    );
 
-    const account = await Account.create({
-      email: normalizedEmail,
-      phoneNumber: phoneNumber || null,
-      passwordHash,
-      status: 'active',
-      roleId: 3
-    }, { transaction: tx });
-
-    const reader = await Reader.create({
-      accountId: account.accountId,
-      roleId: 3,
-      fullName,
-      dateOfBirth: dateOfBirth || null,
-      gender: typeof gender !== 'undefined' ? gender : null,
-      cccd: cccd || null,
-      address: address || null,
-      totalBorrow: 0
-    }, { transaction: tx });
+    // ✅ BƯỚC 4: tạo Reader
+    const reader = await Reader.create(
+      {
+        accountId: account.accountId,
+        roleId: 3,
+        fullName,
+        dateOfBirth: dateOfBirth || null,
+        gender: gender || null,
+        cccd: cccd || null,
+        address: address || null,
+        totolBorrow: 0,
+        note: null,
+      },
+      { transaction: tx }
+    );
 
     await tx.commit();
 
-    console.log(`✅ Account created: ${account.email} | Reader: ${reader.readerId}`);
+    // ✅ BƯỚC 5: tạo thành công rồi mới xóa OTP
+    OTP_STORE.delete(normalizedEmail);
+    console.log(
+      `✅ Registration success, OTP consumed for ${normalizedEmail}`
+    );
 
     return {
       account: {
         accountId: account.accountId,
-        email: account.email
+        email: account.email,
       },
       reader: {
         readerId: reader.readerId,
-        fullName: reader.fullName
-      }
+        fullName: reader.fullName,
+      },
     };
   } catch (err) {
     await tx.rollback();
-    console.error('❌ Transaction failed:', err.message);
+    console.error('❌ verifyOtpAndCreateAccountService failed:', err.message);
+    // KHÔNG xoá OTP ở đây -> user vẫn có thể dùng lại OTP trong 10 phút
     throw err;
   }
 }
+
 
 // =============================
 // 🎫 COMPLETE REGISTRATION

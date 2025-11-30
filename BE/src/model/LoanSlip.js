@@ -22,6 +22,7 @@ const LoanSlip = sequelize.define('LoanSlip', {
   deleted: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false, field: 'deleted' },
   created_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW, field: 'created_at' },
   updated_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW, field: 'updated_at' },
+  note: { type: DataTypes.TEXT, allowNull: true, field: 'note' },
 }, {
   tableName: 'LoanSlips',
   timestamps: false

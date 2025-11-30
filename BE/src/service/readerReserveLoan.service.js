@@ -11,8 +11,10 @@ const {
   MemberCard,
   CardType,
   Account,
-  Notification
+  Notification,
+
 } = require('../model');
+const { cancelReservationService } = require('./adminLoanSlip.service');
 
 const { emitToUser } = require('../config/socket');
 const mailService = require('./mailService');
@@ -660,8 +662,308 @@ async function reserveLoanForReaderService(user, payload) {
   }
 }
 
+/**
+ * Độc giả gửi yêu cầu huỷ phiếu / huỷ 1 dòng trong phiếu
+ * - PENDING:
+ *      + Không có loanDetailId  -> huỷ thẳng cả phiếu (dùng cancelReservationService)
+ *      + Có loanDetailId        -> huỷ 1 LoanDetail PENDING; nếu phiếu rỗng thì huỷ luôn phiếu
+ * - WAITING_FOR_PICKUP:
+ *      + Không có loanDetailId  -> chỉ ghi yêu cầu huỷ vào slip.note
+ *      + Có loanDetailId        -> ghi yêu cầu huỷ vào cả LoanDetail.note và slip.note
+ */
+async function readerRequestCancelLoanSlipService(user, payload) {
+  const { loanSlipId, reason, loanDetailId } = payload || {};
+
+  // Chỉ cho độc giả (roleId = 3)
+  if (!user || user.roleId !== 3) {
+    const e = new Error('Chỉ độc giả mới được gửi yêu cầu huỷ phiếu');
+    e.status = 403;
+    throw e;
+  }
+
+  const slipId = Number(loanSlipId);
+  if (!slipId) {
+    const e = new Error('loanSlipId không hợp lệ');
+    e.status = 400;
+    throw e;
+  }
+
+  const detailId = loanDetailId ? Number(loanDetailId) : null;
+
+  // Tìm reader theo account
+  const reader = await Reader.findOne({
+    where: { accountId: user.accountId, deleted: false },
+    attributes: ['readerId', 'fullName', 'accountId'],
+  });
+
+  if (!reader) {
+    const e = new Error('Không tìm thấy tài khoản độc giả');
+    e.status = 404;
+    throw e;
+  }
+
+  // Tìm phiếu thuộc về reader này
+  const slip = await LoanSlip.findOne({
+    where: { loanSlipId: slipId, readerId: reader.readerId, deleted: false },
+    attributes: ['loanSlipId', 'status', 'note'],
+  });
+
+  if (!slip) {
+    const e = new Error('Không tìm thấy phiếu mượn của bạn');
+    e.status = 404;
+    throw e;
+  }
+
+  const status = String(slip.status || '').toUpperCase();
+  const reasonText = (reason || '').trim();
+
+  // ======================
+  // CASE 1: PENDING
+  // ======================
+  if (status === 'PENDING') {
+    // ----- 1A. Có loanDetailId -> huỷ 1 dòng trong phiếu -----
+    if (detailId) {
+      return await sequelize.transaction(async (t) => {
+        // Load lại slip trong transaction (lock)
+        const txSlip = await LoanSlip.findOne({
+          where: { loanSlipId: slipId, readerId: reader.readerId, deleted: false },
+          attributes: ['loanSlipId', 'note'],
+          transaction: t,
+          lock: t.LOCK.UPDATE,
+        });
+
+        if (!txSlip) {
+          const e = new Error('Không tìm thấy phiếu mượn của bạn (trong transaction)');
+          e.status = 404;
+          throw e;
+        }
+
+        // Tìm LoanDetail cần huỷ (PENDING & chưa gán copy)
+        const detail = await LoanDetail.findOne({
+          where: {
+            loanSlipId: txSlip.loanSlipId,
+            loanDetailId: detailId,
+            status: 'PENDING',
+          },
+          transaction: t,
+          lock: t.LOCK.UPDATE,
+        });
+
+        if (!detail) {
+          const e = new Error('Không tìm thấy dòng mượn PENDING phù hợp để huỷ');
+          e.status = 404;
+          throw e;
+        }
+
+        // Xoá detail
+        await detail.destroy({ transaction: t });
+
+        // Đếm lại số detail còn lại
+        const remainingCount = await LoanDetail.count({
+          where: { loanSlipId: txSlip.loanSlipId },
+          transaction: t,
+        });
+
+        // Nếu không còn chi tiết nào -> huỷ luôn phiếu (dùng cancelReservationService)
+        if (remainingCount === 0) {
+          const finalReason =
+            reasonText ||
+            `Độc giả huỷ chi tiết cuối cùng #${detailId}, phiếu được huỷ toàn bộ.`;
+
+          // Gọi lại service admin (ngoài transaction hiện tại để tránh nested tx phức tạp)
+          await t.commit();
+
+          const result = await cancelReservationService({
+            loanSlipId: txSlip.loanSlipId,
+            reason: finalReason,
+            librarianId: null, // huỷ do độc giả
+          });
+
+          return {
+            success: true,
+            cancelled: true,
+            slipId: txSlip.loanSlipId,
+            removedLoanDetailId: detailId,
+            mode: 'AUTO_CANCEL_PENDING_AFTER_LAST_DETAIL_REMOVED',
+            message:
+              result?.message ||
+              'Đã huỷ chi tiết cuối cùng và huỷ luôn phiếu đặt trước.',
+          };
+        }
+
+        // Nếu vẫn còn chi tiết -> chỉ huỷ 1 dòng, ghi note vào LoanSlip
+        const stamp = new Date().toISOString().slice(0, 19).replace('T', ' ');
+        const prefix = `[READER_CANCEL_DETAIL ${stamp}]`;
+
+        const newNote =
+          (txSlip.note ? txSlip.note + '\n' : '') +
+          `${prefix} loanDetailId=${detailId}; ${reasonText || '(không ghi lý do)'}`;
+
+        await LoanSlip.update(
+          { note: newNote },
+          { where: { loanSlipId: txSlip.loanSlipId }, transaction: t }
+        );
+
+        return {
+          success: true,
+          cancelled: false,
+          slipId: txSlip.loanSlipId,
+          removedLoanDetailId: detailId,
+          mode: 'REMOVE_DETAIL_PENDING',
+          message: 'Đã huỷ 1 tài liệu khỏi phiếu đặt trước.',
+        };
+      });
+    }
+
+    // ----- 1B. Không có loanDetailId -> huỷ thẳng cả phiếu (giống cũ) -----
+    const finalReason =
+      reasonText || 'Độc giả yêu cầu huỷ phiếu đặt trước.';
+
+    const result = await cancelReservationService({
+      loanSlipId: slip.loanSlipId,
+      reason: finalReason,
+      librarianId: null, // huỷ do độc giả
+    });
+
+    return {
+      success: true,
+      cancelled: true,
+      slipId: slip.loanSlipId,
+      mode: 'AUTO_CANCEL_PENDING',
+      message: result?.message || 'Phiếu đặt trước đã được huỷ thành công.',
+    };
+  }
+
+  // ==========================================
+  // CASE 2: WAITING_FOR_PICKUP -> CHỈ GHI NOTE
+  // ==========================================
+  if (status === 'WAITING_FOR_PICKUP') {
+    return await sequelize.transaction(async (t) => {
+      const txSlip = await LoanSlip.findOne({
+        where: { loanSlipId: slipId, readerId: reader.readerId, deleted: false },
+        attributes: ['loanSlipId', 'note'],
+        transaction: t,
+        lock: t.LOCK.UPDATE,
+      });
+
+      if (!txSlip) {
+        const e = new Error('Không tìm thấy phiếu mượn của bạn (trong transaction)');
+        e.status = 404;
+        throw e;
+      }
+
+      const stamp = new Date().toISOString().slice(0, 19).replace('T', ' ');
+
+      // Nếu có loanDetailId -> ghi yêu cầu huỷ riêng cho 1 dòng
+      if (detailId) {
+        const detail = await LoanDetail.findOne({
+          where: {
+            loanSlipId: txSlip.loanSlipId,
+            loanDetailId: detailId,
+            status: 'WAITING_FOR_PICKUP',
+          },
+          transaction: t,
+          lock: t.LOCK.UPDATE,
+        });
+
+        if (!detail) {
+          const e = new Error(
+            'Không tìm thấy dòng mượn đang chờ đến lấy để yêu cầu huỷ.'
+          );
+          e.status = 404;
+          throw e;
+        }
+
+        const detailPrefix = `[READER_CANCEL_REQUEST ${stamp}]`;
+        const newDetailNote =
+          (detail.note ? detail.note + '\n' : '') +
+          `${detailPrefix} ${reasonText || '(không ghi lý do)'}`;
+
+        await LoanDetail.update(
+          { note: newDetailNote },
+          { where: { loanDetailId: detail.loanDetailId }, transaction: t }
+        );
+
+        const slipPrefix = `[READER_CANCEL_DETAIL_REQUEST ${stamp}]`;
+        const slipNoteLine =
+          `${slipPrefix} loanDetailId=${detailId}; ${reasonText || '(không ghi lý do)'}`;
+
+        const newSlipNote =
+          (txSlip.note ? txSlip.note + '\n' : '') + slipNoteLine;
+
+        await LoanSlip.update(
+          { note: newSlipNote },
+          { where: { loanSlipId: txSlip.loanSlipId }, transaction: t }
+        );
+
+        return {
+          success: true,
+          cancelled: false,
+          slipId: txSlip.loanSlipId,
+          requestedLoanDetailId: detailId,
+          mode: 'REQUEST_CANCEL_DETAIL_WAITING_FOR_PICKUP',
+          message:
+            'Đã ghi nhận yêu cầu huỷ 1 tài liệu trong phiếu chờ đến lấy. Thủ thư sẽ xem xét và xử lý.',
+        };
+      }
+
+      // Không có loanDetailId -> yêu cầu huỷ cả phiếu (nhưng chỉ ở mức request)
+      const prefix = `[READER_CANCEL_REQUEST ${stamp}]`;
+      const newNote =
+        (txSlip.note ? txSlip.note + '\n' : '') +
+        `${prefix} ${reasonText || '(không ghi lý do)'}`;
+
+      await LoanSlip.update(
+        { note: newNote },
+        { where: { loanSlipId: txSlip.loanSlipId }, transaction: t }
+      );
+
+      return {
+        success: true,
+        cancelled: false,
+        slipId: txSlip.loanSlipId,
+        mode: 'REQUEST_ONLY_WAITING_FOR_PICKUP',
+        message:
+          'Phiếu đang chờ đến lấy, bạn không thể tự huỷ trực tiếp. ' +
+          'Yêu cầu huỷ đã được ghi lại, thủ thư sẽ xem xét và xử lý.',
+      };
+    });
+  }
+
+  // ======================
+  // CÁC TRẠNG THÁI KHÁC
+  // ======================
+  if (status === 'BORROWING') {
+    const e = new Error(
+      'Phiếu đang trong trạng thái đang mượn, không thể huỷ. Vui lòng trả sách nếu không còn nhu cầu.'
+    );
+    e.status = 409;
+    throw e;
+  }
+
+  if (status === 'RETURNED') {
+    const e = new Error('Phiếu đã hoàn tất, không cần huỷ.');
+    e.status = 409;
+    throw e;
+  }
+
+  if (status === 'CANCELLED') {
+    const e = new Error('Phiếu này đã bị huỷ trước đó.');
+    e.status = 409;
+    throw e;
+  }
+
+  const e = new Error(
+    `Không hỗ trợ huỷ phiếu ở trạng thái hiện tại: ${slip.status}`
+  );
+  e.status = 409;
+  throw e;
+}
+
+
 module.exports = {
   reserveLoanForReaderService,
   getReaderBorrowSnapshot,
-  checkExistingDocuments // export để có thể dùng ở nơi khác nếu cần
+  checkExistingDocuments, // export để có thể dùng ở nơi khác nếu cần
+  readerRequestCancelLoanSlipService
 };
