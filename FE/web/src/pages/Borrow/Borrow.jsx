@@ -431,10 +431,17 @@ function Row({
   const librarianName =
     row?.Librarian?.fullName || (row?.librarianId ? `#${row.librarianId}` : "-");
 
-  // check note có yêu cầu hủy
-  const hasReaderCancelRequest = String(row.note || "").includes(
-    "[READER_CANCEL_REQUEST"
-  );
+  // check phiếu có bất kỳ yêu cầu hủy nào:
+  // - hủy cả phiếu: [READER_CANCEL_REQUEST ...]
+  // - hủy 1 detail: [READER_CANCEL_DETAIL_REQUEST ...]
+  // - dự phòng: note của detail có [READER_CANCEL_REQUEST ...]
+  const hasReaderCancelRequest =
+    String(row.note || "").includes("[READER_CANCEL_REQUEST") ||
+    String(row.note || "").includes("[READER_CANCEL_DETAIL_REQUEST") ||
+    (row.details || []).some((d) =>
+      String(d.note || "").includes("[READER_CANCEL_REQUEST")
+    );
+
 
   // Gom tất cả Violation từ các LoanDetail của phiếu
   const allViolations = [];
@@ -760,8 +767,23 @@ function Row({
                           ? null
                           : doc?.coverPhoto || null;
 
+                      // 🔥 xác định document nào đang yêu cầu hủy
+                      const detailCancel = String(d.note || "").includes("[READER_CANCEL_REQUEST");
+
                       return (
-                        <TableRow key={d.loanDetailId} hover>
+                        <TableRow
+                          key={d.loanDetailId}
+                          hover
+                          sx={
+                            detailCancel
+                              ? {
+                                backgroundColor: "rgba(255,120,120,0.18)",
+                                borderLeft: "4px solid #E53E3E",
+                                "&:hover": { backgroundColor: "rgba(255,120,120,0.28)" },
+                              }
+                              : {}
+                          }
+                        >
                           <TableCell>
                             <Typography variant="body2" fontWeight={600}>
                               {d.loanDetailId}
@@ -769,21 +791,13 @@ function Row({
                           </TableCell>
 
                           <TableCell>
-                            <Typography
-                              variant="body2"
-                              fontFamily="monospace"
-                            >
+                            <Typography variant="body2" fontFamily="monospace">
                               {documentId ?? "-"}
                             </Typography>
                           </TableCell>
 
                           <TableCell>
-                            <Typography
-                              variant="body2"
-                              fontWeight={600}
-                              noWrap
-                              sx={{ maxWidth: 200 }}
-                            >
+                            <Typography variant="body2" fontWeight={600} noWrap sx={{ maxWidth: 200 }}>
                               {title}
                             </Typography>
                           </TableCell>
@@ -802,28 +816,32 @@ function Row({
                                   display: "block",
                                 }}
                               />
-                            ) : (
-                              "-"
-                            )}
+                            ) : "-"}
                           </TableCell>
 
                           <TableCell>
-                            <Typography
-                              variant="body2"
-                              fontFamily="monospace"
-                            >
+                            <Typography variant="body2" fontFamily="monospace">
                               {copy?.barCode || "-"}
                             </Typography>
                           </TableCell>
 
+                          {/* ⚡ Thêm chip báo yêu cầu huỷ tại đây */}
                           <TableCell>
-                            {chipForDetailStatus(d.status)}
+                            <Stack direction="row" spacing={1} alignItems="center">
+                              {chipForDetailStatus(d.status)}
+                              {detailCancel && (
+                                <Chip
+                                  size="small"
+                                  label="Độc giả yêu cầu hủy"
+                                  color="error"
+                                  sx={{ fontWeight: 700 }}
+                                />
+                              )}
+                            </Stack>
                           </TableCell>
 
                           <TableCell>
-                            <Typography variant="body2">
-                              {formatDate(d.returnDate)}
-                            </Typography>
+                            <Typography variant="body2">{formatDate(d.returnDate)}</Typography>
                           </TableCell>
 
                           <TableCell>
@@ -833,46 +851,22 @@ function Row({
                           </TableCell>
 
                           <TableCell align="center">
-                            <Chip
-                              label={d.renewalCount ?? 0}
-                              size="small"
-                              color="primary"
-                              sx={{ fontWeight: 600 }}
-                            />
+                            <Chip label={d.renewalCount ?? 0} size="small" color="primary" sx={{ fontWeight: 600 }} />
                           </TableCell>
 
                           <TableCell>
-                            <Typography
-                              variant="caption"
-                              color="text.secondary"
-                            >
+                            <Typography variant="caption" color="text.secondary">
                               {d.note || "-"}
                             </Typography>
                           </TableCell>
 
                           <TableCell align="right">
-                            {["BORROWED", "OVERDUE"].includes(
-                              String(d.status).toUpperCase()
-                            ) && (
-                                <Button
-                                  size="small"
-                                  variant="outlined"
-                                  onClick={() =>
-                                    onSingleReturn?.(row, d)
-                                  }
-                                >
-                                  Trả
-                                </Button>
-                              )}
-
                             {row.status === "WAITING_FOR_PICKUP" && (
                               <Button
                                 size="small"
                                 variant="outlined"
                                 color="error"
-                                onClick={() =>
-                                  onDeleteDetail?.(row, d)
-                                }
+                                onClick={() => onDeleteDetail?.(row, d)}
                               >
                                 Xóa
                               </Button>
