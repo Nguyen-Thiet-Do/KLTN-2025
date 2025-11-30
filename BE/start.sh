@@ -21,5 +21,29 @@ else
   echo "[start.sh] $ENV_NAME not found — FCM disabled."
 fi
 
+
+### ====== 2) Dialogflow key ======
+ENV_NAME_DF="DIALOGFLOW_SERVICE_ACCOUNT_B64"
+TARGETS_DF=(
+  "./src/config/dialogflowKey.json"
+  "/opt/render/project/src/BE/src/config/dialogflowKey.json"
+)
+
+if [ -n "${!ENV_NAME_DF:-}" ]; then
+  echo "[start.sh] Found $ENV_NAME_DF, decoding..."
+  for t in "${TARGETS_DF[@]}"; do
+    dir="$(dirname "$t")"
+    mkdir -p "$dir"
+    echo "${!ENV_NAME_DF}" | base64 --decode > "$t"
+    chmod 600 "$t"
+    echo "[start.sh] Wrote $t"
+  done
+else
+  echo "[start.sh] $ENV_NAME_DF not found — Dialogflow disabled."
+fi
+
+
 echo "[start.sh] Starting Node server..."
 exec node src/server.js
+
+
