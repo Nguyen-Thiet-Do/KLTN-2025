@@ -25,8 +25,13 @@ const getLibraryStatistics = async () => {
       monthlyLoans,
       borrowedCopies,
       overdueLoans,
-
       totalBorrowedBooks,       
+      returnedBooks,
+      borrowingBooks,
+      waitingPickupBooks,
+      lostBooks,
+      pendingBooks,
+      pendingPaymentBooks,
       monthlyBorrowedBooks     
     ] = await Promise.all([
       Document.count({ where: { deleted: false } }),
@@ -52,12 +57,14 @@ const getLibraryStatistics = async () => {
         },
       }),
 
-      // ⭐ Tổng số cuốn sách đã mượn
-      LoanDetail.count({
-        where: { deleted: false }
-      }),
+      LoanDetail.count({ where: { deleted: false } }),
+      LoanDetail.count({ where: { deleted: false, status: 'RETURNED' } }),
+      LoanDetail.count({ where: { deleted: false, status: 'BORROWED' } }),
+      LoanDetail.count({ where: { deleted: false, status: 'WAITING_FOR_PICKUP' } }),
+      LoanDetail.count({ where: { deleted: false, status: 'LOST' } }),
+      LoanDetail.count({ where: { deleted: false, status: 'PENDING' } }),
+      LoanDetail.count({ where: { deleted: false, status: 'PENDING_PAYMENT' } }),
 
-      // ⭐ Số cuốn sách được mượn trong tháng
       LoanDetail.count({
         include: [
           {
@@ -73,7 +80,6 @@ const getLibraryStatistics = async () => {
       })
     ]);
 
-    // 🔹 Thể loại phổ biến nhất
     const [rows] = await sequelize.query(`
       SELECT g.name, COUNT(dgm.documentId) AS count
       FROM DocumentGenreMaps dgm
@@ -94,9 +100,15 @@ const getLibraryStatistics = async () => {
       monthlyLoans,
       borrowedCopies,
       overdueLoans,
-      totalBorrowedBooks,       
-      monthlyBorrowedBooks,     
       mostPopularGenre: topGenre ? topGenre.name : null,
+      totalBorrowedBooks,
+      returnedBooks,
+      borrowingBooks,
+      waitingPickupBooks,
+      lostBooks,
+      pendingBooks,
+      pendingPaymentBooks,
+      monthlyBorrowedBooks,
     };
   } catch (error) {
     console.error("❌ Lỗi getLibraryStatistics:", error);
@@ -105,11 +117,21 @@ const getLibraryStatistics = async () => {
 };
 
 // ============================================================
-// 🔹 Thống kê số lượt mượn theo 12 tháng (LoanSlips)
+// 🔹 Thống kê số lượt mượn theo 12 tháng - ✅ TỰ ĐỘNG LẤY NĂM CÓ DỮ LIỆU
 // ============================================================
 const getMonthlyLoans = async () => {
   try {
-    const year = new Date().getFullYear();
+    // ⭐ Lấy năm gần nhất có dữ liệu
+    const [yearResult] = await sequelize.query(`
+      SELECT YEAR(created_at) AS year
+      FROM LoanSlips
+      WHERE deleted = FALSE
+      ORDER BY created_at DESC
+      LIMIT 1;
+    `);
+
+    const year = yearResult?.[0]?.year || new Date().getFullYear();
+
     const [rows] = await sequelize.query(`
       SELECT 
         MONTH(created_at) AS month, 
@@ -182,29 +204,218 @@ const getTop5MostBorrowedBooks = async () => {
     throw error;
   }
 };
-const getTop5Readers = async () => {
-  const [rows] = await sequelize.query(`
-    SELECT r.fullName AS reader, COUNT(*) AS total
-    FROM LoanSlips ls
-    JOIN Readers r ON r.readerId = ls.readerId
-    WHERE ls.deleted = FALSE
-    GROUP BY r.readerId, r.fullName
-    ORDER BY total DESC
-    LIMIT 5;
-  `);
 
-  return rows.map(r => ({
-    reader: r.reader,
-    total: parseInt(r.total),
-  }));
+// ============================================================
+// 🔹 Top 5 độc giả mượn nhiều nhất
+// ============================================================
+const getTop5Readers = async () => {
+  try {
+    const [rows] = await sequelize.query(`
+      SELECT r.fullName AS reader, COUNT(*) AS total
+      FROM LoanSlips ls
+      JOIN Readers r ON r.readerId = ls.readerId
+      WHERE ls.deleted = FALSE
+      GROUP BY r.readerId, r.fullName
+      ORDER BY total DESC
+      LIMIT 5;
+    `);
+
+    return rows.map(r => ({
+      reader: r.reader,
+      total: parseInt(r.total),
+    }));
+  } catch (error) {
+    console.error("❌ Lỗi getTop5Readers:", error);
+    throw error;
+  }
 };
 
+// ============================================================
+// 📅 Lượt mượn theo ngày trong tuần
+// ============================================================
+const getBorrowByDayOfWeek = async () => {
+  try {
+    const [rows] = await sequelize.query(`
+      SELECT 
+        DAYOFWEEK(created_at) AS dayOfWeek,
+        COUNT(*) AS total
+      FROM LoanSlips
+      WHERE deleted = FALSE 
+        AND YEAR(created_at) = YEAR(NOW())
+      GROUP BY DAYOFWEEK(created_at)
+      ORDER BY dayOfWeek;
+    `);
 
+    const daysMap = {
+      1: 'Chủ nhật',
+      2: 'Thứ 2', 
+      3: 'Thứ 3',
+      4: 'Thứ 4',
+      5: 'Thứ 5',
+      6: 'Thứ 6',
+      7: 'Thứ 7'
+    };
+
+    const result = Array.from({ length: 7 }, (_, i) => {
+      const dayNum = i + 1;
+      const found = rows.find(r => r.dayOfWeek === dayNum);
+      return {
+        day: daysMap[dayNum],
+        dayNum: dayNum,
+        total: found ? parseInt(found.total) : 0
+      };
+    });
+
+    return result;
+  } catch (error) {
+    console.error("❌ Lỗi getBorrowByDayOfWeek:", error);
+    throw error;
+  }
+};
+
+// ============================================================
+// 📚 Sách chưa từng được mượn - ✅ FIXED
+// ============================================================
+const getNeverBorrowedBooks = async () => {
+  try {
+    const [rows] = await sequelize.query(`
+      SELECT 
+        d.documentId,
+        d.title,
+        d.publicationYear,
+        COUNT(dc.documentCopyId) AS totalCopies
+      FROM Documents d
+      LEFT JOIN DocumentCopys dc 
+        ON dc.documentId = d.documentId 
+        AND dc.deleted = FALSE
+      WHERE d.deleted = FALSE
+        AND d.documentId NOT IN (
+          SELECT DISTINCT dc2.documentId 
+          FROM LoanDetails ld
+          INNER JOIN DocumentCopys dc2 
+            ON dc2.documentCopyId = ld.documentCopyId
+          WHERE ld.deleted = FALSE 
+            AND dc2.deleted = FALSE
+        )
+      GROUP BY d.documentId, d.title, d.publicationYear
+      ORDER BY d.created_at DESC;
+    `);
+
+    return rows.map(r => ({
+      documentId: r.documentId,
+      title: r.title,
+      author: null,
+      publishYear: r.publicationYear,
+      totalCopies: parseInt(r.totalCopies)
+    }));
+  } catch (error) {
+    console.error("❌ Lỗi getNeverBorrowedBooks:", error);
+    throw error;
+  }
+};
+
+// ============================================================
+// 👥 Độc giả không hoạt động - ✅ FIXED
+// ============================================================
+const getInactiveReaders = async () => {
+  try {
+    const threeMonthsAgo = new Date();
+    threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
+
+    const [rows] = await sequelize.query(`
+      SELECT 
+        r.readerId,
+        r.fullName,
+        r.address,
+        MAX(ls.created_at) AS lastBorrowDate,
+        DATEDIFF(NOW(), MAX(ls.created_at)) AS daysSinceLastBorrow
+      FROM Readers r
+      LEFT JOIN LoanSlips ls ON ls.readerId = r.readerId AND ls.deleted = FALSE
+      WHERE r.deleted = FALSE
+      GROUP BY r.readerId, r.fullName, r.address
+      HAVING lastBorrowDate IS NULL 
+         OR lastBorrowDate < :threeMonthsAgo
+      ORDER BY daysSinceLastBorrow DESC;
+    `, {
+      replacements: { threeMonthsAgo }
+    });
+
+    return rows.map(r => ({
+      readerId: r.readerId,
+      fullName: r.fullName,
+      email: null,
+      phoneNumber: r.address,
+      lastBorrowDate: r.lastBorrowDate,
+      daysSinceLastBorrow: r.daysSinceLastBorrow || 999
+    }));
+  } catch (error) {
+    console.error("❌ Lỗi getInactiveReaders:", error);
+    throw error;
+  }
+};
+
+// ============================================================
+// 📊 Tổng hợp báo cáo nhanh - ✅ FIXED
+// ============================================================
+const getReportSummary = async () => {
+  try {
+    const [borrowByDay, neverBorrowed, inactiveReaders] = await Promise.all([
+      getBorrowByDayOfWeek(),
+      getNeverBorrowedBooks(),
+      getInactiveReaders()
+    ]);
+
+    console.log('📊 borrowByDay:', borrowByDay);
+
+    // ✅ Kiểm tra nếu không có dữ liệu
+    if (!borrowByDay || borrowByDay.length === 0) {
+      return {
+        totalNeverBorrowedBooks: neverBorrowed.length,
+        totalInactiveReaders: inactiveReaders.length,
+        busiestDay: { name: "Không có dữ liệu", count: 0 },
+        quietestDay: { name: "Không có dữ liệu", count: 0 }
+      };
+    }
+
+    // ✅ Tìm ngày đông nhất và vắng nhất
+    const busiest = borrowByDay.reduce((max, day) => 
+      day.total > max.total ? day : max
+    , borrowByDay[0]);
+
+    const quietest = borrowByDay.reduce((min, day) => 
+      day.total < min.total ? day : min
+    , borrowByDay[0]);
+
+    console.log('📊 busiest:', busiest);
+    console.log('📊 quietest:', quietest);
+
+    return {
+      totalNeverBorrowedBooks: neverBorrowed.length,
+      totalInactiveReaders: inactiveReaders.length,
+      busiestDay: {
+        name: busiest.day,
+        count: busiest.total
+      },
+      quietestDay: {
+        name: quietest.day,
+        count: quietest.total
+      }
+    };
+
+  } catch (error) {
+    console.error("❌ Lỗi getReportSummary:", error);
+    throw error;
+  }
+};
 
 module.exports = {
   getLibraryStatistics,
   getMonthlyLoans,
   getCategoryStatistics,
   getTop5MostBorrowedBooks,
-  getTop5Readers
+  getTop5Readers,
+  getBorrowByDayOfWeek,
+  getNeverBorrowedBooks,
+  getInactiveReaders,
+  getReportSummary
 };
