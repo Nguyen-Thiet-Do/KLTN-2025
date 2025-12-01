@@ -57,9 +57,9 @@ function normalizeVietnamese(str) {
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/đ/g, "d")
     .replace(/Đ/g, "d")
+    .replace(/\s+/g, " ") // Giữ khoảng trắng, chỉ xóa thừa
     .trim();
 }
-
 // ======================================================
 //      CHUYỂN TÊN THỂ LOẠI → ID
 // ======================================================
@@ -69,23 +69,34 @@ async function genreNameToId(genreName) {
   const genres = await getAllGenres();
   if (!genres.length) return null;
 
-  const normalized = normalizeVietnamese(genreName);
+  const normalized = normalizeVietnamese(genreName).replace(/\s+/g, "");
+  // ví dụ: "tâm lý" → "tamly"
 
-  // Exact match
-  let found = genres.find((g) => {
-    return normalizeVietnamese(g.name) === normalized;
-  });
+  // --- CHUẨN HÓA DANH SÁCH GENRE ---
+  const normalizedGenres = genres.map(g => ({
+    ...g,
+    normName: normalizeVietnamese(g.name).replace(/\s+/g, "")
+  }));
 
-  // Partial match
-  if (!found) {
-    found = genres.find((g) => {
-      const gN = normalizeVietnamese(g.name);
-      return gN.includes(normalized) || normalized.includes(gN);
-    });
-  }
+  // === 1) Exact match sau normalize ===
+  let found = normalizedGenres.find(g => g.normName === normalized);
+
+  if (found) return found.genreId;
+
+  // === 2) Partial match rộng ===
+  found = normalizedGenres.find(g => g.normName.includes(normalized));
+  if (found) return found.genreId;
+
+  // === 3) Token smart match ===
+  const tokens = normalized.split(/(?=[A-Z])|(?<=[a-z])(?=[a-z])/i);
+
+  found = normalizedGenres.find(g =>
+    tokens.some(tok => g.normName.includes(tok))
+  );
 
   return found ? found.genreId : null;
 }
+
 
 // ======================================================
 //     GỌI API SÁCH THEO THỂ LOẠI - CHỈ GIỮ 1 HÀM NÀY
@@ -99,7 +110,6 @@ async function getBooksByGenre(genreName) {
       return [];
     }
 
-    // ✅ ĐÚNG - Không có /api vì đã có trong .env
     const url = `${process.env.API_INTERNAL_URL}/documents/reader/by-genre`;
     console.log('📡 Calling books API:', url, 'with genreId:', genreId);
 
@@ -111,15 +121,19 @@ async function getBooksByGenre(genreName) {
       },
     });
 
-    console.log('📚 Found', res.data.items?.length || 0, 'books');
-    return res.data.items || [];
+    // ✅ SỬA: Lấy từ res.data.data (không phải res.data.data.items)
+    // Vì controller đã đặt result.items vào data rồi
+    const books = res.data.data || [];
+    
+    console.log('📦 Full response:', JSON.stringify(res.data, null, 2));
+    console.log('📚 Found', books.length, 'books');
+    return books;
   } catch (err) {
     console.error("❌ Error fetching books:", err.message);
     console.error("❌ Error details:", err.response?.data || err);
     return [];
   }
 }
-
 // ======================================================
 //             XỬ LÝ CHAT DIALOGFLOW
 // ======================================================
