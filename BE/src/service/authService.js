@@ -364,7 +364,7 @@ const registerReaderService = async (userData) => {
 };
 
 // =============================
-// 🔐 IN-MEMORY OTP STORE (FIXED)
+// 🔐 IN-MEMORY OTP STORE
 // =============================
 const OTP_STORE = new Map();
 
@@ -383,18 +383,15 @@ function _saveOtp(email, otp, ttl = 10 * 60 * 1000, meta = {}) {
   console.log(`   Expires: ${new Date(expiresAt).toISOString()}`);
 }
 
-function _verifyOtp(email, otp, options = {}) {
-  const { consume = true } = options; // mặc định vẫn "ăn" OTP như cũ
-
+// ✅ SỬA: chỉ check và trả true/false, KHÔNG xóa OTP ở đây
+function _verifyOtp(email, otp) {
   const normalizedEmail = String(email).toLowerCase().trim();
   const row = OTP_STORE.get(normalizedEmail);
 
   console.log(`🔍 Verifying OTP for: ${normalizedEmail}`);
   console.log(`   Stored OTP: ${row?.otp || 'NOT_FOUND'}`);
   console.log(`   Input OTP: ${otp}`);
-  console.log(
-    `   Expires at: ${row ? new Date(row.expiresAt).toISOString() : 'N/A'}`
-  );
+  console.log(`   Expires at: ${row ? new Date(row.expiresAt).toISOString() : 'N/A'}`);
 
   if (!row) {
     console.log('❌ OTP not found in store');
@@ -411,19 +408,11 @@ function _verifyOtp(email, otp, options = {}) {
   const inputOtp = String(otp).trim();
 
   if (storedOtp !== inputOtp) {
-    console.log(
-      `❌ OTP mismatch: stored="${storedOtp}" vs input="${inputOtp}"`
-    );
+    console.log(`❌ OTP mismatch: stored="${storedOtp}" vs input="${inputOtp}"`);
     return false;
   }
 
-  if (consume) {
-    console.log('✅ OTP valid - deleting from store');
-    OTP_STORE.delete(normalizedEmail);
-  } else {
-    console.log('✅ OTP valid - keep in store (no consume)');
-  }
-
+  console.log('✅ OTP valid - keep in store until registration success');
   return true;
 }
 
@@ -469,109 +458,93 @@ async function verifyOtpAndCreateAccountService(payload) {
     dateOfBirth,
     gender,
     cccd,
-    address,
+    address
   } = payload;
 
   if (!email || !otp || !password || !fullName) {
     throw Object.assign(new Error('MISSING_FIELDS'), { statusCode: 400 });
   }
 
-  const normalizedEmail = String(email).toLowerCase().trim();
+  const normalizedEmail = email.toLowerCase().trim();
 
-  // ✅ BƯỚC 1: chỉ verify, CHƯA xóa OTP
-  const isValidOtp = _verifyOtp(normalizedEmail, otp, { consume: false });
-  if (!isValidOtp) {
-    throw Object.assign(new Error('OTP_INVALID_OR_EXPIRED'), {
-      statusCode: 400,
-    });
+  // ✅ chỉ verify, KHÔNG xóa OTP ở đây
+  if (!_verifyOtp(normalizedEmail, otp)) {
+    throw Object.assign(new Error('OTP_INVALID_OR_EXPIRED'), { statusCode: 400 });
   }
 
-  // ✅ BƯỚC 2: kiểm tra trùng email / CCCD / phone
-  const existedAccount = await Account.findOne({
-    where: { email: normalizedEmail.toLowerCase() },
+  const ex = await Account.findOne({
+    where: sequelize.where(
+      sequelize.fn('LOWER', sequelize.col('email')),
+      normalizedEmail
+    )
   });
-  if (existedAccount) {
-    throw Object.assign(new Error('EMAIL_EXISTS'), { statusCode: 409 });
+
+  if (ex) {
+    throw Object.assign(new Error('Email đăng ký đã tồn tại'), { statusCode: 409 });
   }
 
-  let existedReader = null;
   if (cccd) {
-    existedReader = await Reader.findOne({ where: { cccd } });
+    const er = await Reader.findOne({ where: { cccd } });
+    if (er) {
+      throw Object.assign(new Error('Căn cước công dân dã tồn tại'), { statusCode: 409 });
+    }
   }
-  if (existedReader) {
-    throw Object.assign(new Error('CCCD_EXISTS'), { statusCode: 409 });
-  }
-
-  let existedPhone = null;
+  // === PHONE NUMBER ===
   if (phoneNumber) {
-    existedPhone = await Account.findOne({ where: { phoneNumber } });
+    const existPhone = await Account.findOne({ where: { phoneNumber } });
+    if (existPhone) throw Object.assign(new Error('Số Điện thoại đã tồn tại'), { statusCode: 409 });
   }
-  if (existedPhone) {
-    throw Object.assign(new Error('PHONE_EXISTS'), { statusCode: 409 });
-  }
-
-  if (password.length < 6) {
-    throw Object.assign(new Error('WEAK_PASSWORD'), { statusCode: 400 });
-  }
-
-  const hashedPassword = await bcrypt.hash(password, 10);
 
   const tx = await sequelize.transaction();
-  try {
-    // ✅ BƯỚC 3: tạo Account
-    const account = await Account.create(
-      {
-        email: normalizedEmail,
-        password: hashedPassword,
-        phoneNumber: phoneNumber || null,
-        roleId: 3, // role Reader
-        status: 'ACTIVE',
-      },
-      { transaction: tx }
-    );
 
-    // ✅ BƯỚC 4: tạo Reader
-    const reader = await Reader.create(
-      {
-        accountId: account.accountId,
-        roleId: 3,
-        fullName,
-        dateOfBirth: dateOfBirth || null,
-        gender: gender || null,
-        cccd: cccd || null,
-        address: address || null,
-        totolBorrow: 0,
-        note: null,
-      },
-      { transaction: tx }
-    );
+  try {
+    const saltRounds = Number(process.env.BCRYPT_SALT_ROUNDS) || 10;
+    const passwordHash = await bcrypt.hash(password, saltRounds);
+
+    const account = await Account.create({
+      email: normalizedEmail,
+      phoneNumber: phoneNumber || null,
+      passwordHash,
+      status: 'active',
+      roleId: 3
+    }, { transaction: tx });
+
+    const reader = await Reader.create({
+      accountId: account.accountId,
+      roleId: 3,
+      fullName,
+      dateOfBirth: dateOfBirth || null,
+      gender: typeof gender !== 'undefined' ? gender : null,
+      cccd: cccd || null,
+      address: address || null,
+      totalBorrow: 0
+    }, { transaction: tx });
 
     await tx.commit();
 
-    // ✅ BƯỚC 5: tạo thành công rồi mới xóa OTP
+    // ✅ CHỈ SAU KHI TẠO THÀNH CÔNG MỚI XÓA OTP
     OTP_STORE.delete(normalizedEmail);
-    console.log(
-      `✅ Registration success, OTP consumed for ${normalizedEmail}`
-    );
+    console.log(`✅ Registration success, OTP consumed for ${normalizedEmail}`);
+
+    console.log(`✅ Account created: ${account.email} | Reader: ${reader.readerId}`);
 
     return {
       account: {
         accountId: account.accountId,
-        email: account.email,
+        email: account.email
       },
       reader: {
         readerId: reader.readerId,
-        fullName: reader.fullName,
-      },
+        fullName: reader.fullName
+      }
     };
   } catch (err) {
     await tx.rollback();
-    console.error('❌ verifyOtpAndCreateAccountService failed:', err.message);
-    // KHÔNG xoá OTP ở đây -> user vẫn có thể dùng lại OTP trong 10 phút
+    console.error('❌ Transaction failed:', err.message);
+    // ❗ Không xóa OTP ở đây → user có thể thử lại trong thời gian còn hạn
     throw err;
   }
 }
-
 
 // =============================
 // 🎫 COMPLETE REGISTRATION
@@ -682,9 +655,6 @@ async function completeRegistrationService({ readerId, cardTypeId, action = 'SKI
 }
 
 // =============================
-// 💳 FINALIZE PAYMENT AND CREATE MEMBER CARD (FIXED)
-// =============================
-// =============================
 // 💳 FINALIZE PAYMENT AND CREATE MEMBER CARD (WITH EMAIL NOTIFICATION)
 // =============================
 async function finalizePaymentAndCreateMemberCard(paymentOrId) {
@@ -706,7 +676,6 @@ async function finalizePaymentAndCreateMemberCard(paymentOrId) {
       note: payment.note
     });
 
-    // ✅ KIỂM TRA CARD TRƯỚC (quan trọng nhất)
     const existingCard = await MemberCard.findOne({
       where: {
         readerId: payment.readerId,
@@ -720,7 +689,6 @@ async function finalizePaymentAndCreateMemberCard(paymentOrId) {
       return { payment, memberCard: existingCard };
     }
 
-    // ✅ Nếu chưa có card, kiểm tra note có cardTypeId không
     const note = payment.note || '';
     const m = /cardType:(\d+)/.exec(note);
     const cardTypeId = m ? Number(m[1]) : null;
@@ -732,7 +700,6 @@ async function finalizePaymentAndCreateMemberCard(paymentOrId) {
       return { payment, memberCard: null };
     }
 
-    // ✅ Get CardType
     const cardType = await CardType.findByPk(cardTypeId);
 
     if (!cardType) {
@@ -746,7 +713,6 @@ async function finalizePaymentAndCreateMemberCard(paymentOrId) {
       duration: cardType.duration
     });
 
-    // ✅ Generate card details
     const cardNumber = generateCardNumber();
     const today = new Date();
     const issueDate = today.toISOString().slice(0, 10);
@@ -760,7 +726,6 @@ async function finalizePaymentAndCreateMemberCard(paymentOrId) {
       expiryDate
     });
 
-    // ✅ Create MemberCard
     const card = await MemberCard.create({
       readerId: payment.readerId,
       cardNumber,
@@ -778,15 +743,12 @@ async function finalizePaymentAndCreateMemberCard(paymentOrId) {
       readerId: card.readerId
     });
 
-    // ✅ Update payment note
     const newNote = note + `|created_card:${card.memberCardId}`;
     await payment.update({ note: newNote });
 
     console.log('✅ Payment updated with card info');
 
-    // === Send confirmation email (best-effort: log errors but don't break flow) ===
     try {
-      // Try to get reader and account info
       let readerEmail = null;
       let readerFullName = '';
 
@@ -801,7 +763,6 @@ async function finalizePaymentAndCreateMemberCard(paymentOrId) {
         }
       }
 
-      // Fallback: if readerEmail not found, try payment.readerId (in case different)
       if (!readerEmail && payment.readerId) {
         const r2 = await Reader.findByPk(payment.readerId);
         if (r2) {
@@ -814,7 +775,6 @@ async function finalizePaymentAndCreateMemberCard(paymentOrId) {
       }
 
       if (readerEmail) {
-        // prepare mail data
         const mailData = {
           fullName: readerFullName || '',
           cardNumber: card.cardNumber,
@@ -828,22 +788,18 @@ async function finalizePaymentAndCreateMemberCard(paymentOrId) {
         };
 
         try {
-          // mailService.sendMemberCardIssuedEmail should be available (ensure imported)
           await mailService.sendMemberCardIssuedEmail(readerEmail, mailData);
           console.log('✅ Confirmation email sent to', readerEmail);
         } catch (mailErr) {
           console.error('❌ Failed to send confirmation email:', mailErr?.message || mailErr);
-          // Do NOT throw — keep flow intact
         }
       } else {
         console.warn('⚠️ No reader email found — skipping member card confirmation email.');
       }
     } catch (prepareMailErr) {
       console.error('❌ Error while preparing/sending member card email:', prepareMailErr?.message || prepareMailErr);
-      // Do not throw
     }
 
-    // ✅ Return fresh data
     const updatedPayment = await Payment.findByPk(payment.paymentId);
 
     return {

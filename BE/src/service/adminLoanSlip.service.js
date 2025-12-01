@@ -3611,6 +3611,9 @@ async function pickupLoanSlipService(payload) {
 // ==========================
 // XÓA 1 LOAN DETAIL
 // ==========================
+// ==========================
+// XÓA 1 LOAN DETAIL
+// ==========================
 async function removeLoanDetailService({ slipId, loanDetailId, reason, librarianId }) {
   if (!slipId || !loanDetailId) {
     const e = new Error('Thiếu slipId hoặc loanDetailId'); e.status = 400; throw e;
@@ -3627,6 +3630,8 @@ async function removeLoanDetailService({ slipId, loanDetailId, reason, librarian
     });
 
     if (!slip) { const e = new Error('Không tìm thấy phiếu'); e.status = 404; throw e; }
+
+    const slipStatus = String(slip.status || '').toUpperCase(); // 🆕 lưu lại trạng thái phiếu
 
     const target = (slip.details || []).find(
       (d) => String(d.loanDetailId || d.id) === String(loanDetailId)
@@ -3690,24 +3695,27 @@ async function removeLoanDetailService({ slipId, loanDetailId, reason, librarian
       }
     }
 
-    // tạo notification không làm lỗi transaction
+    // Nếu vẫn còn detail => tạo notification "LOAN_DETAIL_REMOVED" bình thường
     let createdNotification = null;
-    try {
-      createdNotification = await createNotificationSafe({
-        readerId: slip.readerId,
-        type: 'LOAN_DETAIL_REMOVED',
-        title: `Một tài liệu đã bị xoá khỏi phiếu #${slipId}`,
-        content: `Tài liệu "${removedItem.title || ''}" đã bị xoá. Lý do: ${reason || '—'}.`,
-        priority: 'NORMAL',
-        link: `/loan/${slipId}`,
-        isRead: 0
-      }, t);
-    } catch (nerr) {
-      createdNotification = null;
+    if (remain > 0) {
+      try {
+        createdNotification = await createNotificationSafe({
+          readerId: slip.readerId,
+          type: 'LOAN_DETAIL_REMOVED',
+          title: `Một tài liệu đã bị xoá khỏi phiếu #${slipId}`,
+          content: `Tài liệu "${removedItem.title || ''}" đã bị xoá. Lý do: ${reason || '—'}.`,
+          priority: 'NORMAL',
+          link: `/loan/${slipId}`,
+          isRead: 0
+        }, t);
+      } catch (nerr) {
+        createdNotification = null;
+      }
     }
 
     return {
       deletedSlip: remain === 0,
+      slipStatus,                         // 🆕 trả ra trạng thái ban đầu của phiếu
       readerId: slip.readerId,
       readerEmail: slip.Reader?.Account?.email || slip.reader?.Account?.email || null,
       fullName: slip.Reader?.fullName || slip.reader?.fullName || 'Độc giả',
@@ -3719,80 +3727,118 @@ async function removeLoanDetailService({ slipId, loanDetailId, reason, librarian
     };
   }); // end tx
 
-  // gửi email (non-critical)
-  try {
-    const finalEmail = txResult.readerEmail || process.env.ADMIN_NOTIFICATION_EMAIL || null;
-    if (finalEmail) {
-      await mailService.sendLoanDetailRemovedEmail(finalEmail, {
-        fullName: txResult.fullName,
-        slipId,
-        removedItem: txResult.removedItem,
-        reason,
-        librarianId
-      });
+  // Nếu đã xoá hết detail -> tự động HUỶ CẢ PHIẾU tuỳ theo trạng thái
+  if (txResult.deletedSlip) {
+    const status = String(txResult.slipStatus || '').toUpperCase();
+    const finalReason =
+      reason ||
+      'Xoá mục cuối cùng trong phiếu, hệ thống tự động huỷ toàn bộ phiếu.';
 
-      if (txResult.notificationId && Notification) {
-        const pk = Notification.primaryKeyAttribute || 'notificationID';
-        const where = {}; where[pk] = txResult.notificationId;
-        try { await Notification.update({ emailAt: new Date() }, { where }); } catch (err) { /* ignore */ }
+    try {
+      if (status === 'PENDING') {
+        // Phiếu đặt trước chưa duyệt
+        await cancelReservationService({
+          loanSlipId: slipId,
+          reason: finalReason,
+          librarianId
+        });
+      } else if (status === 'WAITING_FOR_PICKUP') {
+        // Phiếu chờ đến lấy
+        await cancelLoanSlipService({
+          slipId,
+          reason: finalReason,
+          librarianId
+        });
+      } else {
+        // Các trạng thái khác (BORROWING, ...) hiện tại không auto huỷ,
+        // chỉ log lại cho chắc
+        console.warn(
+          'removeLoanDetailService: deleted last detail but slip in unexpected status =',
+          status
+        );
       }
+    } catch (cancelErr) {
+      console.error(
+        'removeLoanDetailService: auto cancel slip failed',
+        cancelErr?.message || cancelErr
+      );
     }
-  } catch (mailErr) {
-    console.error('removeLoanDetailService: send email failed', mailErr?.message || mailErr);
-  }
+  } else {
+    // ✅ Chỉ gửi email/FCM/socket khi CHƯA huỷ cả phiếu
+    try {
+      const finalEmail = txResult.readerEmail || process.env.ADMIN_NOTIFICATION_EMAIL || null;
+      if (finalEmail) {
+        await mailService.sendLoanDetailRemovedEmail(finalEmail, {
+          fullName: txResult.fullName,
+          slipId,
+          removedItem: txResult.removedItem,
+          reason,
+          librarianId
+        });
 
-  // FCM
-  try {
-    const payload = buildFcmPayload({
-      title: `Một tài liệu bị xoá khỏi phiếu #${slipId}`,
-      body: `Tài liệu "${txResult.removedItem.title || ''}" đã bị xoá. Lý do: ${reason || '—'}.`,
-      data: {
+        if (txResult.notificationId && Notification) {
+          const pk = Notification.primaryKeyAttribute || 'notificationID';
+          const where = {}; where[pk] = txResult.notificationId;
+          try { await Notification.update({ emailAt: new Date() }, { where }); } catch (err) { /* ignore */ }
+        }
+      }
+    } catch (mailErr) {
+      console.error('removeLoanDetailService: send email failed', mailErr?.message || mailErr);
+    }
+
+    // FCM
+    try {
+      const payload = buildFcmPayload({
+        title: `Một tài liệu bị xoá khỏi phiếu #${slipId}`,
+        body: `Tài liệu "${txResult.removedItem.title || ''}" đã bị xoá. Lý do: ${reason || '—'}.`,
+        data: {
+          type: 'LOAN_DETAIL_REMOVED',
+          slipId: String(slipId),
+          loanDetailId: String(txResult.removedItem.loanDetailId || ''),
+          notificationId: txResult.notificationId ? String(txResult.notificationId) : '',
+          link: `/loan/${slipId}`
+        }
+      });
+      await sendFcmToReader(txResult.readerId, payload);
+    } catch (fcmErr) {
+      console.error('removeLoanDetailService: send FCM failed', fcmErr?.message || fcmErr);
+    }
+
+    // SOCKET.IO EMIT (non-critical)
+    try {
+      let targetUserId = txResult.readerId;
+      try {
+        const rr = await Reader.findByPk(txResult.readerId, { attributes: ['accountId'] });
+        if (rr?.accountId) targetUserId = rr.accountId;
+      } catch (e) {
+        // ignore, giữ targetUserId = readerId
+      }
+
+      const socketData = {
         type: 'LOAN_DETAIL_REMOVED',
         slipId: String(slipId),
         loanDetailId: String(txResult.removedItem.loanDetailId || ''),
+        removedTitle: txResult.removedItem.title || '',
+        reason: reason || '',
         notificationId: txResult.notificationId ? String(txResult.notificationId) : '',
         link: `/loan/${slipId}`
+      };
+
+      if (typeof emitToUser === 'function') {
+        emitToUser(targetUserId, 'loanDetailRemoved', socketData);
+        console.log('✅ removeLoanDetailService: Socket emitted to user', { targetUserId, socketData });
+      } else {
+        console.warn('⚠️ removeLoanDetailService: emitToUser không khả dụng, bỏ qua emit socket');
       }
-    });
-    await sendFcmToReader(txResult.readerId, payload);
-  } catch (fcmErr) {
-    console.error('removeLoanDetailService: send FCM failed', fcmErr?.message || fcmErr);
-  }
-
-  // SOCKET.IO EMIT (non-critical)
-  try {
-    let targetUserId = txResult.readerId;
-    try {
-      const rr = await Reader.findByPk(txResult.readerId, { attributes: ['accountId'] });
-      if (rr?.accountId) targetUserId = rr.accountId;
-    } catch (e) {
-      // ignore, giữ targetUserId = readerId
+    } catch (socketErr) {
+      console.error('removeLoanDetailService: send socket failed', socketErr?.message || socketErr);
     }
-
-    const socketData = {
-      type: 'LOAN_DETAIL_REMOVED',
-      slipId: String(slipId),
-      loanDetailId: String(txResult.removedItem.loanDetailId || ''),
-      removedTitle: txResult.removedItem.title || '',
-      reason: reason || '',
-      notificationId: txResult.notificationId ? String(txResult.notificationId) : '',
-      link: `/loan/${slipId}`
-    };
-
-    if (typeof emitToUser === 'function') {
-      emitToUser(targetUserId, 'loanDetailRemoved', socketData);
-      console.log('✅ removeLoanDetailService: Socket emitted to user', { targetUserId, socketData });
-    } else {
-      console.warn('⚠️ removeLoanDetailService: emitToUser không khả dụng, bỏ qua emit socket');
-    }
-  } catch (socketErr) {
-    console.error('removeLoanDetailService: send socket failed', socketErr?.message || socketErr);
   }
 
   return {
     deletedSlip: txResult.deletedSlip,
     message: txResult.deletedSlip
-      ? 'Đã xóa mục cuối → phiếu đã bị xoá'
+      ? 'Đã xoá mục cuối cùng, phiếu đã được huỷ.'
       : 'Đã xoá 1 tài liệu khỏi phiếu',
     slipId,
     notificationId: txResult.notificationId || null

@@ -7,12 +7,10 @@ const {
   Reader,
   DocumentCopy,
   Violation,
-  Payment,
   MemberCard,
   CardType,
   Account,
   Notification,
-
 } = require('../model');
 const { cancelReservationService } = require('./adminLoanSlip.service');
 
@@ -51,7 +49,10 @@ async function getReaderBorrowSnapshot(readerId, t) {
   });
   const pendingSlipIds = pendingSlips.map(s => s.loanSlipId);
   const pendingApprovalCount = pendingSlipIds.length
-    ? await LoanDetail.count({ where: { loanSlipId: pendingSlipIds, status: 'PENDING' }, transaction: t })
+    ? await LoanDetail.count({
+      where: { loanSlipId: pendingSlipIds, status: 'PENDING' },
+      transaction: t
+    })
     : 0;
 
   const waitingSlips = await LoanSlip.findAll({
@@ -62,7 +63,13 @@ async function getReaderBorrowSnapshot(readerId, t) {
   });
   const waitingSlipIds = waitingSlips.map(s => s.loanSlipId);
   const waitingForPickupCount = waitingSlipIds.length
-    ? await LoanDetail.count({ where: { loanSlipId: waitingSlipIds, status: 'WAITING_FOR_PICKUP' }, transaction: t })
+    ? await LoanDetail.count({
+      where: {
+        loanSlipId: waitingSlipIds,
+        status: 'WAITING_FOR_PICKUP'
+      },
+      transaction: t
+    })
     : 0;
 
   const borrowingSlips = await LoanSlip.findAll({
@@ -73,7 +80,10 @@ async function getReaderBorrowSnapshot(readerId, t) {
   });
   const borrowingSlipIds = borrowingSlips.map(s => s.loanSlipId);
   const borrowingCount = borrowingSlipIds.length
-    ? await LoanDetail.count({ where: { loanSlipId: borrowingSlipIds, status: 'BORROWED' }, transaction: t })
+    ? await LoanDetail.count({
+      where: { loanSlipId: borrowingSlipIds, status: 'BORROWED' },
+      transaction: t
+    })
     : 0;
 
   let overdueCount = 0;
@@ -84,21 +94,25 @@ async function getReaderBorrowSnapshot(readerId, t) {
 
     overdueCount = overdueSlipIds.length
       ? await LoanDetail.count({
-        where: { loanSlipId: overdueSlipIds, status: 'BORROWED', returnDate: { [Op.is]: null } },
+        where: {
+          loanSlipId: overdueSlipIds,
+          status: 'BORROWED',
+          returnDate: { [Op.is]: null }
+        },
         transaction: t
       })
       : 0;
   }
 
-  const unresolvedPayments = await Payment.count({
-    where: { readerId, status: 'PENDING', paymentType: { [Op.not]: 'DEPOSIT' } },
+  // ✅ CHỈ CHECK VI PHẠM, KHÔNG DÙNG BẢNG PAYMENTS NỮA
+  const unresolvedViolationCount = await Violation.count({
+    where: {
+      readerId,
+      deleted: false,
+      paymentStatus: { [Op.ne]: 'PAID' }
+    },
     transaction: t
   });
-  const unresolvedViolations = await Violation.count({
-    where: { readerId, deleted: false, paymentStatus: { [Op.ne]: 'PAID' } },
-    transaction: t
-  });
-  const unresolvedViolationCount = Math.max(unresolvedPayments, unresolvedViolations) || unresolvedPayments + unresolvedViolations;
 
   const activeCount = waitingForPickupCount + borrowingCount;
 
@@ -108,7 +122,7 @@ async function getReaderBorrowSnapshot(readerId, t) {
     borrowingCount,
     overdueCount,
     unresolvedViolationCount,
-    activeCount,
+    activeCount
   };
 }
 
@@ -153,41 +167,30 @@ async function ensureReaderBorrowQuota({
       blockingReasons.push(`Có ${snap.overdueCount} quyển trễ hạn chưa trả`);
     }
     if (snap.unresolvedViolationCount > 0) {
-      blockingReasons.push(`Có ${snap.unresolvedViolationCount} vi phạm/chứng từ phạt chưa giải quyết`);
+      blockingReasons.push(`Có ${snap.unresolvedViolationCount} vi phạm chưa giải quyết`);
     }
   }
 
+  // ❌ Có sách trễ hạn / vi phạm => ghép hết lý do vào message
   if (blockingReasons.length) {
-    const e = new Error('Độc giả chưa đủ điều kiện mượn');
+    const combinedMessage =
+      'Độc giả chưa đủ điều kiện mượn: ' + blockingReasons.join('; ');
+
+    const e = new Error(combinedMessage);
     e.status = 409;
-    e.details = {
-      message: 'Độc giả chưa đủ điều kiện mượn',
-      context,
-      breakdown: {
-        maxBorrowLimit,
-        pendingApprovalCount: snap.pendingApprovalCount,
-        waitingForPickupCount: snap.waitingForPickupCount,
-        borrowingCount: snap.borrowingCount,
-        overdueCount: snap.overdueCount,
-        unresolvedViolationCount: snap.unresolvedViolationCount,
-        quota: {
-          max: maxBorrowLimit,
-          using: currentTotal,
-          remaining: Math.max(0, remaining),
-          requested
-        }
-      },
-      reasons: blockingReasons
-    };
     throw e;
   }
 
+  // ❌ Vượt hạn mức mượn cho lần request này
   if (requested > 0) {
     if (remaining <= 0 || requested > remaining) {
-      const e = new Error('Vượt quá hạn mức mượn');
+      const hint = `Bạn chỉ có thể mượn thêm tối đa ${Math.max(0, remaining)} tài liệu.`;
+      const combinedMessage = `Vượt quá hạn mức mượn. ${hint}`;
+
+      const e = new Error(combinedMessage);
       e.status = 409;
       e.details = {
-        message: 'Vượt quá hạn mức mượn',
+        message: combinedMessage,
         context,
         breakdown: {
           maxBorrowLimit,
@@ -203,16 +206,19 @@ async function ensureReaderBorrowQuota({
             requested
           }
         },
-        hint: `Bạn chỉ có thể mượn thêm tối đa ${Math.max(0, remaining)} tài liệu.`
+        hint
       };
       throw e;
     }
   } else {
+    // ❌ Tổng hiện tại đã vượt maxBorrowLimit
     if (currentTotal > maxBorrowLimit) {
-      const e = new Error('Vượt quá số sách tối đa cho phép theo loại thẻ');
+      const combinedMessage = `Vượt quá số sách tối đa cho phép theo loại thẻ (tối đa ${maxBorrowLimit}, hiện đang dùng ${currentTotal}).`;
+
+      const e = new Error(combinedMessage);
       e.status = 409;
       e.details = {
-        message: 'Vượt quá số sách tối đa cho phép',
+        message: combinedMessage,
         context,
         breakdown: {
           maxBorrowLimit,
@@ -243,14 +249,14 @@ async function checkExistingDocuments(readerId, documentIds, transaction) {
     where: {
       readerId,
       deleted: false,
-      status: { [Op.in]: ['PENDING', 'WAITING_FOR_PICKUP', 'BORROWING'] } // ✅
+      status: { [Op.in]: ['PENDING', 'WAITING_FOR_PICKUP', 'BORROWING'] }
     },
     attributes: ['loanSlipId', 'status'],
     include: [{
       model: LoanDetail,
-      as: 'details',   // ✅ ĐÚNG alias với model/index.js
+      as: 'details',
       where: {
-        status: { [Op.in]: ['PENDING', 'WAITING_FOR_PICKUP', 'BORROWED'] } // ✅
+        status: { [Op.in]: ['PENDING', 'WAITING_FOR_PICKUP', 'BORROWED'] }
       },
       attributes: ['loanDetailId', 'documentCopyId', 'note', 'status'],
       required: true
@@ -277,7 +283,7 @@ async function checkExistingDocuments(readerId, documentIds, transaction) {
   const checkDocIds = new Set(documentIds.map(id => Number(id)));
 
   for (const slip of activeSlips) {
-    for (const detail of slip.details || []) {   // ✅ dùng đúng alias 'details'
+    for (const detail of slip.details || []) {
       let docId = null;
 
       if (detail.documentCopyId) {
@@ -386,16 +392,19 @@ async function reserveLoanForReaderService(user, payload) {
     const { duplicates } = await checkExistingDocuments(reader.readerId, documentIds, t);
 
     if (duplicates.length > 0) {
-      // Tạo thông báo chi tiết cho từng tài liệu trùng
       const duplicateMessages = duplicates.map(dup =>
         `"${dup.title}" đã có trong phiếu #${dup.slipId} (${dup.statusText})`
       );
 
-      const e = new Error('Một số tài liệu đã có trong phiếu mượn hiện tại của bạn');
+      const combinedMessage =
+        'Một số tài liệu đã có trong phiếu mượn hiện tại của bạn: ' +
+        duplicateMessages.join('; ');
+
+      const e = new Error(combinedMessage);
       e.statusCode = 400;
       e.details = {
-        message: 'Các tài liệu sau đã có trong phiếu mượn của bạn',
-        duplicates: duplicates,
+        message: combinedMessage,
+        duplicates,
         messages: duplicateMessages
       };
       throw e;
@@ -723,7 +732,9 @@ async function readerRequestCancelLoanSlipService(user, payload) {
   if (status === 'PENDING') {
     // ----- 1A. Có loanDetailId -> huỷ 1 dòng trong phiếu -----
     if (detailId) {
-      return await sequelize.transaction(async (t) => {
+      let autoCancelWholeSlip = false;
+
+      await sequelize.transaction(async (t) => {
         // Load lại slip trong transaction (lock)
         const txSlip = await LoanSlip.findOne({
           where: { loanSlipId: slipId, readerId: reader.readerId, deleted: false },
@@ -738,7 +749,7 @@ async function readerRequestCancelLoanSlipService(user, payload) {
           throw e;
         }
 
-        // Tìm LoanDetail cần huỷ (PENDING & chưa gán copy)
+        // Tìm LoanDetail cần huỷ (PENDING)
         const detail = await LoanDetail.findOne({
           where: {
             loanSlipId: txSlip.loanSlipId,
@@ -764,31 +775,10 @@ async function readerRequestCancelLoanSlipService(user, payload) {
           transaction: t,
         });
 
-        // Nếu không còn chi tiết nào -> huỷ luôn phiếu (dùng cancelReservationService)
+        // Nếu không còn chi tiết nào -> sau transaction sẽ huỷ luôn phiếu
         if (remainingCount === 0) {
-          const finalReason =
-            reasonText ||
-            `Độc giả huỷ chi tiết cuối cùng #${detailId}, phiếu được huỷ toàn bộ.`;
-
-          // Gọi lại service admin (ngoài transaction hiện tại để tránh nested tx phức tạp)
-          await t.commit();
-
-          const result = await cancelReservationService({
-            loanSlipId: txSlip.loanSlipId,
-            reason: finalReason,
-            librarianId: null, // huỷ do độc giả
-          });
-
-          return {
-            success: true,
-            cancelled: true,
-            slipId: txSlip.loanSlipId,
-            removedLoanDetailId: detailId,
-            mode: 'AUTO_CANCEL_PENDING_AFTER_LAST_DETAIL_REMOVED',
-            message:
-              result?.message ||
-              'Đã huỷ chi tiết cuối cùng và huỷ luôn phiếu đặt trước.',
-          };
+          autoCancelWholeSlip = true;
+          return;
         }
 
         // Nếu vẫn còn chi tiết -> chỉ huỷ 1 dòng, ghi note vào LoanSlip
@@ -803,26 +793,52 @@ async function readerRequestCancelLoanSlipService(user, payload) {
           { note: newNote },
           { where: { loanSlipId: txSlip.loanSlipId }, transaction: t }
         );
+      });
+
+      // Sau khi transaction xong:
+      // - Nếu phiếu không còn detail -> huỷ luôn cả phiếu bằng cancelReservationService
+      if (autoCancelWholeSlip) {
+        const finalReason =
+          reasonText ||
+          `Độc giả huỷ chi tiết cuối cùng #${detailId}, phiếu được huỷ toàn bộ.`;
+
+        const result = await cancelReservationService({
+          loanSlipId: slip.loanSlipId,
+          reason: finalReason,
+          librarianId: null,
+        });
 
         return {
           success: true,
-          cancelled: false,
-          slipId: txSlip.loanSlipId,
+          cancelled: true,
+          slipId: slip.loanSlipId,
           removedLoanDetailId: detailId,
-          mode: 'REMOVE_DETAIL_PENDING',
-          message: 'Đã huỷ 1 tài liệu khỏi phiếu đặt trước.',
+          mode: 'AUTO_CANCEL_PENDING_AFTER_LAST_DETAIL_REMOVED',
+          message:
+            result?.message ||
+            'Đã huỷ chi tiết cuối cùng và huỷ luôn phiếu đặt trước.',
         };
-      });
+      }
+
+      // - Ngược lại chỉ huỷ 1 detail
+      return {
+        success: true,
+        cancelled: false,
+        slipId: slip.loanSlipId,
+        removedLoanDetailId: detailId,
+        mode: 'REMOVE_DETAIL_PENDING',
+        message: 'Đã huỷ 1 tài liệu khỏi phiếu đặt trước.',
+      };
     }
 
-    // ----- 1B. Không có loanDetailId -> huỷ thẳng cả phiếu (giống cũ) -----
+    // ----- 1B. Không có loanDetailId -> huỷ thẳng cả phiếu -----
     const finalReason =
       reasonText || 'Độc giả yêu cầu huỷ phiếu đặt trước.';
 
     const result = await cancelReservationService({
       loanSlipId: slip.loanSlipId,
       reason: finalReason,
-      librarianId: null, // huỷ do độc giả
+      librarianId: null,
     });
 
     return {
@@ -964,6 +980,6 @@ async function readerRequestCancelLoanSlipService(user, payload) {
 module.exports = {
   reserveLoanForReaderService,
   getReaderBorrowSnapshot,
-  checkExistingDocuments, // export để có thể dùng ở nơi khác nếu cần
+  checkExistingDocuments,
   readerRequestCancelLoanSlipService
 };
