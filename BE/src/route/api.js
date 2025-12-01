@@ -1596,6 +1596,67 @@ routeApi.get('/', (req, res) => {
       }
       ,
       {
+  group: 'Statistics',
+  icon: '📊',
+  routes: [
+    {
+      method: 'GET',
+      path: '/api/statistics',
+      description: 'Tổng hợp thống kê thư viện',
+      auth: true
+    },
+    {
+      method: 'GET',
+      path: '/api/statistics/monthly',
+      description: 'Thống kê số lượt mượn theo 12 tháng',
+      auth: true
+    },
+    {
+      method: 'GET',
+      path: '/api/statistics/category',
+      description: 'Thống kê số sách theo danh mục',
+      auth: true
+    },
+    {
+      method: 'GET',
+      path: '/api/statistics/top-books',
+      description: 'Top 5 sách mượn nhiều nhất',
+      auth: true
+    },
+    {
+      method: 'GET',
+      path: '/api/statistics/top-readers',
+      description: 'Top 5 độc giả mượn nhiều nhất',
+      auth: true
+    },
+    {
+      method: 'GET',
+      path: '/api/statistics/report-summary',
+      description: 'Báo cáo tổng hợp nhanh',
+      auth: true
+    },
+    {
+      method: 'GET',
+      path: '/api/statistics/borrow-by-day',
+      description: 'Mượn theo ngày trong tuần',
+      auth: true
+    },
+    {
+      method: 'GET',
+      path: '/api/statistics/never-borrowed',
+      description: 'Sách chưa từng được mượn',
+      auth: true
+    },
+    {
+      method: 'GET',
+      path: '/api/statistics/inactive-readers',
+      description: 'Độc giả không hoạt động',
+      auth: true
+    }
+  ]
+}
+,
+      {
         group: 'Test',
         icon: '🧪',
         routes: [
