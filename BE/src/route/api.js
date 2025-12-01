@@ -1297,7 +1297,7 @@ routeApi.get('/', (req, res) => {
             auth: true,
             role: 'Reader (roleId = 3)',
             body: {
-              items: 'array [{ documentId:number}] (required)',
+              items: 'array [{ documentId:number }] (required)',
               note: 'string (optional)'
             }
           },
@@ -1305,21 +1305,30 @@ routeApi.get('/', (req, res) => {
             method: 'POST',
             path: '/api/loans/reader/loans/:loanSlipId/cancel-request',
             description:
-              'Độc giả gửi yêu cầu huỷ phiếu đặt trước / phiếu đang chờ đến lấy. ' +
-              'PENDING: có thể huỷ thẳng phiếu hoặc 1 dòng; WAITING_FOR_PICKUP: chỉ ghi yêu cầu vào note để thủ thư xử lý.',
+              'Độc giả huỷ / gửi yêu cầu huỷ phiếu mượn.\n' +
+              '- Áp dụng cho các phiếu thuộc về chính độc giả và chưa bị xoá.\n' +
+              '- Nếu phiếu ở trạng thái PENDING:\n' +
+              '   + Không truyền loanDetailId  → huỷ thẳng toàn bộ phiếu đặt trước.\n' +
+              '   + Có truyền loanDetailId    → huỷ 1 dòng PENDING trong phiếu.\n' +
+              '       · Nếu sau khi huỷ, phiếu không còn dòng nào → hệ thống tự động huỷ luôn cả phiếu.\n' +
+              '- Nếu phiếu ở trạng thái WAITING_FOR_PICKUP:\n' +
+              '   + Không truyền loanDetailId  → chỉ ghi yêu cầu huỷ cả phiếu vào note; thủ thư xem và quyết định.\n' +
+              '   + Có truyền loanDetailId    → ghi yêu cầu huỷ riêng cho dòng đó vào note của LoanDetail và LoanSlip; thủ thư xử lý.\n' +
+              '- Các trạng thái khác (BORROWING, RETURNED, CANCELLED) không cho phép huỷ, API trả lỗi 409.',
             auth: true,
             role: 'Reader (roleId = 3)',
             params: {
               loanSlipId: 'number (required, id phiếu mượn)'
             },
             body: {
-              reason: 'string (optional, lý do huỷ)',
+              reason: 'string (optional, lý do huỷ do độc giả nhập)',
               loanDetailId:
-                'number (optional, nếu truyền thì chỉ yêu cầu huỷ 1 tài liệu cụ thể trong phiếu)'
+                'number (optional; nếu truyền thì áp dụng lên 1 tài liệu cụ thể trong phiếu như mô tả ở trên)'
             }
           }
         ]
       },
+
       {
         group: 'Notifications',
         icon: '🔔',
@@ -1596,66 +1605,66 @@ routeApi.get('/', (req, res) => {
       }
       ,
       {
-  group: 'Statistics',
-  icon: '📊',
-  routes: [
-    {
-      method: 'GET',
-      path: '/api/statistics',
-      description: 'Tổng hợp thống kê thư viện',
-      auth: true
-    },
-    {
-      method: 'GET',
-      path: '/api/statistics/monthly',
-      description: 'Thống kê số lượt mượn theo 12 tháng',
-      auth: true
-    },
-    {
-      method: 'GET',
-      path: '/api/statistics/category',
-      description: 'Thống kê số sách theo danh mục',
-      auth: true
-    },
-    {
-      method: 'GET',
-      path: '/api/statistics/top-books',
-      description: 'Top 5 sách mượn nhiều nhất',
-      auth: true
-    },
-    {
-      method: 'GET',
-      path: '/api/statistics/top-readers',
-      description: 'Top 5 độc giả mượn nhiều nhất',
-      auth: true
-    },
-    {
-      method: 'GET',
-      path: '/api/statistics/report-summary',
-      description: 'Báo cáo tổng hợp nhanh',
-      auth: true
-    },
-    {
-      method: 'GET',
-      path: '/api/statistics/borrow-by-day',
-      description: 'Mượn theo ngày trong tuần',
-      auth: true
-    },
-    {
-      method: 'GET',
-      path: '/api/statistics/never-borrowed',
-      description: 'Sách chưa từng được mượn',
-      auth: true
-    },
-    {
-      method: 'GET',
-      path: '/api/statistics/inactive-readers',
-      description: 'Độc giả không hoạt động',
-      auth: true
-    }
-  ]
-}
-,
+        group: 'Statistics',
+        icon: '📊',
+        routes: [
+          {
+            method: 'GET',
+            path: '/api/statistics',
+            description: 'Tổng hợp thống kê thư viện',
+            auth: true
+          },
+          {
+            method: 'GET',
+            path: '/api/statistics/monthly',
+            description: 'Thống kê số lượt mượn theo 12 tháng',
+            auth: true
+          },
+          {
+            method: 'GET',
+            path: '/api/statistics/category',
+            description: 'Thống kê số sách theo danh mục',
+            auth: true
+          },
+          {
+            method: 'GET',
+            path: '/api/statistics/top-books',
+            description: 'Top 5 sách mượn nhiều nhất',
+            auth: true
+          },
+          {
+            method: 'GET',
+            path: '/api/statistics/top-readers',
+            description: 'Top 5 độc giả mượn nhiều nhất',
+            auth: true
+          },
+          {
+            method: 'GET',
+            path: '/api/statistics/report-summary',
+            description: 'Báo cáo tổng hợp nhanh',
+            auth: true
+          },
+          {
+            method: 'GET',
+            path: '/api/statistics/borrow-by-day',
+            description: 'Mượn theo ngày trong tuần',
+            auth: true
+          },
+          {
+            method: 'GET',
+            path: '/api/statistics/never-borrowed',
+            description: 'Sách chưa từng được mượn',
+            auth: true
+          },
+          {
+            method: 'GET',
+            path: '/api/statistics/inactive-readers',
+            description: 'Độc giả không hoạt động',
+            auth: true
+          }
+        ]
+      }
+      ,
       {
         group: 'Test',
         icon: '🧪',

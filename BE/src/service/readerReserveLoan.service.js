@@ -732,7 +732,9 @@ async function readerRequestCancelLoanSlipService(user, payload) {
   if (status === 'PENDING') {
     // ----- 1A. Có loanDetailId -> huỷ 1 dòng trong phiếu -----
     if (detailId) {
-      return await sequelize.transaction(async (t) => {
+      let autoCancelWholeSlip = false;
+
+      await sequelize.transaction(async (t) => {
         // Load lại slip trong transaction (lock)
         const txSlip = await LoanSlip.findOne({
           where: { loanSlipId: slipId, readerId: reader.readerId, deleted: false },
@@ -747,7 +749,7 @@ async function readerRequestCancelLoanSlipService(user, payload) {
           throw e;
         }
 
-        // Tìm LoanDetail cần huỷ (PENDING & chưa gán copy)
+        // Tìm LoanDetail cần huỷ (PENDING)
         const detail = await LoanDetail.findOne({
           where: {
             loanSlipId: txSlip.loanSlipId,
@@ -773,31 +775,10 @@ async function readerRequestCancelLoanSlipService(user, payload) {
           transaction: t,
         });
 
-        // Nếu không còn chi tiết nào -> huỷ luôn phiếu (dùng cancelReservationService)
+        // Nếu không còn chi tiết nào -> sau transaction sẽ huỷ luôn phiếu
         if (remainingCount === 0) {
-          const finalReason =
-            reasonText ||
-            `Độc giả huỷ chi tiết cuối cùng #${detailId}, phiếu được huỷ toàn bộ.`;
-
-          // Gọi lại service admin (ngoài transaction hiện tại để tránh nested tx phức tạp)
-          await t.commit();
-
-          const result = await cancelReservationService({
-            loanSlipId: txSlip.loanSlipId,
-            reason: finalReason,
-            librarianId: null,
-          });
-
-          return {
-            success: true,
-            cancelled: true,
-            slipId: txSlip.loanSlipId,
-            removedLoanDetailId: detailId,
-            mode: 'AUTO_CANCEL_PENDING_AFTER_LAST_DETAIL_REMOVED',
-            message:
-              result?.message ||
-              'Đã huỷ chi tiết cuối cùng và huỷ luôn phiếu đặt trước.',
-          };
+          autoCancelWholeSlip = true;
+          return;
         }
 
         // Nếu vẫn còn chi tiết -> chỉ huỷ 1 dòng, ghi note vào LoanSlip
@@ -812,16 +793,42 @@ async function readerRequestCancelLoanSlipService(user, payload) {
           { note: newNote },
           { where: { loanSlipId: txSlip.loanSlipId }, transaction: t }
         );
+      });
+
+      // Sau khi transaction xong:
+      // - Nếu phiếu không còn detail -> huỷ luôn cả phiếu bằng cancelReservationService
+      if (autoCancelWholeSlip) {
+        const finalReason =
+          reasonText ||
+          `Độc giả huỷ chi tiết cuối cùng #${detailId}, phiếu được huỷ toàn bộ.`;
+
+        const result = await cancelReservationService({
+          loanSlipId: slip.loanSlipId,
+          reason: finalReason,
+          librarianId: null,
+        });
 
         return {
           success: true,
-          cancelled: false,
-          slipId: txSlip.loanSlipId,
+          cancelled: true,
+          slipId: slip.loanSlipId,
           removedLoanDetailId: detailId,
-          mode: 'REMOVE_DETAIL_PENDING',
-          message: 'Đã huỷ 1 tài liệu khỏi phiếu đặt trước.',
+          mode: 'AUTO_CANCEL_PENDING_AFTER_LAST_DETAIL_REMOVED',
+          message:
+            result?.message ||
+            'Đã huỷ chi tiết cuối cùng và huỷ luôn phiếu đặt trước.',
         };
-      });
+      }
+
+      // - Ngược lại chỉ huỷ 1 detail
+      return {
+        success: true,
+        cancelled: false,
+        slipId: slip.loanSlipId,
+        removedLoanDetailId: detailId,
+        mode: 'REMOVE_DETAIL_PENDING',
+        message: 'Đã huỷ 1 tài liệu khỏi phiếu đặt trước.',
+      };
     }
 
     // ----- 1B. Không có loanDetailId -> huỷ thẳng cả phiếu -----
