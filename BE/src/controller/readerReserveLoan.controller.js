@@ -6,12 +6,15 @@ exports.reserveLoanForReader = async (req, res) => {
     const result = await reserveLoanForReaderService(req.user, req.body);
     return res.status(201).json({ success: true, ...result });
   } catch (err) {
-    return res.status(err.statusCode || 500).json({
+    const status = err.status || err.statusCode || 500;
+
+    return res.status(status).json({
       success: false,
       message: err.message || 'Lỗi đặt mượn trước',
     });
   }
 };
+
 
 /**
  * Độc giả yêu cầu huỷ phiếu
