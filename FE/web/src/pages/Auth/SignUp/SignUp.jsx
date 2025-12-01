@@ -1,3 +1,4 @@
+// src/pages/Auth/SignUp/SignUp.jsx
 import { useState, useEffect } from 'react';
 import { useNavigate, Link as RouterLink } from 'react-router-dom';
 import {
@@ -20,19 +21,21 @@ import {
 } from '@mui/material';
 import Visibility from '@mui/icons-material/Visibility';
 import VisibilityOff from '@mui/icons-material/VisibilityOff';
+import QRCode from 'react-qr-code';
+
 import { authService } from '../../../services/authService';
+import { useAuth } from '../../../contexts/AuthContext';
 
 export default function SignUp() {
   const navigate = useNavigate();
+  const { login } = useAuth();
 
-  const [step, setStep] = useState(1); // 1: email, 2: info+OTP, 3: card
+  // 1: Thông tin + OTP, 2: Làm thẻ
+  const [step, setStep] = useState(1);
   const [readerId, setReaderId] = useState(null);
 
   const [formData, setFormData] = useState({
-    // step 1
     email: '',
-    // step 2
-    otp: '',
     password: '',
     confirmPassword: '',
     fullName: '',
@@ -42,9 +45,7 @@ export default function SignUp() {
     cccd: '',
     address: '',
     agree: true,
-    // step 3
-    cardTypeId: 1, // 1 = FREE, 2 = PREMIUM
-    action: 'SKIP', // SKIP (free) hoặc PAY (premium)
+    otp: '',
   });
 
   const [errors, setErrors] = useState({});
@@ -54,21 +55,37 @@ export default function SignUp() {
   const [showPwd, setShowPwd] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
 
-  // Ẩn thanh cuộn khi mở trang
-  useEffect(() => {
-    document.body.style.overflow = 'hidden';
-    return () => {
-      document.body.style.overflow = 'unset';
-    };
-  }, []);
+  const [paymentData, setPaymentData] = useState(null);
+  const [isWaitingPayment, setIsWaitingPayment] = useState(false);
 
-  // Prefill email nếu trước đó đã lưu ở màn hình đăng nhập
+  // Prefill email nếu có
   useEffect(() => {
-    const saved = localStorage.getItem('last_login_email');
+    const saved = sessionStorage.getItem('last_login_email');
     if (saved && !formData.email) {
       setFormData((p) => ({ ...p, email: saved }));
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Lắng nghe event payment_success (NotificationContext sẽ dispatch)
+  useEffect(() => {
+    const handlePaymentSuccess = (e) => {
+      console.log('🔔 payment_success event:', e.detail);
+      setApiError('');
+      setApiSuccess('Thanh toán thành công! Thẻ thư viện của bạn đã được tạo.');
+      setIsWaitingPayment(false);
+
+      setTimeout(() => {
+        navigate('/login', { replace: true });
+      }, 1500);
+    };
+
+    window.addEventListener('payment_success', handlePaymentSuccess);
+
+    return () => {
+      window.removeEventListener('payment_success', handlePaymentSuccess);
+    };
+  }, [navigate]);
 
   const handleChange = (e) => {
     const { name, value, checked, type } = e.target;
@@ -83,26 +100,14 @@ export default function SignUp() {
     }
   };
 
-  // ================= VALIDATE =================
-
-  const validateStep1 = () => {
+  // ===== VALIDATE =====
+  const validateInfo = () => {
     const newErrors = {};
+
     if (!formData.email.trim()) {
       newErrors.email = 'Email không được để trống';
     } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) {
       newErrors.email = 'Email không hợp lệ';
-    }
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
-  };
-
-  const validateStep2 = () => {
-    const newErrors = {};
-
-    if (!formData.otp.trim()) {
-      newErrors.otp = 'Vui lòng nhập mã OTP';
-    } else if (!/^\d{6}$/.test(formData.otp.trim())) {
-      newErrors.otp = 'OTP phải gồm 6 chữ số';
     }
 
     if (!formData.password) {
@@ -133,30 +138,36 @@ export default function SignUp() {
       newErrors.agree = 'Bạn cần đồng ý điều khoản sử dụng';
     }
 
-    setErrors(newErrors);
+    setErrors((prev) => ({ ...prev, ...newErrors }));
     return Object.keys(newErrors).length === 0;
   };
 
-  const validateStep3 = () => {
+  const validateOtp = () => {
+    const newErrors = {};
+    if (!formData.otp.trim()) {
+      newErrors.otp = 'Vui lòng nhập mã OTP';
+    } else if (!/^\d{6}$/.test(formData.otp.trim())) {
+      newErrors.otp = 'OTP phải gồm 6 chữ số';
+    }
+    setErrors((prev) => ({ ...prev, ...newErrors }));
+    return Object.keys(newErrors).length === 0;
+  };
+
+  const validateStep2 = () => {
     const newErrors = {};
     if (!readerId) {
-      newErrors.cardTypeId = 'Thiếu thông tin readerId, hãy thực hiện lại bước 2';
+      newErrors.cardType = 'Thiếu readerId, hãy thực hiện lại bước trước.';
     }
-    if (![1, 2].includes(Number(formData.cardTypeId))) {
-      newErrors.cardTypeId = 'Loại thẻ không hợp lệ';
-    }
-    if (!formData.action) {
-      newErrors.action = 'Thiếu hành động đăng ký thẻ';
-    }
-    setErrors(newErrors);
+    setErrors((prev) => ({ ...prev, ...newErrors }));
     return Object.keys(newErrors).length === 0;
   };
 
-  // ================= CALL API =================
+  // ===== CALL API =====
 
-  // Bước 1: gửi OTP
+  // Gửi OTP
   const handleInitRegister = async () => {
-    if (!validateStep1()) return;
+    const okInfo = validateInfo();
+    if (!okInfo) return;
 
     setIsSubmitting(true);
     setApiError('');
@@ -164,10 +175,10 @@ export default function SignUp() {
 
     try {
       const res = await authService.registerInit(formData.email.trim());
-
       if (res.ok) {
-        setApiSuccess('Đã gửi mã OTP đến email của bạn. Vui lòng kiểm tra hộp thư (kể cả spam).');
-        setStep(2);
+        setApiSuccess(
+          'Đã gửi mã OTP đến email của bạn. Vui lòng kiểm tra hộp thư (kể cả spam).'
+        );
       } else {
         setApiError(res.message || 'Không thể gửi OTP. Vui lòng thử lại.');
       }
@@ -178,6 +189,8 @@ export default function SignUp() {
         setApiError('Email này đã được đăng ký tài khoản khác.');
       } else if (code === 'INVALID_EMAIL') {
         setApiError('Định dạng email không hợp lệ.');
+      } else if (code === 'MISSING_EMAIL') {
+        setApiError('Thiếu thông tin email.');
       } else {
         setApiError(err?.message || 'Không thể gửi OTP. Vui lòng thử lại.');
       }
@@ -186,9 +199,11 @@ export default function SignUp() {
     }
   };
 
-  // Bước 2: verify OTP + tạo account/reader
+  // Xác thực OTP + tạo account + reader + auto login
   const handleVerifyRegister = async () => {
-    if (!validateStep2()) return;
+    const okInfo = validateInfo();
+    const okOtp = validateOtp();
+    if (!okInfo || !okOtp) return;
 
     setIsSubmitting(true);
     setApiError('');
@@ -212,11 +227,19 @@ export default function SignUp() {
       if (res.ok && res.data) {
         const { account, reader } = res.data;
         setReaderId(reader.readerId);
-        // lưu tạm để login nhanh
-        localStorage.setItem('last_login_email', account.email);
 
-        setApiSuccess('Xác thực OTP thành công! Hãy chọn loại thẻ thành viên để hoàn tất.');
-        setStep(3);
+        sessionStorage.setItem('last_login_email', account.email);
+
+        // Auto login sau khi tạo tài khoản
+        try {
+          await login(formData.email.trim(), formData.password);
+          console.log('✅ Auto login sau đăng ký thành công');
+        } catch (loginErr) {
+          console.error('Auto login sau đăng ký thất bại:', loginErr);
+        }
+
+        setApiSuccess('Tạo tài khoản thành công! Hãy làm thẻ thư viện để hoàn tất.');
+        setStep(2);
       } else {
         setApiError(res.message || 'Xác thực OTP thất bại.');
       }
@@ -231,6 +254,8 @@ export default function SignUp() {
         setApiError('Số CMND/CCCD đã được đăng ký.');
       } else if (code === 'WEAK_PASSWORD') {
         setApiError('Mật khẩu phải có ít nhất 6 ký tự.');
+      } else if (code === 'MISSING_FIELDS') {
+        setApiError('Thiếu các trường bắt buộc (email, otp, password, họ tên).');
       } else {
         setApiError(err?.message || 'Xác thực OTP thất bại. Vui lòng thử lại.');
       }
@@ -239,58 +264,49 @@ export default function SignUp() {
     }
   };
 
-  // Bước 3: chọn thẻ + complete
-  const handleCompleteRegister = async () => {
-    if (!validateStep3()) return;
+  // unwrap response /register/complete
+  const unwrapCompleteResponse = (res) => {
+    const level1 = res && res.data ? res.data : res;
+    return level1 && level1.data ? level1.data : level1;
+  };
+
+  // ĐỂ SAU → tạo thẻ free (cardTypeId=1, action=SKIP)
+  const handleCreateLater = async () => {
+    if (!validateStep2()) return;
 
     setIsSubmitting(true);
     setApiError('');
     setApiSuccess('');
+    setPaymentData(null);
+    setIsWaitingPayment(false);
 
     try {
-      const cardTypeId = Number(formData.cardTypeId);
-      let action = formData.action;
-
-      // Logic nhẹ: nếu thẻ FREE thì auto SKIP, thẻ PREMIUM thì auto PAY
-      if (cardTypeId === 1) action = 'SKIP';
-      if (cardTypeId === 2) action = 'PAY';
-
       const payload = {
         readerId,
-        cardTypeId,
-        action,
+        cardTypeId: 1,
+        action: 'SKIP',
       };
 
       const res = await authService.registerComplete(payload);
+      const data = unwrapCompleteResponse(res);
 
-      if (cardTypeId === 1 && res.ok && res.memberCard) {
-        setApiSuccess('Đăng ký thành công! Thẻ FREE đã được tạo cho bạn. Hãy đăng nhập để sử dụng.');
-        // chuyển sang login sau 2 giây
+      if (data && data.free && data.memberCard) {
+        setApiSuccess(
+          'Đăng ký thành công! Bạn có thể làm thẻ chi tiết hơn sau. Hãy đăng nhập để sử dụng tài khoản.'
+        );
         setTimeout(() => {
           navigate('/login', { replace: true });
         }, 2000);
-      } else if (cardTypeId === 2 && res.ok && res.payos) {
-        setApiSuccess(
-          'Đã tạo đơn thanh toán PREMIUM 150.000đ. Hãy thanh toán qua PayOS, sau đó đăng nhập để xem thẻ.'
-        );
-        // mở trang thanh toán PayOS
-        if (res.payos.checkoutUrl) {
-          window.open(res.payos.checkoutUrl, '_blank');
-        }
-        // chuyển sang login sau 3 giây
-        setTimeout(() => {
-          navigate('/login', { replace: true });
-        }, 3000);
       } else {
-        setApiError(res.message || 'Không thể hoàn tất đăng ký. Vui lòng thử lại.');
+        setApiError(
+          data?.message || res?.message || 'Không thể hoàn tất đăng ký. Vui lòng thử lại.'
+        );
       }
     } catch (err) {
-      console.error('Complete register error:', err);
+      console.error('Create later card error:', err);
       const code = err?.response?.data?.code;
       if (code === 'CARD_TYPE_NOT_FOUND') {
         setApiError('Loại thẻ không tồn tại hoặc đã bị xóa.');
-      } else if (code === 'PAYOS_CREATE_FAILED') {
-        setApiError('Không thể tạo link thanh toán PayOS.');
       } else {
         setApiError(err?.message || 'Không thể hoàn tất đăng ký. Vui lòng thử lại.');
       }
@@ -299,32 +315,72 @@ export default function SignUp() {
     }
   };
 
-  // Handler cho nút chính theo step
+  // LÀM THẺ NGAY → tạo payment + QR (cardTypeId=2, action=PAY)
+  const handleCreateAndPayCard = async () => {
+    if (!validateStep2()) return;
+
+    setIsSubmitting(true);
+    setApiError('');
+    setApiSuccess('');
+    setPaymentData(null);
+    setIsWaitingPayment(false);
+
+    try {
+      const payload = {
+        readerId,
+        cardTypeId: 2,
+        action: 'PAY',
+      };
+
+      const res = await authService.registerComplete(payload);
+      const data = unwrapCompleteResponse(res);
+
+      if (data && data.payos && data.payos.qrCode) {
+        setPaymentData({
+          amount: data.amount,
+          orderCode: data.orderCode,
+          qrCode: data.payos.qrCode,
+        });
+        setIsWaitingPayment(true);
+        setApiSuccess(
+          'Đã tạo đơn thanh toán làm thẻ thư viện (150.000đ). Vui lòng quét QR để thanh toán. Sau khi thanh toán xong, hệ thống sẽ tự chuyển bạn sang trang đăng nhập.'
+        );
+      } else {
+        setApiError(
+          data?.message || res?.message || 'Không thể tạo đơn thanh toán. Vui lòng thử lại.'
+        );
+      }
+    } catch (err) {
+      console.error('Create card & payment error:', err);
+      const code = err?.response?.data?.code;
+      if (code === 'CARD_TYPE_NOT_FOUND') {
+        setApiError('Loại thẻ không tồn tại hoặc đã bị xóa.');
+      } else if (code === 'PAYOS_CREATE_FAILED') {
+        setApiError('Không thể tạo link thanh toán PayOS.');
+      } else {
+        setApiError(err?.message || 'Không thể tạo đơn thanh toán. Vui lòng thử lại.');
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   const handleSubmit = (e) => {
     e.preventDefault();
-    if (step === 1) return handleInitRegister();
-    if (step === 2) return handleVerifyRegister();
-    if (step === 3) return handleCompleteRegister();
+    if (step === 1) return handleVerifyRegister();
+    if (step === 2) return handleCreateAndPayCard();
   };
 
   const renderStepTitle = () => {
-    if (step === 1) return 'Bước 1: Xác thực email';
-    if (step === 2) return 'Bước 2: Thông tin cá nhân & OTP';
-    return 'Bước 3: Chọn loại thẻ thành viên';
+    if (step === 1) return 'Bước 1: Thông tin & xác thực email';
+    return 'Bước 2: Làm thẻ thư viện';
   };
 
   const renderPrimaryButtonLabel = () => {
-    if (isSubmitting) {
-      if (step === 1) return 'Đang gửi OTP...';
-      if (step === 2) return 'Đang xác thực...';
-      if (step === 3) return 'Đang hoàn tất...';
-    }
-    if (step === 1) return 'Gửi mã OTP';
-    if (step === 2) return 'Xác thực & tạo tài khoản';
-    return 'Hoàn tất đăng ký';
+    if (isSubmitting) return 'Đang xử lý...';
+    if (step === 1) return 'Xác thực & tạo tài khoản';
+    return 'Làm thẻ ngay';
   };
-
-  // ================= UI =================
 
   return (
     <Box
@@ -334,7 +390,7 @@ export default function SignUp() {
         display: 'grid',
         placeItems: 'center',
         p: { xs: 2, sm: 3 },
-        overflow: 'hidden',
+        overflowY: 'auto',
         backgroundImage: `
           linear-gradient(135deg, rgba(102,126,234,0.15) 0%, rgba(118,75,162,0.15) 100%),
           radial-gradient(1200px 600px at 50% 100%, rgba(0,0,0,0.4), rgba(0,0,0,0.7)),
@@ -346,7 +402,6 @@ export default function SignUp() {
         fontFamily: '"Inter", "Roboto", "Segoe UI", sans-serif',
       }}
     >
-      {/* Hiệu ứng hạt sáng */}
       <Box
         aria-hidden
         sx={{
@@ -362,7 +417,6 @@ export default function SignUp() {
         }}
       />
 
-      {/* Card đăng ký */}
       <Paper
         elevation={0}
         sx={{
@@ -400,7 +454,7 @@ export default function SignUp() {
         }}
       >
         <Stack spacing={3.5} component="form" onSubmit={handleSubmit} noValidate>
-          {/* Brand + Step */}
+          {/* Header + Step */}
           <Stack spacing={2} alignItems="center" textAlign="center">
             <Box
               component="img"
@@ -441,9 +495,8 @@ export default function SignUp() {
                 {renderStepTitle()}
               </Typography>
 
-              {/* mini step indicator */}
               <Stack direction="row" spacing={1.5} justifyContent="center" mt={1}>
-                {[1, 2, 3].map((s) => (
+                {[1, 2].map((s) => (
                   <Chip
                     key={s}
                     size="small"
@@ -491,7 +544,7 @@ export default function SignUp() {
             </Alert>
           )}
 
-          {/* ==== STEP 1: EMAIL ==== */}
+          {/* STEP 1: Thông tin + OTP */}
           {step === 1 && (
             <Stack spacing={2.5}>
               <TextField
@@ -504,36 +557,7 @@ export default function SignUp() {
                 onChange={handleChange}
                 disabled={isSubmitting}
                 error={Boolean(errors.email)}
-                helperText={errors.email || 'Email sẽ được dùng để gửi mã OTP'}
-                fullWidth
-              />
-            </Stack>
-          )}
-
-          {/* ==== STEP 2: INFO + OTP ==== */}
-          {step === 2 && (
-            <Stack spacing={2.2}>
-              <TextField
-                id="email"
-                name="email"
-                type="email"
-                label="Email"
-                value={formData.email}
-                disabled
-                fullWidth
-                helperText="Email đã cố định, nếu muốn đổi hãy quay lại bước 1."
-              />
-
-              <TextField
-                id="otp"
-                name="otp"
-                label="Mã OTP (6 số)"
-                placeholder="Nhập mã OTP từ email"
-                value={formData.otp}
-                onChange={handleChange}
-                disabled={isSubmitting}
-                error={Boolean(errors.otp)}
-                helperText={errors.otp}
+                helperText={errors.email || 'Email dùng để đăng nhập và nhận mã OTP'}
                 fullWidth
               />
 
@@ -673,139 +697,174 @@ export default function SignUp() {
                 fullWidth
               />
 
-              <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mt: -0.5 }}>
-                <FormControlLabel
-                  control={
-                    <Checkbox
-                      name="agree"
-                      checked={formData.agree}
-                      onChange={handleChange}
-                      size="small"
-                    />
-                  }
-                  label={
-                    <Typography variant="body2">
-                      Tôi đồng ý với{' '}
-                      <Link href="/terms" underline="hover" sx={{ fontWeight: 700 }}>
-                        Điều khoản sử dụng
-                      </Link>
-                    </Typography>
-                  }
-                />
-              </Stack>
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    name="agree"
+                    checked={formData.agree}
+                    onChange={handleChange}
+                    size="small"
+                  />
+                }
+                label={
+                  <Typography variant="body2">
+                    Tôi đồng ý với{' '}
+                    <Link href="/terms" underline="hover" sx={{ fontWeight: 700 }}>
+                      Điều khoản sử dụng
+                    </Link>
+                  </Typography>
+                }
+              />
               {errors.agree && (
                 <Typography variant="body2" color="error" sx={{ fontWeight: 600 }}>
                   {errors.agree}
                 </Typography>
               )}
 
-              <Button
-                variant="text"
-                size="small"
+              <TextField
+                id="otp"
+                name="otp"
+                label="Mã OTP (6 số)"
+                placeholder="Nhập mã OTP từ email"
+                value={formData.otp}
+                onChange={handleChange}
                 disabled={isSubmitting}
-                onClick={() => setStep(1)}
-                sx={{ alignSelf: 'flex-start' }}
-              >
-                ← Quay lại bước 1
+                error={Boolean(errors.otp)}
+                helperText={errors.otp || 'Nhấn "Gửi mã OTP" để nhận mã, sau đó nhập vào đây.'}
+                fullWidth
+              />
+
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+                <Button
+                  type="button"
+                  variant="outlined"
+                  disabled={isSubmitting}
+                  onClick={handleInitRegister}
+                  fullWidth
+                >
+                  Gửi mã OTP
+                </Button>
+                <Button
+                  type="button"
+                  variant="contained"
+                disabled={isSubmitting}
+                onClick={handleVerifyRegister}
+                fullWidth
+                >
+                {renderPrimaryButtonLabel()}
               </Button>
+            </Stack>
             </Stack>
           )}
 
-          {/* ==== STEP 3: CARD TYPE ==== */}
-          {step === 3 && (
-            <Stack spacing={2.5}>
-              <Alert severity="info">
-                Bạn đã có tài khoản độc giả. Hãy chọn loại thẻ thành viên để sử dụng dịch vụ thư viện.
-              </Alert>
+        {/* STEP 2: Làm thẻ thư viện */}
+        {step === 2 && (
+          <Stack spacing={2.5}>
+            <Alert severity="info">
+              Tài khoản độc giả đã được tạo. Để có thể <b>mượn sách mang về</b>, bạn cần làm thẻ
+              thư viện.
+            </Alert>
 
-              <Stack spacing={1.5}>
-                <Button
-                  variant={Number(formData.cardTypeId) === 1 ? 'contained' : 'outlined'}
-                  onClick={() =>
-                    setFormData((p) => ({ ...p, cardTypeId: 1, action: 'SKIP' }))
-                  }
-                  disabled={isSubmitting}
-                  sx={{ justifyContent: 'space-between' }}
+            <Typography variant="body2" sx={{ opacity: 0.9 }}>
+              Bạn có thể:
+              <br />• Chọn <b>"Làm thẻ ngay"</b> để thanh toán làm thẻ (150.000đ) và dùng đầy đủ
+              chức năng.
+              <br />• Hoặc chọn <b>"Để sau"</b> nếu hiện tại chưa muốn làm thẻ.
+            </Typography>
+
+            {paymentData && paymentData.qrCode && (
+              <Stack
+                spacing={1.5}
+                alignItems="center"
+                sx={{
+                  p: 2,
+                  borderRadius: 2.5,
+                  border: '1px dashed rgba(0,0,0,0.12)',
+                  backgroundColor: 'rgba(247,250,252,0.9)',
+                }}
+              >
+                <Typography variant="subtitle2" fontWeight={700}>
+                  Quét QR để thanh toán làm thẻ thư viện
+                </Typography>
+                <Typography variant="body2" sx={{ opacity: 0.8 }}>
+                  Số tiền: {paymentData.amount?.toLocaleString('vi-VN')} đ
+                </Typography>
+
+                <Box
+                  sx={{
+                    p: 2,
+                    borderRadius: 2,
+                    backgroundColor: '#fff',
+                  }}
                 >
-                  <span>Thẻ FREE (miễn phí)</span>
-                  <Typography variant="body2" sx={{ opacity: 0.8 }}>
-                    0đ • Đọc sách tại chỗ, mượn số lượng cơ bản
-                  </Typography>
-                </Button>
+                  <QRCode value={paymentData.qrCode} size={180} />
+                </Box>
 
-                <Button
-                  variant={Number(formData.cardTypeId) === 2 ? 'contained' : 'outlined'}
-                  onClick={() =>
-                    setFormData((p) => ({ ...p, cardTypeId: 2, action: 'PAY' }))
-                  }
-                  disabled={isSubmitting}
-                  sx={{ justifyContent: 'space-between' }}
-                >
-                  <span>Thẻ PREMIUM (150.000đ / năm)</span>
-                  <Typography variant="body2" sx={{ opacity: 0.8 }}>
-                    Mượn nhiều hơn, ưu tiên đặt chỗ, nhiều ưu đãi khác
-                  </Typography>
-                </Button>
-
-                {errors.cardTypeId && (
-                  <Typography variant="body2" color="error">
-                    {errors.cardTypeId}
-                  </Typography>
-                )}
+                <Typography variant="caption" sx={{ opacity: 0.7, textAlign: 'center' }}>
+                  Sau khi thanh toán thành công, hệ thống sẽ tự động xác nhận và chuyển bạn sang
+                  trang đăng nhập.
+                </Typography>
               </Stack>
+            )}
 
+            {errors.cardType && (
+              <Typography variant="body2" color="error">
+                {errors.cardType}
+              </Typography>
+            )}
+
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
               <Button
-                variant="text"
-                size="small"
+                type="button"
+                variant="contained"
+                fullWidth
                 disabled={isSubmitting}
-                onClick={() => setStep(2)}
-                sx={{ alignSelf: 'flex-start' }}
+                onClick={handleCreateAndPayCard}
               >
-                ← Quay lại bước 2
+                Làm thẻ ngay
+              </Button>
+              <Button
+                type="button"
+                variant="outlined"
+                fullWidth
+                disabled={isSubmitting}
+                onClick={handleCreateLater}
+              >
+                Để sau
               </Button>
             </Stack>
-          )}
+          </Stack>
+        )}
 
-          {/* Nút submit */}
-          <Button
-            type="submit"
-            variant="contained"
-            size="large"
-            disabled={isSubmitting}
+        <Divider sx={{ my: 2, opacity: 0.4 }} />
+
+        <Typography
+          variant="body2"
+          color="text.secondary"
+          textAlign="center"
+          sx={{ fontFamily: '"Inter", sans-serif', fontWeight: 500 }}
+        >
+          Đã có tài khoản?{' '}
+          <Typography
+            component={RouterLink}
+            to="/login"
             sx={{
-              py: 1.6,
+              color: 'primary.main',
               fontWeight: 700,
-              letterSpacing: '0.02em',
-              borderRadius: 2.5,
-              fontSize: '1rem',
-              textTransform: 'none',
+              textDecoration: 'none',
+              transition: 'all 0.2s ease',
+              fontFamily: '"Inter", sans-serif',
+              '&:hover': {
+                textDecoration: 'underline',
+                color: 'primary.dark',
+              },
             }}
           >
-            {isSubmitting ? (
-              <Stack direction="row" spacing={1.5} alignItems="center">
-                <CircularProgress size={20} sx={{ color: 'white' }} />
-                <span>{renderPrimaryButtonLabel()}</span>
-              </Stack>
-            ) : (
-              renderPrimaryButtonLabel()
-            )}
-          </Button>
-
-          <Divider sx={{ my: 2, opacity: 0.4 }} />
-
-          <Typography
-            variant="body2"
-            color="text.secondary"
-            textAlign="center"
-            sx={{ fontFamily: '"Inter", sans-serif', fontWeight: 500 }}
-          >
-            Đã có tài khoản?{' '}
-            <Link component={RouterLink} to="/login" underline="hover" sx={{ fontWeight: 700 }}>
-              Đăng nhập
-            </Link>
+            Đăng nhập
           </Typography>
-        </Stack>
-      </Paper>
-    </Box>
+        </Typography>
+      </Stack>
+    </Paper>
+    </Box >
   );
 }

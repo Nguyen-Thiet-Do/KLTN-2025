@@ -21,7 +21,9 @@ export function NotificationProvider({ children }) {
   const socketRef = useRef(null);
 
   // expose closeSnackbar globally (optional)
-  window.__closeSnackbar = (id) => closeSnackbar(id);
+  if (typeof window !== "undefined") {
+    window.__closeSnackbar = (id) => closeSnackbar(id);
+  }
 
   const getSocketBaseUrl = () => {
     const socketEnv = import.meta.env.VITE_SOCKET_URL;
@@ -47,30 +49,39 @@ export function NotificationProvider({ children }) {
   // Socket + Load unread count khi auth sẵn sàng
   useEffect(() => {
     if (authLoading) return;
-    
+
     if (!isAuthenticated) {
       setUnreadCount(0); // Reset khi logout
+      // Ngắt kết nối socket nếu có
+      if (socketRef.current) {
+        try {
+          socketRef.current.disconnect();
+        } catch { }
+        socketRef.current = null;
+      }
       return;
     }
 
     const token = sessionStorage.getItem("accessToken");
     if (!token) return;
 
-    // LẤY readerId để join room (KHÔNG dùng accountId)
+    // LẤY readerId để join room
     const readerId =
       user?.readerId ||
       JSON.parse(sessionStorage.getItem("profile") || "{}")?.readerId;
 
     if (!readerId) return;
 
-    // ✅ THÊM: Load unread count ngay khi mount
+    // Load unread ngay khi mount
     loadUnreadCount();
 
     const baseUrl = getSocketBaseUrl();
 
     // Clear socket cũ
     if (socketRef.current) {
-      try { socketRef.current.disconnect(); } catch {}
+      try {
+        socketRef.current.disconnect();
+      } catch { }
       socketRef.current = null;
     }
 
@@ -81,11 +92,11 @@ export function NotificationProvider({ children }) {
     });
     socketRef.current = socket;
 
-    // --- ĐỊNH NGHĨA HÀM ---
+    // --- HANDLERS ---
     const onConnect = () => {
       console.log("✅ Socket connected");
-    socket.emit("register", readerId);
-
+      // BE đang join room theo JWT + readerId, nên mình có thể emit thêm nếu muốn
+      socket.emit("register", readerId);
     };
 
     const onConnectError = (err) => {
@@ -97,10 +108,23 @@ export function NotificationProvider({ children }) {
       setUnreadCount((v) => v + 1);
     };
 
+    // 🔥 NEW: handler cho payment_success
+    const onPaymentSuccess = (payload) => {
+      console.log("💳 [socket] payment_success:", payload);
+
+      // Đẩy ra window để SignUp.jsx bắt được
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(
+          new CustomEvent("payment_success", { detail: payload })
+        );
+      }
+    };
+
     // --- BIND ---
     socket.on("connect", onConnect);
     socket.on("connect_error", onConnectError);
     socket.on("notification:new", onNewNotification);
+    socket.on("payment_success", onPaymentSuccess);
 
     // --- CLEANUP ---
     return () => {
@@ -108,8 +132,9 @@ export function NotificationProvider({ children }) {
         socket.off("connect", onConnect);
         socket.off("connect_error", onConnectError);
         socket.off("notification:new", onNewNotification);
+        socket.off("payment_success", onPaymentSuccess);
         socket.disconnect();
-      } catch {}
+      } catch { }
       socketRef.current = null;
     };
   }, [authLoading, isAuthenticated, user?.readerId]);
