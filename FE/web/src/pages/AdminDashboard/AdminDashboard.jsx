@@ -7,7 +7,11 @@ import {
   Typography,
   CircularProgress,
   Divider,
+  Button,
+  Alert,
+  Snackbar,
 } from "@mui/material";
+import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 import {
   BarChart,
   Bar,
@@ -22,6 +26,7 @@ import {
   Legend,
 } from "recharts";
 import { statisticApi } from "../../services/statisticApi";
+import { exportLibraryReportToPDF } from "../../utils/pdfExport";
 
 export default function AdminDashboard() {
   const [stats, setStats] = useState(null);
@@ -30,6 +35,14 @@ export default function AdminDashboard() {
   const [topBooks, setTopBooks] = useState([]);
   const [topReaders, setTopReaders] = useState([]);
   const [loading, setLoading] = useState(true);
+  
+  // State cho export PDF
+  const [exporting, setExporting] = useState(false);
+  const [snackbar, setSnackbar] = useState({ 
+    open: false, 
+    message: '', 
+    severity: 'success' 
+  });
 
   useEffect(() => {
     loadData();
@@ -48,17 +61,58 @@ export default function AdminDashboard() {
           statisticApi.getTopReaders(),
         ]);
       
-      console.log('📊 Monthly stats:', monthlyStats); // Debug
+      console.log('📊 Monthly stats:', monthlyStats);
       
       setStats(allStats);
-      setMonthly(monthlyStats); // ✅ SỬA: Không lấy .data nữa
+      setMonthly(monthlyStats);
       setCategories(categoryStats);
       setTopBooks(topBookStats);
       setTopReaders(topReaderStats);
     } catch (error) {
       console.error("❌ Lỗi tải dữ liệu:", error);
+      setSnackbar({
+        open: true,
+        message: 'Lỗi khi tải dữ liệu thống kê',
+        severity: 'error'
+      });
     } finally {
       setLoading(false);
+    }
+  };
+
+  // ==================== HÀM EXPORT PDF ====================
+  const handleExportPDF = async () => {
+    try {
+      setExporting(true);
+      
+      // Chuẩn bị dữ liệu để export
+      const exportData = {
+        stats,
+        monthly,
+        categories,
+        topBooks,
+        topReaders
+      };
+
+      console.log('📄 Bắt đầu xuất PDF...', exportData);
+
+      // Gọi hàm export
+      const fileName = await exportLibraryReportToPDF(exportData);
+      
+      setSnackbar({
+        open: true,
+        message: `✅ Đã xuất file PDF: ${fileName}`,
+        severity: 'success'
+      });
+    } catch (error) {
+      console.error('❌ Lỗi xuất PDF:', error);
+      setSnackbar({
+        open: true,
+        message: '❌ Lỗi khi xuất file PDF: ' + error.message,
+        severity: 'error'
+      });
+    } finally {
+      setExporting(false);
     }
   };
 
@@ -106,9 +160,43 @@ export default function AdminDashboard() {
 
   return (
     <Box sx={{ p: 3 }}>
-      <Typography variant="h4" fontWeight={700} mb={3}>
-        📊 Thống kê thư viện
-      </Typography>
+      {/* ==================== HEADER VỚI NÚT EXPORT ==================== */}
+      <Box sx={{ 
+        display: 'flex', 
+        justifyContent: 'space-between', 
+        alignItems: 'center', 
+        mb: 3 
+      }}>
+        <Typography variant="h4" fontWeight={700}>
+          📊 Thống kê thư viện
+        </Typography>
+        
+        <Button
+          variant="contained"
+          color="error"
+          startIcon={exporting ? (
+            <CircularProgress size={20} color="inherit" />
+          ) : (
+            <PictureAsPdfIcon />
+          )}
+          onClick={handleExportPDF}
+          disabled={exporting}
+          sx={{
+            px: 3,
+            py: 1.5,
+            fontSize: '16px',
+            fontWeight: 600,
+            boxShadow: 3,
+            '&:hover': {
+              boxShadow: 6,
+              transform: 'translateY(-2px)'
+            },
+            transition: 'all 0.3s'
+          }}
+        >
+          {exporting ? 'Đang xuất PDF...' : 'Xuất báo cáo PDF'}
+        </Button>
+      </Box>
 
       {/* Thống kê cơ bản */}
       <Typography variant="h6" fontWeight={600} mb={2}>
@@ -328,6 +416,22 @@ export default function AdminDashboard() {
           </CardContent>
         </Card>
       )}
+
+      {/* ==================== SNACKBAR THÔNG BÁO ==================== */}
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={4000}
+        onClose={() => setSnackbar({ ...snackbar, open: false })}
+        anchorOrigin={{ vertical: 'top', horizontal: 'right' }}
+      >
+        <Alert 
+          onClose={() => setSnackbar({ ...snackbar, open: false })} 
+          severity={snackbar.severity}
+          sx={{ width: '100%' }}
+        >
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
     </Box>
   );
 }
