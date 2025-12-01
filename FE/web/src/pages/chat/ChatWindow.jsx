@@ -7,6 +7,7 @@ import {
   Stack,
   Typography,
   Avatar,
+  Paper,
 } from "@mui/material";
 import SendIcon from "@mui/icons-material/Send";
 
@@ -43,8 +44,21 @@ export default function ChatWindow({ onUnread }) {
       });
 
       const data = await res.json();
-      const botMsg = { from: "bot", text: data.reply || "..." };
 
+      // ==== BOT TRẢ VỀ DANH SÁCH SÁCH ====
+      if (data.books) {
+        setMessages((prev) => [
+          ...prev,
+          { from: "bot", text: data.reply, books: data.books },
+        ]);
+
+        onUnread?.();
+        setLoading(false);
+        return;
+      }
+
+      // ==== BOT TRẢ VỀ TEXT THƯỜNG ====
+      const botMsg = { from: "bot", text: data.reply || "..." };
       setMessages((prev) => [...prev, botMsg]);
       onUnread?.();
     } catch (err) {
@@ -119,30 +133,71 @@ export default function ChatWindow({ onUnread }) {
           >
             {/* Avatar bot/user */}
             {msg.from === "bot" && (
-              <Avatar sx={{ width: 32, height: 32, bgcolor: "#667EEA" }}>B</Avatar>
+              <Avatar sx={{ width: 32, height: 32, bgcolor: "#667EEA" }}>
+                B
+              </Avatar>
             )}
 
-      <Box
-  sx={{
-    maxWidth: "75%",
-    p: 1.2,
-    borderRadius: 3,
-    background:
-      msg.from === "user"
-        ? "linear-gradient(135deg, #667EEA, #764BA2)"
-        : "white",
-    color: msg.from === "user" ? "white" : "black",
-    boxShadow:
-      msg.from === "user"
-        ? "0 3px 10px rgba(102,126,234,0.3)"
-        : "0 2px 6px rgba(0,0,0,0.1)",
-  }}
->
-  <Typography sx={{ fontSize: "0.9rem" }}>{msg.text}</Typography>
-</Box>
+            <Box>
+              {/* Bubble */}
+              <Box
+                sx={{
+                  maxWidth: "75%",
+                  p: 1.2,
+                  borderRadius: 3,
+                  background:
+                    msg.from === "user"
+                      ? "linear-gradient(135deg, #667EEA, #764BA2)"
+                      : "white",
+                  color: msg.from === "user" ? "white" : "black",
+                  boxShadow:
+                    msg.from === "user"
+                      ? "0 3px 10px rgba(102,126,234,0.3)"
+                      : "0 2px 6px rgba(0,0,0,0.1)",
+                }}
+              >
+                <Typography sx={{ fontSize: "0.9rem" }}>{msg.text}</Typography>
+              </Box>
+
+              {/* HIỆN GỢI Ý SÁCH */}
+              {msg.books && (
+                <Box sx={{ mt: 1 }}>
+                  {msg.books.map((b) => (
+                    <Paper
+                      key={b.documentId}
+                      onClick={() =>
+                        (window.location.href = `/reader/documents/${b.documentId}`)
+                      }
+                      sx={{
+                        p: 1.5,
+                        my: 1,
+                        borderRadius: 2,
+                        cursor: "pointer",
+                        width: "75%",
+                        boxShadow: "0 2px 6px rgba(0,0,0,0.15)",
+                        "&:hover": {
+                          background: "#f3f3ff",
+                          transform: "scale(1.02)",
+                        },
+                        transition: "0.15s",
+                      }}
+                    >
+                      <Typography fontWeight={700} sx={{ mb: 0.5 }}>
+                        {b.title}
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        {b.authors?.map((a) => a.fullName).join(", ")}
+                      </Typography>
+                    </Paper>
+                  ))}
+                </Box>
+              )}
+            </Box>
 
             {msg.from === "user" && (
-              <Avatar sx={{ width: 32, height: 32, bgcolor: "#764BA2" }}>U</Avatar>
+              <Avatar sx={{ width: 32, height: 32, bgcolor: "#764BA2" }}>
+                U
+              </Avatar>
             )}
           </Stack>
         ))}
@@ -150,7 +205,7 @@ export default function ChatWindow({ onUnread }) {
         <div ref={bottomRef} />
       </Box>
 
-      {/* KHU VỰC NHẬP TIN NHẮN */}
+      {/* INPUT */}
       <Box
         sx={{
           px: 2,
@@ -174,7 +229,6 @@ export default function ChatWindow({ onUnread }) {
               borderRadius: 3,
               background: "#f5f6ff",
               "& fieldset": { border: "none" },
-              "&:hover fieldset": { border: "none" },
               "&.Mui-focused fieldset": {
                 border: "2px solid #667EEA",
               },
@@ -197,7 +251,11 @@ export default function ChatWindow({ onUnread }) {
             transition: "0.15s",
           }}
         >
-          {loading ? <CircularProgress size={22} color="inherit" /> : <SendIcon />}
+          {loading ? (
+            <CircularProgress size={22} color="inherit" />
+          ) : (
+            <SendIcon />
+          )}
         </IconButton>
       </Box>
     </Box>
