@@ -494,11 +494,13 @@ routeApi.get('/', (req, res) => {
             description: 'Cập nhật thông tin tài khoản (email, phoneNumber, password)',
             auth: true,
             role: 'Reader (roleId = 3)',
-            body: {
-              email: 'string (optional)',
-              phoneNumber: 'string (optional)',
-              password: 'string (optional - mật khẩu mới)'
-            },
+           body: {
+  email: 'string (optional)',
+  phoneNumber: 'string (optional)',
+  oldPassword: 'string (optional - bắt buộc khi đổi mật khẩu)',
+  newPassword: 'string (optional - mật khẩu mới)'
+},
+
             response: {
               success: 'boolean',
               message: 'string',
