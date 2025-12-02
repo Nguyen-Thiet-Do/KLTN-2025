@@ -29,7 +29,6 @@ const getPaymentStatus = async (req, res) => {
       // 📝 CASE 1: CARD_PURCHASE (Đăng ký thẻ mới)
       // ========================================
       if (payment.paymentType === 'CARD_PURCHASE') {
-        // Kiểm tra xem đã có thẻ chưa
         const existingCard = await MemberCard.findOne({
           where: {
             readerId: payment.readerId,
@@ -38,7 +37,6 @@ const getPaymentStatus = async (req, res) => {
           }
         });
 
-        // Nếu chưa có thẻ thì tạo
         if (!existingCard) {
           console.log('💳 Creating member card for payment:', paymentId);
           
@@ -54,7 +52,6 @@ const getPaymentStatus = async (req, res) => {
             });
           } catch (err) {
             console.error('❌ Error creating card:', err);
-            // Vẫn trả SUCCESS vì payment đã thành công
           }
         }
 
@@ -68,9 +65,9 @@ const getPaymentStatus = async (req, res) => {
       }
 
       // ========================================
-      // 💰 CASE 2: TOPUP (Nạp tiền vào thẻ)
+      // 💰 CASE 2: TOPUP hoặc DEPOSIT (Nạp tiền vào thẻ)
       // ========================================
-      if (payment.paymentType === 'TOPUP') {
+      if (payment.paymentType === 'TOPUP' || payment.paymentType === 'DEPOSIT') {
         // Tìm thẻ thành viên
         const memberCard = await MemberCard.findOne({
           where: {
@@ -112,7 +109,7 @@ const getPaymentStatus = async (req, res) => {
             success: true,
             status: 'SUCCESS',
             message: 'Nạp tiền thành công',
-            paymentType: 'TOPUP',
+            paymentType: payment.paymentType,
             topup: {
               amount: topupAmount,
               oldBalance: oldBalance,
@@ -126,7 +123,7 @@ const getPaymentStatus = async (req, res) => {
           success: true,
           status: 'SUCCESS',
           message: 'Nạp tiền đã được xử lý trước đó',
-          paymentType: 'TOPUP',
+          paymentType: payment.paymentType,
           currentBalance: Number(memberCard.balance)
         });
       }
