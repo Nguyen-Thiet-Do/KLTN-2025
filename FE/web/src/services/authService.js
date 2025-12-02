@@ -61,6 +61,14 @@ export const completeRegistration = async (payload, token = null) => {
   const response = await api.post("/auth/register/complete", payload, config);
   return response.data;
 };
+export const topupMemberCard = async (payload, token = null) => {
+  const config = token
+    ? { headers: { Authorization: `Bearer ${token}` } }
+    : {};
+
+  const response = await api.post("/member-cards/topup", payload, config);
+  return response.data;
+};
 
 /**
  * ⭐ EXPORT GIỐNG CŨ – Cho phép dùng:
@@ -74,6 +82,7 @@ export const authService = {
   logout,
   getCurrentUser,
   completeRegistration,
+  topupMemberCard,
 };
 
 /**
