@@ -42,7 +42,32 @@ export const createMemberCardPayment = async (payload, token) => {
   }
 };
 
+/**
+ * 🔼 Tạo yêu cầu nạp tiền để làm đầy số dư mặc định của memberCard
+ * payload: { memberCardId?: number, readerId?: number }
+ * token: access token
+ * trả về: data giống spec (ok + paymentId/orderCode/amount/payos... hoặc already_sufficient)
+ */
+export const topupMemberCard = async (payload, token) => {
+  try {
+    const response = await api.post('/member-cards/topup', payload, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json"
+      }
+    });
+    return response.data;
+  } catch (error) {
+    console.error('❌ topupMemberCard error:', error);
+    // Trả lỗi nguyên bản để component xử lý chi tiết
+    if (error.response?.data) throw error.response.data;
+    throw error;
+  }
+};
+
+
 export default {
   checkPaymentStatus,
-  createMemberCardPayment
+  createMemberCardPayment,
+  topupMemberCard
 };

@@ -208,7 +208,6 @@ export default function ReturnBulkDialog({ open, onClose, slip, onReturned }) {
     if (!items.length) return;
 
     // Chỉ tự động preview khi thay đổi isLost
-    // Không tự động khi thay đổi conditionReturn, note, hoặc returnDate
     const isLostStates = items.map(it => it.isLost).join(',');
 
     // debounce 500ms
@@ -303,7 +302,7 @@ export default function ReturnBulkDialog({ open, onClose, slip, onReturned }) {
       });
       setShowQr(true);
       enqueueSnackbar(
-        "Đã tạo QR/link thanh toán. Vui lòng thanh toán rồi bấm 'Tôi đã thanh toán'.",
+        "Đã tạo QR/link thanh toán. Vui lòng thanh toán rồi bấm 'Tôi đã thanh toán' hoặc chọn 'Thanh toán tiền mặt'.",
         { variant: "info" }
       );
     } catch (err) {
@@ -369,6 +368,56 @@ export default function ReturnBulkDialog({ open, onClose, slip, onReturned }) {
         err?.response?.data?.message ||
         err?.message ||
         "Lỗi khi xác nhận sau thanh toán";
+      enqueueSnackbar(msg, { variant: "error" });
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // ------------------ XÁC NHẬN THANH TOÁN TIỀN MẶT ------------------
+  async function handleCashPayment() {
+    if (!slip) return;
+
+    const librarianId = getLibrarianIdFromUser(user) ?? librarianIdFromAuth;
+    if (!librarianId) {
+      enqueueSnackbar("Không xác định được librarianId.", { variant: "error" });
+      return;
+    }
+
+    const baseItems = items.map((it) => ({
+      loanDetailId: it.loanDetailId,
+      conditionReturn: it.isLost ? 0 : Number(it.conditionReturn),
+      isLost: !!it.isLost,
+      note: it.note || undefined,
+    }));
+
+    const payload = {
+      loanSlipId: slip.loanSlipId,
+      returnDate,
+      items: baseItems,
+      librarianId: Number(librarianId),
+      paidByCash: true,
+    };
+
+    setLoading(true);
+    try {
+      const res = await confirmBulkReturnAfterPayment(payload);
+      if (!res?.success) {
+        const msg = res?.message || "Xác nhận thanh toán tiền mặt thất bại.";
+        enqueueSnackbar(msg, { variant: "error" });
+        return;
+      }
+
+      enqueueSnackbar("Đã xác nhận thanh toán tiền mặt và trả phiếu.", {
+        variant: "success",
+      });
+      setShowQr(false);
+      setPendingPayment(null);
+      onReturned && onReturned(res.finalResult || res);
+      onClose && onClose();
+    } catch (err) {
+      console.error("handleCashPayment error:", err);
+      const msg = err?.response?.data?.message || err?.message || "Lỗi khi xác nhận thanh toán tiền mặt";
       enqueueSnackbar(msg, { variant: "error" });
     } finally {
       setLoading(false);
@@ -623,15 +672,6 @@ export default function ReturnBulkDialog({ open, onClose, slip, onReturned }) {
           Huỷ
         </Button>
 
-        {/* Nút này giờ chỉ là tùy chọn, không bắt buộc dùng nữa */}
-        {/* <Button
-          variant="outlined"
-          onClick={handlePreview}
-          disabled={loading || !items.length}
-        >
-          Tính phí (preview)
-        </Button> */}
-
         <Button
           variant="contained"
           onClick={handleConfirm}
@@ -696,6 +736,16 @@ export default function ReturnBulkDialog({ open, onClose, slip, onReturned }) {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setShowQr(false)}>Đóng</Button>
+
+          {/* Nút thanh toán tiền mặt: cho phép luôn (nếu modal payment đang mở) */}
+          <Button
+            variant="outlined"
+            onClick={handleCashPayment}
+            disabled={loading}
+          >
+            Thanh toán tiền mặt
+          </Button>
+
           <Button
             variant="contained"
             onClick={handleConfirmAfterPaid}

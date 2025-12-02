@@ -346,7 +346,7 @@ export default function ReturnSingleDialog({
             });
             setShowQr(true);
             enqueueSnackbar(
-                "Đã tạo QR/link thanh toán. Vui lòng thanh toán rồi bấm 'Tôi đã thanh toán'.",
+                "Đã tạo QR/link thanh toán. Vui lòng thanh toán rồi bấm 'Tôi đã thanh toán' hoặc chọn 'Thanh toán tiền mặt'.",
                 { variant: "info" }
             );
         } catch (err) {
@@ -417,6 +417,56 @@ export default function ReturnSingleDialog({
                 err?.response?.data?.message ||
                 err?.message ||
                 "Lỗi khi xác nhận sau thanh toán";
+            enqueueSnackbar(msg, { variant: "error" });
+        } finally {
+            setLoading(false);
+        }
+    }
+
+    // ------------------ MỚI: XÁC NHẬN THANH TOÁN TIỀN MẶT (SINGLE) ------------------
+    async function handleCashPayment() {
+        if (!slipId || !loanDetail) return;
+
+        const librarianId = getLibrarianIdFromUser(user) ?? librarianIdFromAuth ?? null;
+        if (!librarianId) {
+            enqueueSnackbar("Không xác định được librarianId.", { variant: "error" });
+            return;
+        }
+
+        const items = [
+            {
+                loanDetailId: loanDetail.loanDetailId,
+                conditionReturn: isLost ? 0 : Number(conditionReturn),
+                isLost: !!isLost,
+                note: note || undefined,
+            },
+        ];
+
+        const payload = {
+            loanSlipId: slipId,
+            returnDate,
+            items,
+            librarianId: Number(librarianId),
+            paidByCash: true,
+        };
+
+        setLoading(true);
+        try {
+            const res = await confirmBulkReturnAfterPayment(payload);
+            if (!res?.success) {
+                const msg = res?.message || "Xác nhận trả bằng tiền mặt thất bại.";
+                enqueueSnackbar(msg, { variant: "error" });
+                return;
+            }
+
+            enqueueSnackbar("Đã xác nhận thanh toán tiền mặt và cập nhật phiếu.", { variant: "success" });
+            setShowQr(false);
+            setPendingPayment(null);
+            onReturned && onReturned(res.finalResult || res);
+            onClose && onClose();
+        } catch (err) {
+            console.error("handleCashPayment (single) error:", err);
+            const msg = err?.response?.data?.message || err?.message || "Lỗi khi xác nhận trả bằng tiền mặt";
             enqueueSnackbar(msg, { variant: "error" });
         } finally {
             setLoading(false);
@@ -599,13 +649,6 @@ export default function ReturnSingleDialog({
                 <Button onClick={() => onClose?.()} disabled={loading}>
                     Huỷ
                 </Button>
-                {/* <Button
-                    variant="outlined"
-                    onClick={handlePreview}
-                    disabled={loading || !loanDetail}
-                >
-                    Tính phí (preview)
-                </Button> */}
                 <Button
                     variant="contained"
                     onClick={handleConfirm}
@@ -615,7 +658,7 @@ export default function ReturnSingleDialog({
                 </Button>
             </DialogActions>
 
-            {/* Dialog QR giống ReturnBulkDialog */}
+            {/* Dialog QR giống ReturnBulkDialog */} 
             <Dialog
                 open={showQr && !!pendingPayment}
                 onClose={() => setShowQr(false)}
@@ -670,6 +713,16 @@ export default function ReturnSingleDialog({
                 </DialogContent>
                 <DialogActions>
                     <Button onClick={() => setShowQr(false)}>Đóng</Button>
+
+                    {/* Nút thanh toán tiền mặt */}
+                    <Button
+                        variant="outlined"
+                        onClick={handleCashPayment}
+                        disabled={loading}
+                    >
+                        Thanh toán tiền mặt
+                    </Button>
+
                     <Button
                         variant="contained"
                         onClick={handleConfirmAfterPaid}
