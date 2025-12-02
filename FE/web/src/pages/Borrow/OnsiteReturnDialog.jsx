@@ -131,7 +131,6 @@ export default function OnsiteReturnDialog({ open, onClose, slip, librarianId, o
                                     <TableCell>Tài liệu</TableCell>
                                     <TableCell>Mã bản sao</TableCell>
                                     <TableCell>Ghi chú khi trả</TableCell>
-                                    <TableCell>Mất?</TableCell>
                                 </TableRow>
                             </TableHead>
                             <TableBody>
@@ -149,7 +148,7 @@ export default function OnsiteReturnDialog({ open, onClose, slip, librarianId, o
                                                 fullWidth
                                             />
                                         </TableCell>
-                                        <TableCell>
+                                        <TableCell sx={{ display: "none" }}>
                                             <FormControlLabel
                                                 control={<Checkbox checked={r.isLost} onChange={(e) => updateRow(idx, { isLost: e.target.checked })} />}
                                                 label="Báo mất"
@@ -168,7 +167,7 @@ export default function OnsiteReturnDialog({ open, onClose, slip, librarianId, o
             <DialogActions>
                 <Button onClick={() => { if (!loading) onClose(); }} disabled={loading}>Đóng</Button>
                 <Button variant="contained" onClick={handleConfirm} disabled={loading} sx={{ textTransform: "none" }}>
-                    {loading ? <CircularProgress size={20} /> : "Xác nhận kết thúc"}
+                    {loading ? <CircularProgress size={20} /> : "Xác nhận"}
                 </Button>
             </DialogActions>
         </Dialog>
