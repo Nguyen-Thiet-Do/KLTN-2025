@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   Dialog,
   DialogTitle,
@@ -25,7 +25,7 @@ export default function QRPaymentModal({
   onPaymentSuccess 
 }) {
   const [paymentStatus, setPaymentStatus] = useState("pending");
-  const [checkInterval, setCheckInterval] = useState(null);
+  const checkIntervalRef = useRef(null); // ✅ Dùng useRef thay vì useState
 
   useEffect(() => {
     if (open && paymentData) {
@@ -34,35 +34,50 @@ export default function QRPaymentModal({
       console.log("   - paymentId:", paymentData.paymentId);
       console.log("   - qrCode:", paymentData.qrCode);
       console.log("   - checkoutUrl:", paymentData.checkoutUrl);
-      console.log("   - Full:", paymentData);
+      console.log("   - amount:", paymentData.amount);
       console.log("═══════════════════════════════");
     }
   }, [open, paymentData]);
 
   useEffect(() => {
-    if (!open || !paymentData?.paymentId) return;
+    if (!open || !paymentData?.paymentId) {
+      return;
+    }
 
     console.log("💳 Payment modal opened with ID:", paymentData.paymentId);
     console.log("🔄 Starting auto-check payment status every 3 seconds...");
 
-    const interval = setInterval(async () => {
-      await checkPaymentStatus();
+    // ✅ Clear interval cũ nếu có
+    if (checkIntervalRef.current) {
+      clearInterval(checkIntervalRef.current);
+    }
+
+    // ✅ Check ngay lần đầu
+    checkPaymentStatus();
+
+    // ✅ Sau đó check mỗi 3 giây
+    checkIntervalRef.current = setInterval(() => {
+      checkPaymentStatus();
     }, 3000);
 
-    setCheckInterval(interval);
-
     return () => {
-      if (interval) {
+      if (checkIntervalRef.current) {
         console.log("⏹️ Stopping payment status check");
-        clearInterval(interval);
+        clearInterval(checkIntervalRef.current);
+        checkIntervalRef.current = null;
       }
     };
-  }, [open, paymentData]);
+  }, [open, paymentData?.paymentId]); // ✅ Dependency chính xác
 
   const checkPaymentStatus = async () => {
     try {
       const token = sessionStorage.getItem("accessToken");
       
+      if (!token) {
+        console.error("❌ No access token found");
+        return;
+      }
+
       const getApiBaseUrl = () => {
         const isProduction = window.location.hostname !== 'localhost' 
                           && window.location.hostname !== '127.0.0.1';
@@ -80,52 +95,73 @@ export default function QRPaymentModal({
       
       const API_BASE_URL = getApiBaseUrl();
       
+      console.log(`🔍 Checking payment status: ${API_BASE_URL}/payments/${paymentData.paymentId}/status`);
+      
       const response = await fetch(
         `${API_BASE_URL}/payments/${paymentData.paymentId}/status`,
         {
           headers: {
             Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
           },
         }
       );
 
       if (!response.ok) {
-        console.error("❌ API response not OK:", response.status);
+        console.error("❌ API response not OK:", response.status, response.statusText);
         return;
       }
 
       const result = await response.json();
       
-      console.log("💳 Payment status:", result);
+      console.log("📊 Payment status response:", result);
 
+      // ✅ Check các trạng thái thành công
       const successStatuses = ["SUCCESS", "PAID", "COMPLETED"];
       if (result.success && successStatuses.includes(result.status)) {
         console.log("🎉 Payment successful! Status:", result.status);
-        setPaymentStatus("success");
+        console.log("📦 Payment details:", result);
         
-        if (checkInterval) {
-          clearInterval(checkInterval);
+        // ✅ Stop checking
+        if (checkIntervalRef.current) {
+          clearInterval(checkIntervalRef.current);
+          checkIntervalRef.current = null;
         }
 
+        // ✅ Update UI
+        setPaymentStatus("success");
+
+        // ✅ Đợi 2 giây để user thấy UI thành công, sau đó callback
         setTimeout(() => {
+          console.log("✅ Calling onPaymentSuccess callback...");
           onPaymentSuccess();
         }, 2000);
+      } else {
+        console.log("⏳ Payment still pending. Status:", result.status);
       }
     } catch (error) {
-      console.error("❌ Lỗi kiểm tra thanh toán:", error);
+      console.error("❌ Error checking payment status:", error);
     }
   };
 
   const handleClose = () => {
-    if (checkInterval) {
-      clearInterval(checkInterval);
+    console.log("🚪 Closing payment modal");
+    
+    // ✅ Clear interval khi đóng modal
+    if (checkIntervalRef.current) {
+      clearInterval(checkIntervalRef.current);
+      checkIntervalRef.current = null;
     }
+    
+    // ✅ Reset state
     setPaymentStatus("pending");
+    
     onClose();
   };
 
   const openPaymentLink = () => {
     if (paymentData?.checkoutUrl) {
+      console.log("🔗 Opening payment link:", paymentData.checkoutUrl);
       window.open(paymentData.checkoutUrl, "_blank");
     }
   };
@@ -163,13 +199,21 @@ export default function QRPaymentModal({
                 fontSize: 80, 
                 color: "#38A169",
                 mb: 2,
+                animation: "scaleIn 0.3s ease-out",
+                "@keyframes scaleIn": {
+                  "0%": { transform: "scale(0)" },
+                  "100%": { transform: "scale(1)" }
+                }
               }} 
             />
             <Typography variant="h5" fontWeight={700} color="#38A169" gutterBottom>
               Thanh toán thành công!
             </Typography>
-            <Typography variant="body2" color="text.secondary">
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
               Thẻ thành viên đã được kích hoạt
+            </Typography>
+            <Typography variant="caption" color="text.secondary">
+              Đang tải lại trang...
             </Typography>
           </Box>
         ) : (
