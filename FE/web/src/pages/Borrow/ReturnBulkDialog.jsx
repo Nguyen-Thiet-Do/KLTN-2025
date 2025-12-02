@@ -19,6 +19,7 @@ import {
   TableBody,
   Alert,
   Box,
+  MenuItem,
 } from "@mui/material";
 import { useAuth } from "../../contexts/AuthContext";
 import {
@@ -34,6 +35,28 @@ const nf = new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 0 });
 function parseDateOnly(d = null) {
   if (!d) return null;
   return String(d).slice(0, 10);
+}
+
+// Các mốc trạng thái (giữ nguyên code cũ, chỉ thêm helper)
+const CONDITION_RANGES = [
+  { key: "100-90", label: "Mới", upper: 100, lower: 90 },
+  { key: "90-70", label: "Tốt/ Trầy nhẹ", upper: 90, lower: 70 },
+  { key: "70-50", label: "Rách bìa, trang", upper: 70, lower: 50 },
+  { key: "50-0", label: "Hư nặng", upper: 50, lower: 0 },
+];
+
+function getConditionLabelFromNumber(n) {
+  if (n == null || isNaN(Number(n))) return "-";
+  const v = Number(n);
+  const found = CONDITION_RANGES.find((r) => v <= r.upper && v >= r.lower);
+  return found ? found.label : `${v}`;
+}
+
+function getRepresentativeFromNumber(n) {
+  if (n == null || isNaN(Number(n))) return null;
+  const v = Number(n);
+  const found = CONDITION_RANGES.find((r) => v <= r.upper && v >= r.lower);
+  return found ? found.upper : null;
 }
 
 // helper: ưu tiên profile.librarianId, KHÔNG dùng accountId
@@ -100,8 +123,12 @@ export default function ReturnBulkDialog({ open, onClose, slip, onReturned }) {
       setItems(
         borroweds.map((d) => ({
           loanDetailId: d.loanDetailId,
+          // giữ giá trị cũ nhưng map sang representative nếu có
           conditionReturn:
-            d.conditionBorrow != null ? Number(d.conditionBorrow) : 100,
+            d.conditionBorrow != null
+              ? (getRepresentativeFromNumber(Number(d.conditionBorrow)) ??
+                Number(d.conditionBorrow))
+              : 100,
           isLost: false,
           note: d.note || "",
           depositAmount: Number(d.depositAmount) || 0,
@@ -200,15 +227,12 @@ export default function ReturnBulkDialog({ open, onClose, slip, onReturned }) {
     }
   }
 
-  // ---------- AUTO PREVIEW chỉ khi toggle checkbox "Mất sách" ----------
+  // ---------- AUTO PREVIEW chỉ khi toggle checkbox "Mất sách" hoặc thay conditionReturn ----------
   useEffect(() => {
     if (!open) return;
     if (!slip) return;
     if (!returnDate) return;
     if (!items.length) return;
-
-    // Chỉ tự động preview khi thay đổi isLost
-    const isLostStates = items.map(it => it.isLost).join(',');
 
     // debounce 500ms
     if (previewTimeoutRef.current) {
@@ -225,7 +249,7 @@ export default function ReturnBulkDialog({ open, onClose, slip, onReturned }) {
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [items.map(it => it.isLost).join(','), slip, open]);
+  }, [items.map((it) => it.isLost).join(","), items.map((it) => it.conditionReturn).join(","), slip, open, returnDate]);
 
   // ---------- GỌI MANUAL PREVIEW (nếu vẫn muốn dùng nút) ----------
   async function handlePreview() {
@@ -552,28 +576,31 @@ export default function ReturnBulkDialog({ open, onClose, slip, onReturned }) {
                         <TableCell sx={{ fontFamily: "monospace" }}>
                           {it.barCode || "-"}
                         </TableCell>
-                        <TableCell>{it.borrowCond ?? "-"}</TableCell>
+                        {/* Hiển thị label thay vì số cho tình trạng mượn */}
+                        <TableCell>{getConditionLabelFromNumber(it.borrowCond)}</TableCell>
                         <TableCell>
+                          {/* Thay input số bằng select hiển thị label nhưng lưu số representative */}
                           <TextField
-                            type="number"
-                            value={it.conditionReturn}
-                            onChange={(e) =>
-                              updateItem(it.loanDetailId, {
-                                conditionReturn: Number(e.target.value),
-                              })
-                            }
-                            onBlur={() => doPreview({ showSnackbar: false })}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') {
-                                e.preventDefault();
-                                doPreview({ showSnackbar: false });
-                              }
-                            }}
+                            select
                             size="small"
-                            sx={{ width: 120 }}
+                            value={String(it.conditionReturn ?? 100)}
+                            onChange={(e) => {
+                              const v = Number(e.target.value);
+                              updateItem(it.loanDetailId, { conditionReturn: v });
+                            }}
+                            sx={{ minWidth: 200 }}
                             disabled={it.isLost}
-                            inputProps={{ min: 0, max: 100 }}
-                          />
+                          >
+                            {CONDITION_RANGES.map((r) => (
+                              <MenuItem key={r.key} value={r.upper}>
+                                {r.label}
+                              </MenuItem>
+                            ))}
+                          </TextField>
+
+                          {Number(it.conditionReturn) < 70 && !it.isLost && (
+                            <Typography variant="caption" color="error">Sẽ tính phạt hư hỏng</Typography>
+                          )}
                         </TableCell>
                         <TableCell>
                           <FormControlLabel

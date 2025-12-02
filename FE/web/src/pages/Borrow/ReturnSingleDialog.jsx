@@ -14,6 +14,7 @@ import {
     Divider,
     Box,
     Alert,
+    MenuItem,
 } from "@mui/material";
 import { useAuth } from "../../contexts/AuthContext";
 import {
@@ -30,6 +31,28 @@ const nf = new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 0 });
 function parseDateOnly(d = null) {
     if (!d) return null;
     return String(d).slice(0, 10);
+}
+
+// Các mốc trạng thái để hiển thị nhãn nhưng lưu giá trị representative (upper)
+const CONDITION_RANGES = [
+    { key: "100-90", label: "Mới", upper: 100, lower: 90 },
+    { key: "90-70", label: "Tốt/ Trầy nhẹ", upper: 90, lower: 70 },
+    { key: "70-50", label: "Rách bìa, trang", upper: 70, lower: 50 },
+    { key: "50-0", label: "Hư nặng", upper: 50, lower: 0 },
+];
+
+function getConditionLabelFromNumber(n) {
+    if (n == null || isNaN(Number(n))) return "-";
+    const v = Number(n);
+    const found = CONDITION_RANGES.find((r) => v <= r.upper && v >= r.lower);
+    return found ? found.label : `${v}`;
+}
+
+function getRepresentativeFromNumber(n) {
+    if (n == null || isNaN(Number(n))) return null;
+    const v = Number(n);
+    const found = CONDITION_RANGES.find((r) => v <= r.upper && v >= r.lower);
+    return found ? found.upper : null;
 }
 
 // giống helper trong ReturnBulkDialog
@@ -72,6 +95,7 @@ export default function ReturnSingleDialog({
     const [returnDate, setReturnDate] = useState(() =>
         parseDateOnly(new Date().toISOString())
     );
+    // conditionReturn lưu số representative (100,90,70,50)
     const [conditionReturn, setConditionReturn] = useState(100);
     const [isLost, setIsLost] = useState(false);
     const [note, setNote] = useState("");
@@ -94,9 +118,10 @@ export default function ReturnSingleDialog({
     useEffect(() => {
         if (open && loanDetail) {
             setReturnDate(parseDateOnly(new Date().toISOString()));
+            // khởi tạo conditionReturn = representative của borrowCond nếu có
             setConditionReturn(
                 loanDetail?.conditionBorrow != null
-                    ? Number(loanDetail.conditionBorrow)
+                    ? (getRepresentativeFromNumber(Number(loanDetail.conditionBorrow)) ?? Number(loanDetail.conditionBorrow))
                     : 100
             );
             setIsLost(false);
@@ -173,7 +198,7 @@ export default function ReturnSingleDialog({
         if (!isLost) {
             const c = Number(conditionReturn);
             if (isNaN(c) || c < 0 || c > 100) {
-                setErrorMsg("Tình trạng trả phải là số từ 0 - 100");
+                setErrorMsg("Tình trạng trả không hợp lệ");
                 return;
             }
         }
@@ -234,14 +259,13 @@ export default function ReturnSingleDialog({
         }
     }
 
-    // ---------- AUTO PREVIEW chỉ khi toggle checkbox "Mất sách" ----------
+    // ---------- AUTO PREVIEW chỉ khi toggle checkbox "Mất sách" hoặc thay conditionReturn ----------
     useEffect(() => {
         if (!open) return;
         if (!loanDetail) return;
         if (!slipId) return;
         if (!returnDate) return;
 
-        // Chỉ tự động preview khi thay đổi isLost
         if (previewTimeoutRef.current) {
             clearTimeout(previewTimeoutRef.current);
         }
@@ -256,7 +280,7 @@ export default function ReturnSingleDialog({
             }
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [isLost, loanDetail, slipId, open]);
+    }, [isLost, conditionReturn, loanDetail, slipId, open]);
 
     // ---------- PREVIEW MANUAL (nếu vẫn muốn dùng nút) ----------
     async function handlePreview() {
@@ -281,7 +305,7 @@ export default function ReturnSingleDialog({
         if (!isLost) {
             const c = Number(conditionReturn);
             if (isNaN(c) || c < 0 || c > 100) {
-                setErrorMsg("Tình trạng trả phải là số từ 0 - 100");
+                setErrorMsg("Tình trạng trả không hợp lệ");
                 return;
             }
         }
@@ -540,24 +564,26 @@ export default function ReturnSingleDialog({
                                 sx={{ minWidth: 180 }}
                                 disabled
                             />
+                            {/* Thay input số bằng select hiển thị label nhưng lưu số representative */}
                             <TextField
-                                label="Tình trạng trả (0-100)"
-                                type="number"
-                                value={conditionReturn}
+                                label="Tình trạng trả"
+                                select
+                                value={String(conditionReturn ?? 100)}
                                 onChange={(e) => {
-                                    setConditionReturn(e.target.value);
+                                    const v = Number(e.target.value);
+                                    setConditionReturn(v);
                                 }}
                                 onBlur={() => doPreview({ showSnackbar: false })}
-                                onKeyDown={(e) => {
-                                    if (e.key === 'Enter') {
-                                        e.preventDefault();
-                                        doPreview({ showSnackbar: false });
-                                    }
-                                }}
+                                size="small"
                                 disabled={isLost}
-                                InputProps={{ inputProps: { min: 0, max: 100 } }}
-                                sx={{ width: 180 }}
-                            />
+                                sx={{ width: 220 }}
+                            >
+                                {CONDITION_RANGES.map((r) => (
+                                    <MenuItem key={r.key} value={r.upper}>
+                                        {r.label}
+                                    </MenuItem>
+                                ))}
+                            </TextField>
                             <FormControlLabel
                                 control={
                                     <Checkbox
@@ -571,6 +597,11 @@ export default function ReturnSingleDialog({
                             />
                         </Stack>
 
+                        {/* Cảnh báo nếu representative < 70 */}
+                        {!isLost && Number(conditionReturn) < 70 && (
+                            <Alert severity="warning">Lưu ý: ở mức dưới 70% sẽ tính phạt hư hỏng.</Alert>
+                        )}
+
                         <TextField
                             label="Ghi chú (tuỳ chọn)"
                             value={note}
@@ -583,7 +614,7 @@ export default function ReturnSingleDialog({
 
                         <Box>
                             <Typography variant="subtitle2">
-                                Tóm tắt phí 
+                                Tóm tắt phí
                             </Typography>
 
                             {!preview && !autoPreviewing && (
@@ -658,7 +689,7 @@ export default function ReturnSingleDialog({
                 </Button>
             </DialogActions>
 
-            {/* Dialog QR giống ReturnBulkDialog */} 
+            {/* Dialog QR giống ReturnBulkDialog */}
             <Dialog
                 open={showQr && !!pendingPayment}
                 onClose={() => setShowQr(false)}
