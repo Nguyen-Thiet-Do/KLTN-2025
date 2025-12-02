@@ -77,10 +77,10 @@ export default function SignUp() {
 
       setTimeout(() => {
         navigate('/login', { replace: true });
-      }, 1500);
+      }, 3000);
     };
 
-    window.addEventListener('payment_success', handlePaymentSuccess);
+    window.addEventListener('payment_success', handlePaymentSuccess); 
 
     return () => {
       window.removeEventListener('payment_success', handlePaymentSuccess);

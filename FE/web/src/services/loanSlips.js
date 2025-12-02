@@ -260,3 +260,40 @@ export async function createViolationPaymentForSlip(
 
   return res?.data ?? null;
 }
+
+
+/* ============================
+   ON-SITE APIs (FE client)
+   ============================ */
+
+/**
+ * createOnsiteLoanSlip
+ * POST /loans/admin/loans/onsite
+ * body: { readerId, librarianId, items: [{ documentCopyId, conditionBorrow? }], loanDate?, dueDate? }
+ */
+export async function createOnsiteLoanSlip(payload) {
+  try {
+    const res = await api.post("/loans/admin/loans/onsite", payload);
+    return res?.data ?? null;
+  } catch (err) {
+    // normalize error response if backend returned structured json
+    if (err?.response?.data) return err.response.data;
+    throw err;
+  }
+}
+
+/**
+ * finishOnsiteLoanSlip
+ * POST /loans/admin/loans/onsite/:loanSlipId/finish
+ * body: { librarianId, returnDate, items: [...] }
+ */
+export async function finishOnsiteLoanSlip(loanSlipId, payload) {
+  if (!loanSlipId) throw new Error("loanSlipId is required");
+  try {
+    const res = await api.post(`/loans/admin/loans/onsite/${loanSlipId}/finish`, payload);
+    return res?.data ?? null;
+  } catch (err) {
+    if (err?.response?.data) return err.response.data;
+    throw err;
+  }
+}

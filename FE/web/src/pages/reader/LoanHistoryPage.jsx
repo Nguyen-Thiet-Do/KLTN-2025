@@ -63,7 +63,7 @@ export default function LoanHistoryPage() {
     loadLoans();
   }, []);
 
-  // mở dialog huỷ cả phiếu (PENDING)
+  // mở dialog huỷ cả phiếu
   const handleOpenCancelLoan = (loan) => {
     setSelectedLoan(loan);
     setSelectedDetail(null);
@@ -71,7 +71,7 @@ export default function LoanHistoryPage() {
     setCancelDialogOpen(true);
   };
 
-  // mở dialog yêu cầu huỷ 1 dòng tài liệu (WAITING_FOR_PICKUP)
+  // mở dialog huỷ / yêu cầu huỷ 1 dòng tài liệu
   const handleOpenCancelDetail = (loan, detail) => {
     setSelectedLoan(loan);
     setSelectedDetail(detail);
@@ -106,14 +106,27 @@ export default function LoanHistoryPage() {
         body
       );
 
+      // chọn message phù hợp theo trạng thái + loại huỷ
+      let message = "Thao tác huỷ đã được ghi nhận.";
+
+      if (selectedDetail) {
+        if (selectedLoan.status === "PENDING") {
+          message = "Đã huỷ tài liệu khỏi phiếu đặt mượn.";
+        } else if (selectedLoan.status === "WAITING_FOR_PICKUP") {
+          message = "Đã gửi yêu cầu huỷ tài liệu cho thủ thư xử lý.";
+        }
+      } else {
+        if (selectedLoan.status === "PENDING") {
+          message = "Đã huỷ phiếu đặt mượn.";
+        } else if (selectedLoan.status === "WAITING_FOR_PICKUP") {
+          message = "Đã gửi yêu cầu huỷ phiếu cho thủ thư xử lý.";
+        }
+      }
+
       setSnackbar({
         open: true,
         type: "success",
-        message: selectedDetail
-          ? "Đã gửi yêu cầu huỷ tài liệu cho thủ thư xử lý."
-          : selectedLoan.status === "PENDING"
-            ? "Đã huỷ phiếu đặt mượn."
-            : "Đã gửi yêu cầu huỷ phiếu cho thủ thư xử lý.",
+        message,
       });
 
       setCancelDialogOpen(false);
@@ -141,24 +154,44 @@ export default function LoanHistoryPage() {
   const getDialogTitle = () => {
     if (!selectedLoan) return "";
     if (selectedDetail) {
-      return `Yêu cầu huỷ tài liệu trong phiếu #${selectedLoan.loanSlipId}`;
+      return `Huỷ / yêu cầu huỷ tài liệu trong phiếu #${selectedLoan.loanSlipId}`;
     }
     return `Huỷ / yêu cầu huỷ phiếu #${selectedLoan.loanSlipId}`;
   };
 
   const getDialogDescription = () => {
     if (!selectedLoan) return "";
+
+    // Huỷ / yêu cầu huỷ 1 tài liệu
     if (selectedDetail) {
-      return `Bạn muốn gửi yêu cầu huỷ tài liệu "${selectedDetail?.bookInfo?.title}"? ` +
-        `Thủ thư sẽ xem xét và xử lý.`;
+      if (selectedLoan.status === "PENDING") {
+        return (
+          `Tài liệu "${selectedDetail?.bookInfo?.title}" đang trong phiếu đặt chờ duyệt. ` +
+          `Bạn có thể huỷ tài liệu này khỏi phiếu. ` +
+          `Nếu đây là tài liệu cuối cùng trong phiếu, phiếu sẽ được huỷ luôn.`
+        );
+      }
+
+      if (selectedLoan.status === "WAITING_FOR_PICKUP") {
+        return (
+          `Bạn muốn gửi yêu cầu huỷ tài liệu "${selectedDetail?.bookInfo?.title}"? ` +
+          `Thủ thư sẽ xem xét và xử lý.`
+        );
+      }
+
+      return `Bạn muốn huỷ tài liệu "${selectedDetail?.bookInfo?.title}"?`;
     }
 
+    // Huỷ / yêu cầu huỷ cả phiếu
     if (selectedLoan.status === "PENDING") {
       return "Phiếu đang ở trạng thái CHỜ DUYỆT. Bạn có thể huỷ phiếu này hoàn toàn.";
     }
 
     if (selectedLoan.status === "WAITING_FOR_PICKUP") {
-      return "Phiếu đang CHỜ ĐẾN LẤY. Bạn không thể tự huỷ trực tiếp, hệ thống sẽ gửi yêu cầu để thủ thư xử lý.";
+      return (
+        "Phiếu đang CHỜ ĐẾN LẤY. Bạn không thể tự huỷ trực tiếp, " +
+        "hệ thống sẽ gửi yêu cầu để thủ thư xử lý."
+      );
     }
 
     return "Bạn muốn gửi yêu cầu huỷ cho phiếu này?";
@@ -238,6 +271,13 @@ export default function LoanHistoryPage() {
                   const doc = d.bookInfo;
                   const img = doc?.coverPhoto || "/no-image.png";
 
+                  const canRequestCancelDetail =
+                    loan.status === "WAITING_FOR_PICKUP" &&
+                    d.status === "WAITING_FOR_PICKUP";
+
+                  const canHardCancelDetail =
+                    loan.status === "PENDING" && d.status === "PENDING";
+
                   return (
                     <Stack
                       key={idx}
@@ -269,20 +309,8 @@ export default function LoanHistoryPage() {
                         sx={{ mr: 1 }}
                       />
 
-                      {/* nút yêu cầu huỷ từng tài liệu khi phiếu đang chờ đến lấy */}
-                      {loan.status === "WAITING_FOR_PICKUP" &&
-                        d.status === "WAITING_FOR_PICKUP" && (
-                          <Button
-                            variant="text"
-                            size="small"
-                            onClick={() => handleOpenCancelDetail(loan, d)}
-                          >
-                            Yêu cầu huỷ
-                          </Button>
-                        )}
-
-                      {/* nếu muốn, bạn có thể cho huỷ từng tài liệu khi PENDING:
-                      {loan.status === "PENDING" && d.status === "PENDING" && (
+                      {/* PENDING: huỷ thẳng 1 tài liệu trong phiếu đặt trước */}
+                      {canHardCancelDetail && (
                         <Button
                           variant="text"
                           size="small"
@@ -290,7 +318,18 @@ export default function LoanHistoryPage() {
                         >
                           Huỷ tài liệu
                         </Button>
-                      )} */}
+                      )}
+
+                      {/* WAITING_FOR_PICKUP: chỉ gửi yêu cầu huỷ 1 tài liệu */}
+                      {canRequestCancelDetail && (
+                        <Button
+                          variant="text"
+                          size="small"
+                          onClick={() => handleOpenCancelDetail(loan, d)}
+                        >
+                          Yêu cầu huỷ
+                        </Button>
+                      )}
                     </Stack>
                   );
                 })}

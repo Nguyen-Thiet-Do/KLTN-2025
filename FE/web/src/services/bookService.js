@@ -231,3 +231,11 @@ export async function deleteCopy(copyId) {
     const { data } = await api.delete(`/documents/admin/copies/${copyId}`);
     return data; // tuỳ BE
 }
+
+export async function updateCopy(copyId, payload) {
+    if (!copyId && copyId !== 0) throw new Error("Thiếu copyId");
+    const { data } = await api.put(`/documents/admin/copies/${copyId}`, payload);
+    return data;
+}
+
+

@@ -53,10 +53,15 @@ import CancelSlipDialog from "./CancelSlipDialog";
 import DeleteDetailDialog from "./DeleteDetailDialog";
 import { useAuth } from "../../contexts/AuthContext"; // điều chỉnh path nếu khác
 
+// IMPORT: two new dialogs (paste these files into same folder)
+import CreateOnsiteDialog from "./CreateOnsiteDialog";
+import OnsiteReturnDialog from "./OnsiteReturnDialog";
+
 const TABS = [
   { key: "PENDING", label: "Chờ duyệt" },
   { key: "WAITING_FOR_PICKUP", label: "Chờ đến lấy" },
   { key: "BORROWING", label: "Đang mượn" },
+  { key: "ON_SITE", label: "Đọc tại chỗ" }, // <-- new tab
   { key: "RETURNED", label: "Đã trả" },
   { key: "OVERDUE", label: "Quá hạn" },
 ];
@@ -74,7 +79,7 @@ function formatDate(d) {
 }
 
 function chipForSlipStatus(status) {
-  switch (status) {
+  switch (String(status || "").toUpperCase()) {
     case "PENDING":
       return (
         <Chip
@@ -100,6 +105,19 @@ function chipForSlipStatus(status) {
           label="Đang mượn"
           size="small"
           sx={{ fontWeight: 600 }}
+        />
+      );
+    case "ON_SITE":
+      return (
+        <Chip
+          color="secondary"
+          label="Đọc tại chỗ"
+          size="small"
+          sx={{
+            fontWeight: 600,
+            background: "linear-gradient(135deg,#FFB86B 0%, #FF7A59 100%)",
+            color: "white",
+          }}
         />
       );
     case "RETURNED":
@@ -132,7 +150,7 @@ function chipForSlipStatus(status) {
 }
 
 function chipForDetailStatus(status) {
-  switch (status) {
+  switch (String(status || "").toUpperCase()) {
     case "PENDING":
       return (
         <Chip
@@ -193,6 +211,7 @@ function Money({ value }) {
 
 /**
  * Dialog xem / thanh toán vi phạm cho 1 phiếu
+ * (giữ nguyên từ file gốc)
  */
 function ViolationDialog({
   open,
@@ -413,7 +432,7 @@ function ViolationDialog({
 
 /**
  * Row component
- * thêm props: onPickup, onDeleteDetail, isReturnedTab, onViewViolations
+ * thêm props: onPickup, onDeleteDetail, isReturnedTab, onViewViolations, onOpenFinishOnsite
  */
 function Row({
   row,
@@ -426,15 +445,13 @@ function Row({
   onDeleteDetail,
   isReturnedTab,
   onViewViolations,
+  onOpenFinishOnsite, // NEW
 }) {
   const [open, setOpen] = useState(false);
   const librarianName =
     row?.Librarian?.fullName || (row?.librarianId ? `#${row.librarianId}` : "-");
 
   // check phiếu có bất kỳ yêu cầu hủy nào:
-  // - hủy cả phiếu: [READER_CANCEL_REQUEST ...]
-  // - hủy 1 detail: [READER_CANCEL_DETAIL_REQUEST ...]
-  // - dự phòng: note của detail có [READER_CANCEL_REQUEST ...]
   const hasReaderCancelRequest =
     String(row.note || "").includes("[READER_CANCEL_REQUEST") ||
     String(row.note || "").includes("[READER_CANCEL_DETAIL_REQUEST") ||
@@ -442,13 +459,12 @@ function Row({
       String(d.note || "").includes("[READER_CANCEL_REQUEST")
     );
 
-
   // Gom tất cả Violation từ các LoanDetail của phiếu
   const allViolations = [];
   for (const d of row.details || []) {
     const vs = d.Violations || d.violations;
     if (Array.isArray(vs)) {
-      allViolations.push(...vs); // FIX: spread thay vì .vs
+      allViolations.push(...vs);
     }
   }
 
@@ -496,7 +512,7 @@ function Row({
         sx={
           hasReaderCancelRequest
             ? {
-              backgroundColor: "rgba(254, 215, 215, 0.6)", // hồng nhạt
+              backgroundColor: "rgba(254, 215, 215, 0.6)",
               borderLeft: "4px solid #E53E3E",
               "&:hover": {
                 backgroundColor: "rgba(252, 129, 129, 0.25)",
@@ -663,6 +679,19 @@ function Row({
               </Button>
             )}
 
+          {/* NEW: nếu phiếu là ON_SITE, show nút Kết thúc đọc */}
+          {String(row.status).toUpperCase() === "ON_SITE" && (
+            <Button
+              size="small"
+              variant="contained"
+              color="secondary"
+              sx={{ ml: 1 }}
+              onClick={() => onOpenFinishOnsite?.(row)}
+            >
+              Kết thúc đọc
+            </Button>
+          )}
+
           {isReturnedTab && hasViolations && (
             <Button
               size="small"
@@ -825,7 +854,6 @@ function Row({
                             </Typography>
                           </TableCell>
 
-                          {/* ⚡ Thêm chip báo yêu cầu huỷ tại đây */}
                           <TableCell>
                             <Stack direction="row" spacing={1} alignItems="center">
                               {chipForDetailStatus(d.status)}
@@ -861,6 +889,16 @@ function Row({
                           </TableCell>
 
                           <TableCell align="right">
+                            {["BORROWED", "OVERDUE"].includes(String(d.status).toUpperCase()) && (
+                              <Button
+                                size="small"
+                                variant="contained"
+                                onClick={() => onSingleReturn?.(row, d)}
+                                sx={{ mr: 1 }}
+                              >
+                                Trả
+                              </Button>
+                            )}
                             {row.status === "WAITING_FOR_PICKUP" && (
                               <Button
                                 size="small"
@@ -1035,6 +1073,11 @@ export default function Borrow() {
   const [violationPaying, setViolationPaying] = useState(false);
   const [violationPayment, setViolationPayment] = useState(null);
   const [violationPayError, setViolationPayError] = useState("");
+
+  // ----- NEW: states for On-site dialogs -----
+  const [openCreateOnsite, setOpenCreateOnsite] = useState(false);
+  const [openFinishOnsite, setOpenFinishOnsite] = useState(false);
+  const [selectedSlipForFinish, setSelectedSlipForFinish] = useState(null);
 
   const [tab, setTab] = useState("PENDING");
   const [page, setPage] = useState(1);
@@ -1279,6 +1322,38 @@ export default function Borrow() {
   // Lấy librarianId đã resolve để truyền vào dialog/hàm service khác
   const resolvedLibrarianId = resolveLibrarianId();
 
+  // ---------- NEW handlers for On-site flows ----------
+  function handleOpenCreateOnsite() {
+    if (!resolvedLibrarianId) {
+      alert("Không xác định librarianId. Đăng nhập thủ thư hoặc lưu librarianId vào session.");
+      return;
+    }
+    setOpenCreateOnsite(true);
+  }
+  function handleCloseCreateOnsite() {
+    setOpenCreateOnsite(false);
+  }
+  function handleCreatedOnsite() {
+    // reload list
+    load();
+  }
+
+  function handleOpenFinishOnsite(slip) {
+    if (!resolvedLibrarianId) {
+      alert("Không xác định librarianId. Đăng nhập thủ thư hoặc lưu librarianId vào session.");
+      return;
+    }
+    setSelectedSlipForFinish(slip);
+    setOpenFinishOnsite(true);
+  }
+  function handleCloseFinishOnsite() {
+    setSelectedSlipForFinish(null);
+    setOpenFinishOnsite(false);
+  }
+  function handleFinishedOnsite() {
+    load();
+  }
+
   return (
     <Box sx={{ p: 3 }}>
       <Box sx={{ mb: 4 }}>
@@ -1353,6 +1428,21 @@ export default function Borrow() {
                   }}
                 >
                   Tạo phiếu mượn
+                </Button>
+
+                {/* NEW: Tạo phiếu đọc tại chỗ */}
+                <Button
+                  variant="contained"
+                  color="warning"
+                  onClick={handleOpenCreateOnsite}
+                  sx={{
+                    borderRadius: 2,
+                    fontWeight: 700,
+                    height: 40,
+                    textTransform: "none",
+                  }}
+                >
+                  Tạo phiếu đọc tại chỗ
                 </Button>
 
                 <Button
@@ -1567,6 +1657,11 @@ export default function Borrow() {
                     }
                     isReturnedTab={tab === "RETURNED"}
                     onViewViolations={handleOpenViolationDialog}
+                    onOpenFinishOnsite={(slip) => {
+                      // open finish onsite dialog
+                      setSelectedSlipForFinish(slip);
+                      setOpenFinishOnsite(true);
+                    }}
                   />
                 ))
               )}
@@ -1712,6 +1807,28 @@ export default function Borrow() {
         paying={violationPaying}
         payError={violationPayError}
         onPay={handlePayViolations}
+      />
+
+      {/* ----------------- NEW: On-site dialogs ----------------- */}
+      <CreateOnsiteDialog
+        open={openCreateOnsite}
+        onClose={handleCloseCreateOnsite}
+        librarianId={resolvedLibrarianId}
+        onCreated={() => {
+          handleCloseCreateOnsite();
+          load();
+        }}
+      />
+
+      <OnsiteReturnDialog
+        open={openFinishOnsite}
+        onClose={handleCloseFinishOnsite}
+        slip={selectedSlipForFinish}
+        librarianId={resolvedLibrarianId}
+        onFinished={() => {
+          handleCloseFinishOnsite();
+          load();
+        }}
       />
     </Box>
   );

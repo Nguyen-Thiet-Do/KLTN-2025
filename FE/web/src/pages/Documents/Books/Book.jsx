@@ -1,3 +1,4 @@
+// Book.jsx (đã chỉnh sửa: thêm Edit/Delete copy dialogs & action buttons)
 import { useEffect, useMemo, useState } from "react";
 import {
   Box, Typography, Button, TextField, InputAdornment,
@@ -10,6 +11,8 @@ import {
   Refresh as RefreshIcon, KeyboardArrowDown as ArrowDownIcon,
   KeyboardArrowUp as ArrowUpIcon, MoreVert as MoreVertIcon,
 } from "@mui/icons-material";
+import EditIcon from "@mui/icons-material/Edit";
+import DeleteIcon from "@mui/icons-material/Delete";
 import { useSnackbar } from "notistack";
 import { getAllBooks, getBookCopies, addBookCopies, deleteBook } from "../../../services/bookService";
 import ButtonLoader from "../../../components/Loading/ButtonLoader";
@@ -18,6 +21,10 @@ import BookCreateDialog from "./BookCreateDialog";
 import AddCopyDialog from "./AddCopyDialog";
 import EditBookDialog from "./EditBookDialog";
 import DeleteBookDialog from "./DeleteBookDialog";
+
+// Dialogs để sửa / xóa bản sao (tạo file riêng như hướng dẫn trước)
+import EditCopyDialog from "./EditCopyDialog";
+import DeleteCopyDialog from "./DeleteCopyDialog";
 
 const ITEMS_PER_PAGE = 5;
 
@@ -73,9 +80,15 @@ export default function Book() {
   // Add-copy dialog
   const [addDlgOpen, setAddDlgOpen] = useState(false);
 
-  // Delete dialog
+  // Delete dialog (delete book)
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteRow, setDeleteRow] = useState(null);
+
+  // Edit/Delete copy dialogs & state
+  const [editCopyOpen, setEditCopyOpen] = useState(false);
+  const [editCopyRow, setEditCopyRow] = useState(null);
+  const [deleteCopyOpen, setDeleteCopyOpen] = useState(false);
+  const [deleteCopyRow, setDeleteCopyRow] = useState(null);
 
   const fetchAll = async () => {
     try {
@@ -239,6 +252,50 @@ export default function Book() {
     }
   };
 
+  // --- Handlers để mở dialog sửa/xóa bản sao ---
+  const openEditCopy = (copy, bookId) => {
+    setEditCopyRow({ ...copy, documentId: bookId });
+    setEditCopyOpen(true);
+  };
+  const openDeleteCopy = (copy, bookId) => {
+    setDeleteCopyRow({ ...copy, documentId: bookId });
+    setDeleteCopyOpen(true);
+  };
+
+  // --- Callback sau sửa bản sao: refresh copies của sách ---
+  const onCopyUpdated = async () => {
+    const bId = editCopyRow?.documentId;
+    if (!bId) return;
+    try {
+      setCopiesMap(p => ({ ...p, [bId]: { loading: true, error: "", data: null } }));
+      const fresh = await getBookCopies(bId);
+      setCopiesMap(p => ({ ...p, [bId]: { loading: false, error: "", data: fresh } }));
+    } catch (e) {
+      setCopiesMap(p => ({ ...p, [bId]: { loading: false, error: e.message || "Lỗi tải copies", data: null } }));
+    } finally {
+      setEditCopyOpen(false);
+      setEditCopyRow(null);
+    }
+  };
+
+  // --- Callback sau xoá bản sao: refresh copies + cập nhật số bản ---
+  const onCopyDeleted = async () => {
+    const bId = deleteCopyRow?.documentId;
+    if (!bId) return;
+    try {
+      setCopiesMap(p => ({ ...p, [bId]: { loading: true, error: "", data: null } }));
+      const fresh = await getBookCopies(bId);
+      setCopiesMap(p => ({ ...p, [bId]: { loading: false, error: "", data: fresh } }));
+      // Cập nhật số bản hiển thị ở bảng chính
+      setBooks(prev => prev.map(b => b.documentId === bId ? { ...b, numberOfCopy: fresh?.copies?.length ?? b.numberOfCopy } : b));
+    } catch (e) {
+      setCopiesMap(p => ({ ...p, [bId]: { loading: false, error: e.message || "Lỗi tải copies", data: null } }));
+    } finally {
+      setDeleteCopyOpen(false);
+      setDeleteCopyRow(null);
+    }
+  };
+
   return (
     <Box sx={{ p: 3 }}>
       <Box sx={{ mb: 4 }}>
@@ -353,6 +410,8 @@ export default function Book() {
                         onOpenDetail={() => openDetail(b)}
                         copiesState={copiesState}
                         onOpenMenu={(e) => openMenu(e, b)}
+                        openEditCopy={(c) => openEditCopy(c, b.documentId)}
+                        openDeleteCopy={(c) => openDeleteCopy(c, b.documentId)}
                       />
                     );
                   })
@@ -450,11 +509,27 @@ export default function Book() {
         onConfirm={handleDeleteConfirm}
         book={deleteRow}
       />
+
+      {/* Dialog sửa bản sao */}
+      <EditCopyDialog
+        open={editCopyOpen}
+        onClose={() => { setEditCopyOpen(false); setEditCopyRow(null); }}
+        copy={editCopyRow}
+        onUpdated={onCopyUpdated}
+      />
+
+      {/* Dialog xoá bản sao */}
+      <DeleteCopyDialog
+        open={deleteCopyOpen}
+        onClose={() => { setDeleteCopyOpen(false); setDeleteCopyRow(null); }}
+        copy={deleteCopyRow}
+        onDeleted={onCopyDeleted}
+      />
     </Box>
   );
 }
 
-function FragmentRow({ book, isOpen, onToggle, onOpenDetail, copiesState, onOpenMenu }) {
+function FragmentRow({ book, isOpen, onToggle, onOpenDetail, copiesState, onOpenMenu, openEditCopy, openDeleteCopy }) {
   const id = book.documentId;
 
   return (
@@ -530,7 +605,7 @@ function FragmentRow({ book, isOpen, onToggle, onOpenDetail, copiesState, onOpen
                       <TableCell>Trạng thái</TableCell>
                       <TableCell>Tình trạng</TableCell>
                       <TableCell>Ngày nhập</TableCell>
-                      <TableCell align="center" width={64}>Hành động</TableCell>
+                      <TableCell align="center" width={120}>Hành động</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
@@ -561,7 +636,14 @@ function FragmentRow({ book, isOpen, onToggle, onOpenDetail, copiesState, onOpen
                               </Stack>
                             </TableCell>
                             <TableCell>{dateStr}</TableCell>
-                            <TableCell align="center" width={64}>—</TableCell>
+                            <TableCell align="center" width={120}>
+                              <IconButton size="small" onClick={() => openEditCopy(c, book.documentId)} title="Sửa bản sao">
+                                <EditIcon fontSize="small" />
+                              </IconButton>
+                              <IconButton size="small" onClick={() => openDeleteCopy(c, book.documentId)} title="Xóa bản sao">
+                                <DeleteIcon fontSize="small" />
+                              </IconButton>
+                            </TableCell>
                           </TableRow>
                         );
                       })

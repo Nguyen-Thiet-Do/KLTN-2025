@@ -533,7 +533,7 @@ export default function ReturnSingleDialog({
 
                         <Box>
                             <Typography variant="subtitle2">
-                                Tóm tắt phí (từ API preview)
+                                Tóm tắt phí 
                             </Typography>
 
                             {!preview && !autoPreviewing && (
