@@ -264,13 +264,13 @@ export default function ReaderBalanceModal({ open, onClose, reader, onSuccess })
                 </Grid>
 
                 <Grid item xs={6}>
-                  <Typography variant="caption" sx={{ opacity: 0.8 }}>
+                  {/* <Typography variant="caption" sx={{ opacity: 0.8 }}>
                     Loại thẻ
                   </Typography>
                   <Typography variant="body1" sx={{ fontWeight: 600, mt: 0.5 }}>
                     {memberCard.cardType?.cardTypeName || 
                      memberCard.cardType?.typeName || "N/A"}
-                  </Typography>
+                  </Typography> */}
                 </Grid>
 
                 <Grid item xs={6}>
