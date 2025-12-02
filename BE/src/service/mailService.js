@@ -170,7 +170,6 @@ Cảm ơn bạn đã đăng ký thẻ thành viên tại Thư viện Book Tech.
 
 Chúng tôi xác nhận thẻ thành viên của bạn đã được phát hành thành công với thông tin:
 - Số thẻ: ${cardNumber}
-- Loại thẻ: ${cardTypeName}
 - Số tiền đã nộp: ${amount} VND
 - Ngày phát hành: ${issueDate}
 - Hạn sử dụng: ${expiryDate}
@@ -203,7 +202,6 @@ Trân trọng,
 
       <table style="width:100%; border-collapse:collapse; margin:12px 0;">
         <tr><td style="padding:8px; background:#f7f7f7; width:40%"><strong>Số thẻ</strong></td><td style="padding:8px;">${escapeHtml(cardNumber)}</td></tr>
-        <tr><td style="padding:8px; background:#f7f7f7;"><strong>Loại thẻ</strong></td><td style="padding:8px;">${escapeHtml(cardTypeName)}</td></tr>
         <tr><td style="padding:8px; background:#f7f7f7;"><strong>Số tiền đã nộp</strong></td><td style="padding:8px;">${escapeHtml(String(amount))} VND</td></tr>
         <tr><td style="padding:8px; background:#f7f7f7;"><strong>Ngày phát hành</strong></td><td style="padding:8px;">${escapeHtml(issueDate)}</td></tr>
         <tr><td style="padding:8px; background:#f7f7f7;"><strong>Hạn sử dụng</strong></td><td style="padding:8px;">${escapeHtml(expiryDate)}</td></tr>

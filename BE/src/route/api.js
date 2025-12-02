@@ -205,6 +205,64 @@ routeApi.get('/', (req, res) => {
           },
           {
             method: 'POST',
+            path: '/api/member-cards/topup',
+            description: 'Tạo yêu cầu nạp tiền để làm đầy số dư mặc định của thẻ',
+            detailedDescription: 'Endpoint này tạo một payment (PayOS) nhằm nạp thêm tiền để thẻ đạt **đủ số dư mặc định ban đầu** của loại thẻ. Thao tác sẽ: (1) kiểm tra memberCard hiện tại; (2) tính số tiền còn thiếu = targetBalance - currentBalance; (3) nếu missing <= 0 trả về thông báo đã đủ; (4) nếu cần thanh toán, tạo payment record và trả về checkoutUrl/qrCode. Sau khi người dùng thanh toán, webhook PayOS sẽ tự động cập nhật balance cho thẻ.',
+            auth: true,
+            body: {
+              memberCardId: 'number (required) - ID thẻ cần nạp. Nếu không có, server có thể dùng readerId để tìm thẻ mặc định',
+              readerId: 'number (optional) - ID độc giả (dùng để tìm thẻ nếu memberCardId không truyền)',
+              // chú ý: client chỉ cần 1 trong 2; server cần kiểm tra quyền sở hữu thẻ
+            },
+            response: {
+              success: {
+                created: {
+                  ok: true,
+                  paymentId: 'number - ID bản ghi payment vừa tạo',
+                  orderCode: 'number - Mã đơn hàng (timestamp)',
+                  amount: 'number - Số tiền cần thanh toán (số tiền còn thiếu)',
+                  checkoutUrl: 'string - Link thanh toán PayOS (nếu có)',
+                  qrCode: 'string - QR code để quét (nếu PayOS trả về)',
+                  message: 'string - "PAYMENT_CREATED"'
+                },
+                already_sufficient: {
+                  ok: true,
+                  message: 'CARD_ALREADY_SUFFICIENT - Thẻ đã có đủ số dư mặc định',
+                  currentBalance: 'number',
+                  targetBalance: 'number'
+                }
+              },
+              error: {
+                MISSING_MEMBER_CARD: 'Thiếu memberCardId và không tìm thấy thẻ cho readerId',
+                MEMBER_CARD_NOT_FOUND: 'Không tìm thấy memberCard',
+                UNAUTHORIZED: 'Người dùng không có quyền thao tác lên thẻ này',
+                PAYOS_CREATE_FAILED: 'Không tạo được link thanh toán PayOS',
+                INTERNAL_ERROR: 'Lỗi server'
+              }
+            },
+            example: {
+              request: {
+                memberCardId: 68
+              },
+              response_created: {
+                ok: true,
+                paymentId: 523,
+                orderCode: 1769999999999,
+                amount: 50000,
+                checkoutUrl: 'https://pay.payos.vn/web/xxxxxxxx',
+                qrCode: '0002010102...'
+              },
+              response_already: {
+                ok: true,
+                message: 'CARD_ALREADY_SUFFICIENT',
+                currentBalance: 150000,
+                targetBalance: 150000
+              }
+            },
+            note: '⚠️ Sau khi user thanh toán qua PayOS, webhook tại /api/payos/webhook sẽ update balance cho memberCard. Endpoint yêu cầu user đã đăng nhập; server cần kiểm tra quyền sở hữu thẻ và đảm bảo idempotency (không cộng tiền nhiều lần nếu webhook retry).'
+          },
+          {
+            method: 'POST',
             path: '/api/auth/login',
             description: 'Đăng nhập vào hệ thống (dành cho Admin và Thủ thư)',
             detailedDescription: 'Endpoint đăng nhập cho Admin (roleId=1) và Librarian/Thủ thư (roleId=2). Sử dụng email và password để xác thực. Trả về access token (hết hạn sau 1 giờ), refresh token (hết hạn sau 7 ngày) và thông tin profile đầy đủ của người dùng.',
@@ -494,12 +552,12 @@ routeApi.get('/', (req, res) => {
             description: 'Cập nhật thông tin tài khoản (email, phoneNumber, password)',
             auth: true,
             role: 'Reader (roleId = 3)',
-           body: {
-  email: 'string (optional)',
-  phoneNumber: 'string (optional)',
-  oldPassword: 'string (optional - bắt buộc khi đổi mật khẩu)',
-  newPassword: 'string (optional - mật khẩu mới)'
-},
+            body: {
+              email: 'string (optional)',
+              phoneNumber: 'string (optional)',
+              oldPassword: 'string (optional - bắt buộc khi đổi mật khẩu)',
+              newPassword: 'string (optional - mật khẩu mới)'
+            },
 
             response: {
               success: 'boolean',

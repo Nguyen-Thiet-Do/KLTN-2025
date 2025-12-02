@@ -322,6 +322,138 @@ async function runNotificationJob() {
   } catch (err) {
     console.error('[notificationJob] runNotificationJob REMINDER error', err);
   }
+  // -----------------------
+  // AUTO-CANCEL: HỦY phiếu WAITING_FOR_PICKUP > 3 ngày (không đến lấy)
+  // Chèn phần này **sau** phần REMINDER và **trước** phần OVERDUE.
+  // -----------------------
+  try {
+    console.log('[notificationJob] checking WAITING_FOR_PICKUP slips older than 3 days');
+
+    // today đã được lấy ở trên: const today = fmtToday();
+    // Tính cutoff = today - 3 ngày (dùng UTC midnight/parseDateOnlyToDate để consistent)
+    const partsCut = today.split('-').map(p => parseInt(p, 10));
+    // create UTC date for today then subtract 3 days
+    const cutoffDt = new Date(Date.UTC(partsCut[0], partsCut[1] - 1, partsCut[2]));
+    cutoffDt.setUTCDate(cutoffDt.getUTCDate() - 3);
+    const cutoffDate = cutoffDt.toISOString().slice(0, 10); // YYYY-MM-DD
+
+    console.log('[notificationJob] auto-cancel cutoffDate =', cutoffDate);
+
+    // Tìm các LoanSlip có status WAITING_FOR_PICKUP và LoanSlip.created_at <= cutoffDate
+    const waitingSlips = await LoanSlip.findAll({
+      where: {
+        status: 'WAITING_FOR_PICKUP',
+        deleted: 0,
+        [Op.and]: [
+          // quan trọng: nêu rõ alias bảng LoanSlip để tránh ambiguous column
+          sequelize.where(fn('DATE', col('LoanSlip.created_at')), { [Op.lte]: cutoffDate })
+        ]
+      },
+      include: [{ model: Reader }]
+    });
+
+    console.log('[notificationJob] waiting_for_pickup to cancel count =', Array.isArray(waitingSlips) ? waitingSlips.length : waitingSlips);
+
+    // counters & accumulator for summary
+    let cancelledCount = 0;
+    const cancelledIds = [];
+
+    for (const slip of waitingSlips) {
+      try {
+        console.log('[notificationJob] auto-cancelling slip', slip.loanSlipId, 'created_at', slip.created_at);
+
+        // 1) Cập nhật trạng thái phiếu sang CANCELLED và thêm note
+        await slip.update({
+          status: 'CANCELLED',
+          note: (slip.note || '') + `\n[AUTO] Cancelled on ${today} - not picked up within 3 days`
+        });
+        console.log('[notificationJob] slip updated -> CANCELLED', slip.loanSlipId);
+
+        // mark for summary
+        cancelledCount++;
+        cancelledIds.push(slip.loanSlipId);
+
+        // 2) Tạo notification cho độc giả
+        const title = `Phiếu đặt trước #${slip.loanSlipId} đã bị hủy`;
+        const content = `Phiếu #${slip.loanSlipId} đã bị hủy tự động. Lý do: Không đến lấy trong vòng 3 ngày.`;
+        const notif = await createNotificationRow({
+          readerId: slip.readerId,
+          type: 'RESERVATION_CANCELLED',
+          title,
+          content,
+          link: `/loan/${slip.loanSlipId}`
+        });
+        console.log('[notificationJob] created notification id=', notif.notificationID, 'for slip', slip.loanSlipId);
+
+        // 3) Emit realtime (best-effort)
+        try {
+          emitToUser(slip.readerId, 'notification:new', {
+            notificationID: notif.notificationID,
+            type: notif.type,
+            title: notif.title,
+            content: notif.content,
+            isRead: notif.isRead,
+            created_at: notif.created_at
+          });
+        } catch (emitErr) {
+          console.warn('[notificationJob] emit notification:new failed for auto-cancel', emitErr?.message || emitErr);
+        }
+
+        // 4) Gửi email thông báo (nếu có)
+        let toEmail = null;
+        try {
+          if (slip.Reader?.accountId) {
+            const acct = await Account.findByPk(slip.Reader.accountId, { attributes: ['email'] });
+            toEmail = acct?.email || null;
+          }
+        } catch (acctErr) {
+          console.warn('[notificationJob] account lookup error for auto-cancel', acctErr?.message || acctErr);
+        }
+        toEmail = toEmail || (slip.Reader && slip.Reader.email) || null;
+
+        if (toEmail) {
+          const items = await buildItemsForSlip(slip.loanSlipId);
+          const itemsHtml = (items || []).map(it => `<li>${escapeHtml(it.title || `Tài liệu #${it.documentId}`)}${it.documentCopyId ? ` (Bản sao #${it.documentCopyId})` : ''}</li>`).join('');
+          const html = `
+          <!doctype html>
+          <html><body style="font-family:Arial,sans-serif;color:#333">
+            <h3>Thông báo: Phiếu đặt trước #${slip.loanSlipId} đã bị hủy</h3>
+            <p>Chào <strong>${escapeHtml(slip.Reader?.fullName || 'Độc giả')}</strong>,</p>
+            <p>Phiếu đặt trước #${slip.loanSlipId} của bạn đã bị <strong>hủy tự động</strong> vì bạn <strong>không đến lấy</strong> trong vòng 3 ngày kể từ khi được duyệt.</p>
+            <p><strong>Danh sách tài liệu:</strong></p><ul>${itemsHtml}</ul>
+            <p>Lý do hủy: Không đến lấy.</p>
+            <p>Nếu cần trợ giúp, liên hệ: ${escapeHtml(process.env.SUPPORT_EMAIL || '')}</p>
+          </body></html>
+        `;
+          const text = `Phiếu #${slip.loanSlipId} đã bị hủy tự động. Lý do: Không đến lấy.\n\nDanh sách:\n${(items || []).map(it => `- ${it.title || ('Tài liệu #' + it.documentId)}`).join('\n')}`;
+
+          await sendEmailAndMarkNotification(notif, toEmail, `Phiếu đặt trước #${slip.loanSlipId} — Đã bị hủy (Không đến lấy)`, html, text);
+          console.log('[notificationJob] sent auto-cancel email for slip', slip.loanSlipId, 'to', toEmail);
+        } else {
+          // nếu không có email, gắn NO_EMAIL vào content để dễ debug
+          try {
+            await notif.update({ content: (notif.content || '') + '\n\nNO_EMAIL' });
+          } catch (uErr) {
+            console.warn('[notificationJob] fail to update notif content NO_EMAIL', uErr?.message || uErr);
+          }
+          console.warn('[notificationJob] No email for readerId=', slip.readerId, 'loanSlip=', slip.loanSlipId);
+        }
+
+      } catch (innerErr) {
+        console.error('[notificationJob] error auto-cancelling slip', slip.loanSlipId, innerErr?.message || innerErr);
+      }
+    } // end for waitingSlips
+
+    // Summary log for AUTO-CANCEL run
+    console.log(`[notificationJob] AUTO-CANCEL SUMMARY: totalCancelled = ${cancelledCount}, ids = ${JSON.stringify(cancelledIds)}`);
+
+  } catch (err) {
+    console.error('[notificationJob] error checking/cancelling WAITING_FOR_PICKUP slips', err?.message || err);
+  }
+  // -----------------------
+  // END AUTO-CANCEL
+  // -----------------------
+
 
   // 2) Overdue notices: BORROWING slips with dueDate < today and overdueDays in [1..30], send every 3 days (1,4,7,...)
   try {

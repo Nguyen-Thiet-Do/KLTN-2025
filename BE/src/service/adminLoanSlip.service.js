@@ -4629,6 +4629,203 @@ async function createViolationPaymentForSlipService(loanSlipId, rawLibrarianId) 
   });
 }
 
+async function createOnsiteLoanSlipService(body = {}) {
+  const { readerId, librarianId, items = [], loanDate, dueDate } = body;
+
+  if (!readerId || !librarianId || !Array.isArray(items) || items.length === 0) {
+    const e = new Error('Thiếu dữ liệu: readerId, librarianId, items');
+    e.status = 400; throw e;
+  }
+
+  if (items.length > MAX_ITEMS_PER_SLIP) {
+    const e = new Error(`Mỗi phiếu chỉ được mượn tối đa ${MAX_ITEMS_PER_SLIP} tài liệu`);
+    e.status = 400; throw e;
+  }
+
+  const loanDateStr = loanDate || fmtToday();
+  const dueDateStr = dueDate || loanDateStr;
+  if (!parseDateOnly(loanDateStr) || !parseDateOnly(dueDateStr)) {
+    const e = new Error('Định dạng loanDate/dueDate không hợp lệ (YYYY-MM-DD)');
+    e.status = 400; throw e;
+  }
+
+  const copyIds = items.map(i => Number(i.documentCopyId));
+  if (new Set(copyIds).size !== copyIds.length) {
+    const e = new Error('Danh sách documentCopyId không được lặp');
+    e.status = 400; throw e;
+  }
+
+  return await sequelize.transaction(async (t) => {
+    const reader = await Reader.findByPk(readerId, { transaction: t });
+    if (!reader) { const e = new Error('Không tìm thấy độc giả'); e.status = 404; throw e; }
+
+    const librarian = await Librarian.findByPk(librarianId, { transaction: t });
+    if (!librarian) { const e = new Error('Không tìm thấy thủ thư'); e.status = 404; throw e; }
+
+    // optional: require a valid active member card (adjust policy if needed)
+    const memberCard = await MemberCard.findOne({
+      where: { readerId, deleted: false, status: 'ACTIVE' },
+      transaction: t,
+      lock: t.LOCK.UPDATE
+    });
+    if (!memberCard) {
+      const e = new Error('Độc giả chưa có thẻ hợp lệ (MemberCard).');
+      e.status = 403; throw e;
+    }
+
+    const copies = await DocumentCopy.findAll({
+      where: { documentCopyId: copyIds },
+      transaction: t,
+      lock: t.LOCK.UPDATE
+    });
+    if (copies.length !== copyIds.length) {
+      const e = new Error('Có bản sao không tồn tại');
+      e.status = 400; throw e;
+    }
+
+    for (const c of copies) {
+      if (String(c.status || '').toUpperCase() !== 'AVAILABLE') {
+        const e = new Error(`Bản sao #${c.documentCopyId} không sẵn sàng: ${c.status}`);
+        e.status = 400; throw e;
+      }
+    }
+
+    // prevent two copies of same document in one slip
+    const docIds = copies.map(c => Number(c.documentId));
+    if (new Set(docIds).size !== docIds.length) {
+      const e = new Error('Không được mượn 2 bản sao của cùng một đầu sách trong cùng 1 phiếu');
+      e.status = 400; throw e;
+    }
+
+    const slip = await LoanSlip.create({
+      readerId,
+      librarianId,
+      loanDate: loanDateStr,
+      dueDate: dueDateStr,
+      status: 'ON_SITE',
+      deleted: false
+    }, { transaction: t });
+
+    for (const it of items) {
+      const copyId = Number(it.documentCopyId);
+      const condBorrow = sanitizeBorrowCondition(it.conditionBorrow);
+
+      await LoanDetail.create({
+        loanSlipId: slip.loanSlipId,
+        documentCopyId: copyId,
+        status: 'BORROWED',
+        conditionBorrow: condBorrow,
+        conditionReturn: null,
+        returnDate: null,
+        depositAmount: 0,
+        fineAmount: 0,
+        note: it.note || null
+      }, { transaction: t });
+
+      await DocumentCopy.update(
+        { status: 'BORROWED' },
+        { where: { documentCopyId: copyId }, transaction: t }
+      );
+    }
+
+    try {
+      await createNotificationSafe({
+        readerId,
+        type: 'ON_SITE_ISSUED',
+        title: `Phiếu đọc tại chỗ #${slip.loanSlipId} tạo thành công`,
+        content: `Số lượng: ${items.length}`,
+        priority: 'NORMAL',
+        link: `/loan/${slip.loanSlipId}`
+      }, t);
+    } catch (n) { /* ignore */ }
+
+    return { loanSlip: slip, message: 'Phiếu đọc tại chỗ được tạo.' };
+  });
+}
+
+async function finishOnsiteLoanSlipService({ loanSlipId, returnDate, items = [], librarianId } = {}) {
+  if (!loanSlipId || !returnDate || !Array.isArray(items) || items.length === 0 || !librarianId) {
+    const e = new Error('Thiếu dữ liệu: loanSlipId, returnDate, items, librarianId');
+    e.status = 400; throw e;
+  }
+  if (!parseDateOnly(returnDate)) {
+    const e = new Error('returnDate không hợp lệ (YYYY-MM-DD)');
+    e.status = 400; throw e;
+  }
+
+  return await sequelize.transaction(async (t) => {
+    const slip = await LoanSlip.findByPk(Number(loanSlipId), {
+      include: [{ model: LoanDetail, as: 'details', include: [{ model: DocumentCopy, include: [Document] }] }],
+      transaction: t,
+      lock: t.LOCK.UPDATE
+    });
+
+    if (!slip) { const e = new Error('Không tìm thấy phiếu'); e.status = 404; throw e; }
+    if (String(slip.status || '').toUpperCase() !== 'ON_SITE') {
+      const e = new Error('Phiếu không ở trạng thái ON_SITE'); e.status = 409; throw e;
+    }
+
+    const mapItems = new Map(items.map(it => [Number(it.loanDetailId), it]));
+    const processed = [];
+
+    for (const d of slip.details || []) {
+      const item = mapItems.get(Number(d.loanDetailId));
+      if (!item) continue;
+
+      if (String((d.status || '').toUpperCase()) !== 'BORROWED' || d.returnDate) continue;
+
+      const condReturn = item.isLost ? null : sanitizeBorrowCondition(item.conditionReturn);
+      const isLost = !!item.isLost;
+
+      await LoanDetail.update(
+        { status: 'RETURNED', returnDate, conditionReturn: condReturn },
+        { where: { loanDetailId: d.loanDetailId }, transaction: t }
+      );
+
+      if (!isLost) {
+        await DocumentCopy.update(
+          { status: 'AVAILABLE' },
+          { where: { documentCopyId: d.documentCopyId }, transaction: t }
+        );
+      } else {
+        await DocumentCopy.update(
+          { status: 'LOST' },
+          { where: { documentCopyId: d.documentCopyId }, transaction: t }
+        );
+        const doc = d.DocumentCopy?.Document || null;
+        const coverPrice = doc?.coverPrice || 0;
+        const fineAmount = Math.round(coverPrice || 0);
+        await Violation.create({
+          readerId: slip.readerId,
+          loanDetailId: d.loanDetailId,
+          type: 'LOST',
+          violationDescription: `Báo mất bản sao #${d.documentCopyId}`,
+          fineAmount,
+          paymentStatus: 'UNPAID',
+          librarianId
+        }, { transaction: t });
+      }
+
+      processed.push({ loanDetailId: d.loanDetailId, documentCopyId: d.documentCopyId, isLost });
+    }
+
+    slip.status = 'RETURNED';
+    await slip.save({ transaction: t });
+
+    try {
+      await createNotificationSafe({
+        readerId: slip.readerId,
+        type: 'ON_SITE_FINISHED',
+        title: `Phiếu đọc tại chỗ #${slip.loanSlipId} đã kết thúc`,
+        content: `Số mục xử lý: ${processed.length}`,
+        priority: 'NORMAL',
+        link: `/loan/${slip.loanSlipId}`
+      }, t);
+    } catch (n) { /* ignore */ }
+
+    return { loanSlipId: slip.loanSlipId, processed, message: 'Kết thúc phiên đọc tại chỗ thành công.' };
+  });
+}
 
 module.exports = {
   getAllLoanSlipsService,
@@ -4649,5 +4846,7 @@ module.exports = {
   previewBulkReturnFinesService,
   initBulkReturnPaymentService,
   confirmBulkReturnAfterPaymentService,
-  createViolationPaymentForSlipService
+  createViolationPaymentForSlipService,
+  createOnsiteLoanSlipService,
+  finishOnsiteLoanSlipService
 };

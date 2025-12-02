@@ -93,11 +93,16 @@ router.post(
 // 4) TẠO PAYOS PAYMENT CHO VI PHẠM CHƯA THANH TOÁN CỦA PHIẾU
 // POST /api/loans/admin/violations/slips/:loanSlipId/pay
 router.post(
-  '/violations/slips/:loanSlipId/pay',
-  requireAuth,
-  requireRole([1, 2]),
-  controller.createViolationPaymentForSlip
+    '/violations/slips/:loanSlipId/pay',
+    requireAuth,
+    requireRole([1, 2]),
+    controller.createViolationPaymentForSlip
 );
 
+// Tạo phiếu đọc tại chỗ (thủ thư/admin)
+router.post('/loans/onsite', requireAuth, requireRole([1, 2]), controller.createOnsiteLoanSlip);
+
+// Kết thúc phiên đọc tại chỗ (thủ thư xác nhận trả)
+router.post('/loans/onsite/:loanSlipId/finish', requireAuth, requireRole([1, 2]), controller.finishOnsiteLoanSlip);
 
 module.exports = router;

@@ -57,6 +57,7 @@ const cartRoutes = require("./route/cartRoutes");
 const favoriteRoutes = require("./route/favoriteRoutes");
 const paymentRoutes = require('./route/payment');
 const chatRoutes = require("./route/chat.route");
+const memberCardRoutes = require("./route/memberCard.routes");
 
 // ============================================================
 // CORS CONFIGURATION
@@ -121,6 +122,7 @@ app.use("/api/favorite", favoriteRoutes);
 app.use("/api/auth/forgot", forgotRoute);
 app.use('/api', paymentRoutes);
 app.use("/api/chat", chatRoutes);
+app.use('/api/member-cards', memberCardRoutes);
 // ============================================================
 // HEALTH CHECK
 // ============================================================

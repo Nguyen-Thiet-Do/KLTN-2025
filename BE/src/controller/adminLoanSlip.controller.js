@@ -16,7 +16,9 @@ const {
   previewBulkReturnFinesService,
   initBulkReturnPaymentService,
   confirmBulkReturnAfterPaymentService,
-  createViolationPaymentForSlipService
+  createViolationPaymentForSlipService,
+  createOnsiteLoanSlipService,
+  finishOnsiteLoanSlipService
 } = require('../service/adminLoanSlip.service');
 
 exports.getAllLoanSlips = async (req, res) => {
@@ -553,6 +555,44 @@ exports.createViolationPaymentForSlip = async (req, res) => {
     });
   }
 };
+// POST /api/loans/admin/loans/onsite
+exports.createOnsiteLoanSlip = async (req, res) => {
+  try {
+    const payload = req.body || {};
+    const result = await createOnsiteLoanSlipService(payload);
+    return res.status(201).json({ success: true, ...result });
+  } catch (err) {
+    const code = err.status || 500;
+    return res.status(code).json({
+      success: false,
+      message: 'Lỗi tạo phiếu đọc tại chỗ',
+      error: err.message,
+      details: err.details || null
+    });
+  }
+};
 
+// POST /api/loans/admin/loans/onsite/:loanSlipId/finish
+exports.finishOnsiteLoanSlip = async (req, res) => {
+  try {
+    const { loanSlipId } = req.params;
+    const payload = {
+      loanSlipId: Number(loanSlipId),
+      returnDate: req.body.returnDate,
+      items: req.body.items,
+      librarianId: Number(req.body.librarianId)
+    };
+    const result = await finishOnsiteLoanSlipService(payload);
+    return res.json({ success: true, ...result });
+  } catch (err) {
+    const code = err.status || 500;
+    return res.status(code).json({
+      success: false,
+      message: 'Lỗi kết thúc phiếu đọc tại chỗ',
+      error: err.message,
+      details: err.details || null
+    });
+  }
+};
 
 module.exports = exports;
