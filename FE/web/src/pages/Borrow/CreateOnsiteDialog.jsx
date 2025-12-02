@@ -340,7 +340,7 @@ export default function CreateOnsiteDialog({ open, onClose, onCreated }) {
                                 />
                             </Grid>
 
-                            <Grid item xs={6} md={2}>
+                            <Grid item xs={6} md={2} sx={{ display: "none" }}>
                                 <TextField
                                     label="Hạn (tuỳ chọn)"
                                     type="date"
