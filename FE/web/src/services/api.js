@@ -79,7 +79,7 @@ api.interceptors.response.use(
         return api(original);
       } catch (e) {
         sessionStorage.clear();
-        if (!skipRefresh) window.location.href = "/login";
+        // if (!skipRefresh) window.location.href = "/login";
         return Promise.reject(new Error(pickMessage(e)));
       }
     }

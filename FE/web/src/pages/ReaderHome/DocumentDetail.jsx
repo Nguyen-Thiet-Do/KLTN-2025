@@ -8,7 +8,7 @@ import {
   Box, Stack, Typography, Chip, Divider, Button,
   Alert, Paper, Breadcrumbs, Link, Snackbar,
   Rating, TextField, Dialog, DialogTitle, DialogContent,
-  DialogActions, Avatar, IconButton
+  DialogActions, Avatar, IconButton, Pagination
 } from "@mui/material";
 
 import {
@@ -80,20 +80,27 @@ export default function DocumentDetail() {
   const [reviews, setReviews] = useState([]);
   const [reviewStats, setReviewStats] = useState({ averageRating: 0, totalReviews: 0 });
   const [loadingReviews, setLoadingReviews] = useState(false);
+  
+  // ✅ PAGINATION STATES
+  const [currentPage, setCurrentPage] = useState(1);
+  const [reviewsPerPage] = useState(3);
+  
   const [reviewDialog, setReviewDialog] = useState(false);
   const [reviewForm, setReviewForm] = useState({ rating: 5, comment: "" });
   const [editingReview, setEditingReview] = useState(null);
   const [myReview, setMyReview] = useState(null);
-const getCurrentAccountId = () => {
-  try {
-    const accountStr = sessionStorage.getItem("account");
-    if (!accountStr) return null;
-    const account = JSON.parse(accountStr);
-    return account?.accountId ? Number(account.accountId) : null;
-  } catch {
-    return null;
-  }
-};
+
+  const getCurrentAccountId = () => {
+    try {
+      const accountStr = sessionStorage.getItem("account");
+      if (!accountStr) return null;
+      const account = JSON.parse(accountStr);
+      return account?.accountId ? Number(account.accountId) : null;
+    } catch {
+      return null;
+    }
+  };
+
   const [snack, setSnack] = useState({
     open: false,
     message: "",
@@ -180,7 +187,7 @@ const getCurrentAccountId = () => {
     } catch { }
   };
 
-  // ✅ Load reviews với conversion Number rõ ràng
+  // ✅ Load reviews với pagination reset
   const loadReviews = async () => {
     setLoadingReviews(true);
     try {
@@ -192,25 +199,12 @@ const getCurrentAccountId = () => {
         
         setReviews(reviewList);
         setReviewStats(stats);
+        setCurrentPage(1); // ✅ Reset về trang 1
 
-        // ✅ CRITICAL: Lấy userId và debug
-        const userIdRaw = sessionStorage.getItem("accountId");
-        const accountIdRaw = sessionStorage.getItem("accountId");
-        
-        console.log("🔐 SessionStorage Debug:", {
-          userId: userIdRaw,
-          accountId: accountIdRaw,
-          userIdType: typeof userIdRaw,
-          accountIdType: typeof accountIdRaw
-        });
-        
-        // ✅ Ưu tiên accountId, fallback về userId
- const currentAccountId = getCurrentAccountId();
-
+        const currentAccountId = getCurrentAccountId();
         
         console.log("🔍 Current AccountId:", currentAccountId, `(type: ${typeof currentAccountId})`);
         
-        // Debug tất cả reviews
         console.log("📋 All Reviews Data:");
         reviewList.forEach((r, idx) => {
           const readerAccId = Number(r.Reader?.accountId);
@@ -227,11 +221,10 @@ const getCurrentAccountId = () => {
           });
         });
         
-
-const userReview = reviewList.find(r => 
-  Number(r.Reader?.accountId) === currentAccountId || 
-  Number(r.readerAccountId) === currentAccountId
-);
+        const userReview = reviewList.find(r => 
+          Number(r.Reader?.accountId) === currentAccountId || 
+          Number(r.readerAccountId) === currentAccountId
+        );
         
         setMyReview(userReview || null);
         
@@ -264,14 +257,25 @@ const userReview = reviewList.find(r =>
     };
   }, [id]);
 
-  const openEbook = async () => {
-    try {
-      const { ebookUrl } = await documentApi.getEbookUrl(Number(id));
-      if (ebookUrl) navigate(`/reader/ebook/${id}`);
-    } catch {
-      alert("Không lấy được URL ebook");
-    }
-  };
+const openEbook = async () => {
+  const token = sessionStorage.getItem("accessToken");
+
+  if (!token) {
+    setSnack({
+      open: true,
+      message: "Vui lòng đăng nhập để đọc ebook!",
+      severity: "error"
+    });
+    return;
+  }
+
+  try {
+    const { ebookUrl } = await documentApi.getEbookUrl(Number(id));
+    if (ebookUrl) navigate(`/reader/ebook/${id}`);
+  } catch {
+    alert("Không lấy được URL ebook");
+  }
+};
 
   const addToCart = async () => {
     const token = sessionStorage.getItem("accessToken");
@@ -345,7 +349,6 @@ const userReview = reviewList.find(r =>
     }
   };
 
-  // Review handlers
   const handleOpenReviewDialog = (review = null) => {
     const token = sessionStorage.getItem("accessToken");
 
@@ -374,10 +377,9 @@ const userReview = reviewList.find(r =>
     setReviewForm({ rating: 5, comment: "" });
   };
 
-  // ✅ Submit review
   const handleSubmitReview = async () => {
     try {
-    const currentAccountId = getCurrentAccountId();
+      const currentAccountId = getCurrentAccountId();
       
       if (editingReview) {
         console.log("📝 Updating review:", editingReview.reviewId);
@@ -419,7 +421,6 @@ const userReview = reviewList.find(r =>
     }
   };
 
-  // ✅ Delete review
   const handleDeleteReview = async (reviewId) => {
     const confirmed = window.confirm(
       "Bạn có chắc chắn muốn xóa đánh giá này?\n\nHành động này không thể hoàn tác."
@@ -449,6 +450,21 @@ const userReview = reviewList.find(r =>
         severity: "error",
       });
     }
+  };
+
+  // ✅ PAGINATION LOGIC
+  const indexOfLastReview = currentPage * reviewsPerPage;
+  const indexOfFirstReview = indexOfLastReview - reviewsPerPage;
+  const currentReviews = reviews.slice(indexOfFirstReview, indexOfLastReview);
+  const totalPages = Math.ceil(reviews.length / reviewsPerPage);
+
+  const handlePageChange = (event, value) => {
+    setCurrentPage(value);
+    // Scroll về phần reviews
+    document.getElementById('reviews-section')?.scrollIntoView({ 
+      behavior: 'smooth', 
+      block: 'start' 
+    });
   };
 
   const title = doc?.title ?? "—";
@@ -514,7 +530,6 @@ const userReview = reviewList.find(r =>
                     {title}
                   </Typography>
 
-                  {/* Rating Display */}
                   <Stack direction="row" alignItems="center" spacing={2} sx={{ mt: 2 }}>
                     <Rating 
                       value={parseFloat(reviewStats.averageRating) || 0} 
@@ -593,7 +608,7 @@ const userReview = reviewList.find(r =>
             )}
 
             {/* REVIEWS SECTION */}
-            <Paper sx={{ p: 4, borderRadius: 4 }}>
+            <Paper sx={{ p: 4, borderRadius: 4 }} id="reviews-section">
               <Stack 
                 direction="row" 
                 justifyContent="space-between" 
@@ -609,10 +624,10 @@ const userReview = reviewList.find(r =>
                       ? `${reviewStats.totalReviews} đánh giá • Trung bình ${parseFloat(reviewStats.averageRating).toFixed(1)} ⭐`
                       : 'Chưa có đánh giá nào'
                     }
+                    {totalPages > 1 && ` • Trang ${currentPage}/${totalPages}`}
                   </Typography>
                 </Box>
                 
-                {/* ✅ CHỈ HIỆN NÚT NẾU CHƯA CÓ REVIEW */}
                 {!myReview && (
                   <Button
                     variant="contained"
@@ -623,7 +638,6 @@ const userReview = reviewList.find(r =>
                   </Button>
                 )}
                 
-                {/* Hiển thị thông báo nếu đã có review */}
                 {myReview && (
                   <Chip 
                     icon={<StarIcon />}
@@ -643,139 +657,153 @@ const userReview = reviewList.find(r =>
                   Chưa có đánh giá nào. Hãy là người đầu tiên!
                 </Typography>
               ) : (
-                <Stack spacing={2}>
-                  {reviews.map((review) => {
-                    // ✅ CRITICAL: Lấy từ sessionStorage mỗi lần render
-                    const userIdRaw = sessionStorage.getItem("accountId");
-                    const accountIdRaw = sessionStorage.getItem("accountId");
-                 const currentAccountId = getCurrentAccountId();
-
-                    
-           
-const reviewAccountId = parseInt(review.Reader?.accountId, 10) || 0;
-const isMyReview = currentAccountId !== null && reviewAccountId === currentAccountId;
-                    
-                 console.log(`Review ${review.reviewId} render check:`, {
-  sessionUserId: userIdRaw,
-  sessionAccountId: accountIdRaw,
-  currentAccountId: currentAccountId,
-  reviewAccountId: reviewAccountId,   // ← ĐÚNG TÊN BIẾN
-  readerAccountIdRaw: review.Reader?.accountId,
-  isMyReview: isMyReview,
-  calculation: `${reviewAccountId} === ${currentAccountId}`,
-  types: {
-    current: typeof currentAccountId,
-    reader: typeof reviewAccountId,
-    raw: typeof review.Reader?.accountId
-  }
-});
-                    
-                    return (
-                      <Paper
-                        key={review.reviewId}
-                        variant="outlined"
-                        sx={{ 
-                          p: 3, 
-                          borderRadius: 2,
-                          bgcolor: isMyReview ? 'primary.50' : 'transparent',
-                          border: isMyReview ? '2px solid' : '1px solid',
-                          borderColor: isMyReview ? 'primary.main' : 'divider'
-                        }}
-                      >
-                        <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
-                          <Stack direction="row" spacing={2} sx={{ flex: 1 }}>
-                            <Avatar 
-                              sx={{ 
-                                bgcolor: isMyReview ? 'primary.main' : 'grey.400',
-                                width: 40,
-                                height: 40
-                              }}
-                            >
-                              {review.Reader?.fullName?.charAt(0)?.toUpperCase() || 'U'}
-                            </Avatar>
-                            
-                            <Box sx={{ flex: 1 }}>
-                              <Stack direction="row" alignItems="center" spacing={1} mb={0.5}>
-                                <Typography variant="subtitle1" fontWeight={600}>
-                                  {review.Reader?.fullName || 'Người dùng ẩn danh'}
-                                </Typography>
-                                {isMyReview && (
-                                  <Chip 
-                                    label="Bạn" 
+                <>
+                  <Stack spacing={2}>
+                    {currentReviews.map((review) => {
+                      const currentAccountId = getCurrentAccountId();
+                      const reviewAccountId = parseInt(review.Reader?.accountId, 10) || 0;
+                      const isMyReview = currentAccountId !== null && reviewAccountId === currentAccountId;
+                      
+                      console.log(`Review ${review.reviewId} render check:`, {
+                        currentAccountId: currentAccountId,
+                        reviewAccountId: reviewAccountId,
+                        readerAccountIdRaw: review.Reader?.accountId,
+                        isMyReview: isMyReview,
+                        calculation: `${reviewAccountId} === ${currentAccountId}`,
+                        types: {
+                          current: typeof currentAccountId,
+                          reader: typeof reviewAccountId,
+                          raw: typeof review.Reader?.accountId
+                        }
+                      });
+                      
+                      return (
+                        <Paper
+                          key={review.reviewId}
+                          variant="outlined"
+                          sx={{ 
+                            p: 3, 
+                            borderRadius: 2,
+                            bgcolor: isMyReview ? 'primary.50' : 'transparent',
+                            border: isMyReview ? '2px solid' : '1px solid',
+                            borderColor: isMyReview ? 'primary.main' : 'divider'
+                          }}
+                        >
+                          <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
+                            <Stack direction="row" spacing={2} sx={{ flex: 1 }}>
+                              <Avatar 
+                                sx={{ 
+                                  bgcolor: isMyReview ? 'primary.main' : 'grey.400',
+                                  width: 40,
+                                  height: 40
+                                }}
+                              >
+                                {review.Reader?.fullName?.charAt(0)?.toUpperCase() || 'U'}
+                              </Avatar>
+                              
+                              <Box sx={{ flex: 1 }}>
+                                <Stack direction="row" alignItems="center" spacing={1} mb={0.5}>
+                                  <Typography variant="subtitle1" fontWeight={600}>
+                                    {review.Reader?.fullName || 'Người dùng ẩn danh'}
+                                  </Typography>
+                                  {isMyReview && (
+                                    <Chip 
+                                      label="Bạn" 
+                                      size="small" 
+                                      color="primary" 
+                                      sx={{ height: 20 }}
+                                    />
+                                  )}
+                                </Stack>
+                                
+                                <Stack direction="row" alignItems="center" spacing={1} mb={1}>
+                                  <Rating 
+                                    value={review.rating} 
                                     size="small" 
-                                    color="primary" 
-                                    sx={{ height: 20 }}
+                                    readOnly 
                                   />
+                                  <Typography variant="caption" color="text.secondary">
+                                    • {new Date(review.created_at).toLocaleDateString('vi-VN', {
+                                      year: 'numeric',
+                                      month: 'long',
+                                      day: 'numeric'
+                                    })}
+                                  </Typography>
+                                </Stack>
+                                
+                                {review.comment && (
+                                  <Typography 
+                                    variant="body2" 
+                                    color="text.secondary"
+                                    sx={{ mt: 1 }}
+                                  >
+                                    {review.comment}
+                                  </Typography>
                                 )}
-                              </Stack>
-                              
-                              <Stack direction="row" alignItems="center" spacing={1} mb={1}>
-                                <Rating 
-                                  value={review.rating} 
-                                  size="small" 
-                                  readOnly 
-                                />
-                                <Typography variant="caption" color="text.secondary">
-                                  • {new Date(review.created_at).toLocaleDateString('vi-VN', {
-                                    year: 'numeric',
-                                    month: 'long',
-                                    day: 'numeric'
-                                  })}
-                                </Typography>
-                              </Stack>
-                              
-                              {review.comment && (
-                                <Typography 
-                                  variant="body2" 
-                                  color="text.secondary"
-                                  sx={{ mt: 1 }}
-                                >
-                                  {review.comment}
-                                </Typography>
-                              )}
-                            </Box>
-                          </Stack>
-
-                          {/* ✅ NÚT EDIT/DELETE - CHỈ HIỆN KHI isMyReview = true */}
-                          {isMyReview && (
-                            <Stack direction="row" spacing={0.5}>
-                              <IconButton
-                                size="small"
-                                color="primary"
-                                onClick={() => {
-                                  console.log("✏️ Editing review:", review.reviewId);
-                                  handleOpenReviewDialog(review);
-                                }}
-                                sx={{
-                                  '&:hover': {
-                                    bgcolor: 'primary.50'
-                                  }
-                                }}
-                              >
-                                <EditIcon fontSize="small" />
-                              </IconButton>
-                              <IconButton
-                                size="small"
-                                color="error"
-                                onClick={() => {
-                                  console.log("🗑️ Deleting review:", review.reviewId);
-                                  handleDeleteReview(review.reviewId);
-                                }}
-                                sx={{
-                                  '&:hover': {
-                                    bgcolor: 'error.50'
-                                  }
-                                }}
-                              >
-                                <DeleteIcon fontSize="small" />
-                              </IconButton>
+                              </Box>
                             </Stack>
-                          )}
-                        </Stack>
-                      </Paper>
-                    );
-                  })}
-                </Stack>
+
+                            {isMyReview && (
+                              <Stack direction="row" spacing={0.5}>
+                                <IconButton
+                                  size="small"
+                                  color="primary"
+                                  onClick={() => {
+                                    console.log("✏️ Editing review:", review.reviewId);
+                                    handleOpenReviewDialog(review);
+                                  }}
+                                  sx={{
+                                    '&:hover': {
+                                      bgcolor: 'primary.50'
+                                    }
+                                  }}
+                                >
+                                  <EditIcon fontSize="small" />
+                                </IconButton>
+                                <IconButton
+                                  size="small"
+                                  color="error"
+                                  onClick={() => {
+                                    console.log("🗑️ Deleting review:", review.reviewId);
+                                    handleDeleteReview(review.reviewId);
+                                  }}
+                                  sx={{
+                                    '&:hover': {
+                                      bgcolor: 'error.50'
+                                    }
+                                  }}
+                                >
+                                  <DeleteIcon fontSize="small" />
+                                </IconButton>
+                              </Stack>
+                            )}
+                          </Stack>
+                        </Paper>
+                      );
+                    })}
+                  </Stack>
+
+                  {/* ✅ PAGINATION COMPONENT */}
+                  {totalPages > 1 && (
+                    <Box sx={{ display: 'flex', justifyContent: 'center', mt: 4 }}>
+                      <Pagination 
+                        count={totalPages}
+                        page={currentPage}
+                        onChange={handlePageChange}
+                        color="primary"
+                        size="large"
+                        showFirstButton
+                        showLastButton
+                        sx={{
+                          '& .MuiPaginationItem-root': {
+                            fontSize: '1rem',
+                            fontWeight: 600
+                          }
+                        }}
+                      />
+                    </Box>
+                  )}
+                </>
               )}
             </Paper>
 
