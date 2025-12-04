@@ -106,6 +106,7 @@ const updateReaderByAccountId = async (accountId, data) => {
     "address",
     "cccd",
     "note",
+     "avatarUrl", 
   ];
 
   try {

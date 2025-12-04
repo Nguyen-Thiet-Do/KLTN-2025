@@ -1,7 +1,18 @@
+// src/route/profileRoutes.js
 const express = require("express");
 const router = express.Router();
 const { requireAuth, requireRole } = require("../middleware/auth");
 const profileController = require("../controller/profileController");
+const { uploadAvatarMiddleware } = require("../middleware/upload");
+
+// ✅ Upload avatar (ĐẶT TRƯỚC route /me)
+router.post(
+  "/upload-avatar",
+  requireAuth,
+  requireRole([3]),
+  uploadAvatarMiddleware,  // ← Middleware xử lý file upload
+  profileController.uploadAvatar  // ← Controller xử lý logic nghiệp vụ
+);
 
 // ✅ Độc giả xem thông tin cá nhân
 router.get("/me", requireAuth, requireRole([3]), profileController.getCurrentReader);

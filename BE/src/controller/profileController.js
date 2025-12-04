@@ -73,10 +73,48 @@ const updateFullProfile = async (req, res) => {
   }
 };
 
+// ✅ Upload avatar
+const uploadAvatar = async (req, res) => {
+  try {
+    const accountId = req.user.accountId;
+    
+    if (!req.file) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Vui lòng chọn file ảnh" 
+      });
+    }
+
+    const avatarUrl = `/api/files/avatars/${req.file.filename}`;
+    
+    const result = await profileService.updateReaderByAccountId(accountId, {
+      avatarUrl: avatarUrl
+    });
+
+    if (!result) {
+      return res.status(404).json({ 
+        success: false, 
+        message: "Không tìm thấy độc giả." 
+      });
+    }
+
+    res.json({ 
+      success: true, 
+      message: "Upload avatar thành công.", 
+      avatarUrl: avatarUrl,
+      reader: result 
+    });
+  } catch (err) {
+    console.error("❌ Lỗi khi upload avatar:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
 // ⚠️ QUAN TRỌNG: PHẢI EXPORT TẤT CẢ CÁC HÀM
 module.exports = {
   getCurrentReader,
   updateCurrentReader,
   updateCurrentAccount,     
   updateFullProfile,         
+  uploadAvatar
 };

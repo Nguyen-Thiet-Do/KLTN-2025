@@ -19,6 +19,7 @@ console.log("MAIL_USER = ", process.env.MAIL_USER);
 console.log("MAIL_PASS = ", process.env.MAIL_PASS);
 
 const express = require('express');
+const path = require('path');
 const httpsRedirect = require('./middleware/httpsRedirect');
 const cors = require('cors');
 const sequelize = require('./config/database');
@@ -94,6 +95,8 @@ app.use(express.urlencoded({ extended: true, limit: '10mb', verify: rawBodySaver
 
 // Khởi tạo Passport
 app.use(passport.initialize());
+// ✅ THÊM: Serve static files cho avatars
+app.use('/api/files/avatars', express.static(path.join(__dirname, 'uploads/avatars')));
 app.set('trust proxy', 1);
 app.use(httpsRedirect);
 
