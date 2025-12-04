@@ -7,7 +7,7 @@ import Book from "../pages/Documents/Books/Book";
 import Newspaper from "../pages/Documents/Newspapers/Newspaper";
 import Magazine from "../pages/Documents/Magazines/Magazine";
 import AdminDashboard from "../pages/AdminDashboard/AdminDashboard";
-
+import FineStatisticsDashboard from "../pages/AdminDashboard/FineStatisticsDashboard";
 export const librarianRoutes = {
   path: "/librarian",
   element: <ProtectedRoute allowedRoles={[2]} />,
@@ -21,7 +21,8 @@ export const librarianRoutes = {
         { path: "documents/newspapers", element: <Newspaper /> },
         { path: "documents/magazines", element: <Magazine /> },
         { path: "borrow", element: <Borrow /> },
-        { path: "statistics", element: <AdminDashboard />}
+        { path: "statistics", element: <AdminDashboard />},
+         { path: "fine-statistics", element: <FineStatisticsDashboard /> }
       ],
     },
   ],

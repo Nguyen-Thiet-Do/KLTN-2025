@@ -1,5 +1,17 @@
 // menu.ts/js
-import { FaBookReader, FaUserTie, FaBook, FaExchangeAlt, FaChartBar, FaBookOpen, FaNewspaper, FaBookmark , FaClipboardList } from "react-icons/fa";
+import { 
+  FaBookReader, 
+  FaUserTie, 
+  FaBook, 
+  FaExchangeAlt, 
+  FaChartBar, 
+  FaBookOpen, 
+  FaNewspaper, 
+  FaBookmark, 
+  FaClipboardList,
+  FaMoneyBillWave, 
+  FaChartLine       
+} from "react-icons/fa";
 
 export const adminMenuItems = [
   { path: "/admin/readers", icon: FaBookReader, label: "Độc giả" },
@@ -17,7 +29,17 @@ export const adminMenuItems = [
   },
 
   { path: "/admin/borrow", icon: FaExchangeAlt, label: "Mượn trả" },
-  { path: "/admin/dashboard", icon: FaChartBar, label: "Thống kê" },
+  
+ 
+  {
+    path: "/admin/dashboard",
+    icon: FaChartBar,
+    label: "Thống kê",
+    children: [
+      { path: "/admin/dashboard", label: "Tổng quan", icon: FaChartLine },
+      { path: "/admin/fine-statistics", label: "Thống kê tiền phạt", icon: FaMoneyBillWave },
+    ],
+  },
 
   { path: "/admin/reports", icon: FaClipboardList, label: "Báo cáo" },
 ];
