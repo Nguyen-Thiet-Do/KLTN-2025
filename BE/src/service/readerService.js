@@ -19,7 +19,7 @@ const getAllReaders = async () => {
       where: { deleted: false },
       include: [
         {
-          model: Account,
+          model: Account, 
           attributes: ["email", "phoneNumber", "status", "deleted"],
         },
         {
@@ -111,6 +111,7 @@ const getAllReaders = async () => {
         email: r.Account?.email || null,
         phoneNumber: r.Account?.phoneNumber || null,
         status: r.Account?.status || null,
+      avatarUrl: r.avatarUrl || null,
         deleted: r.deleted || false,
         stats: statsMap[r.readerId] || {
           borrowedCount: 0,
@@ -450,6 +451,7 @@ const getReaderById = async (readerId) => {
       email: r.Account?.email || null,
       phoneNumber: r.Account?.phoneNumber || null,
       status: r.Account?.status || null,
+ avatarUrl: r.avatarUrl || null,
 
       // --- bổ sung ---
       stats: {
