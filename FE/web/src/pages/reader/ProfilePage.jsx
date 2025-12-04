@@ -48,7 +48,7 @@ export default function ProfilePage() {
 
   const [paymentModalOpen, setPaymentModalOpen] = useState(false);
   const [currentPaymentData, setCurrentPaymentData] = useState(null);
-  const [avatarKey, setAvatarKey] = useState(Date.now());
+  // const [avatarKey, setAvatarKey] = useState(Date.now());
 
   const getGenderDisplay = (gender) => {
     if (!gender) return "Chưa cập nhật";
@@ -85,6 +85,8 @@ export default function ProfilePage() {
 const getAvatarUrl = () => {
   if (!user?.avatarUrl) return null;
 
+
+  // const baseURL = import.meta.env.VITE_API_URL || "http://localhost:8080";
   // Tự nhận base URL theo môi trường chạy
   const baseURL =
     window.location.hostname === "localhost"
@@ -93,11 +95,11 @@ const getAvatarUrl = () => {
 
   // Nếu avatarUrl đã là URL đầy đủ
   if (user.avatarUrl.startsWith("http")) {
-    return `${user.avatarUrl}?t=${avatarKey}`;
+    return user.avatarUrl;
   }
 
   // Nếu là đường dẫn tương đối từ server
-  return `${baseURL}${user.avatarUrl}?t=${avatarKey}`;
+   return `${baseURL}${user.avatarUrl}`;
 };
 
 
@@ -108,7 +110,7 @@ const getAvatarUrl = () => {
       console.log('🖼️ Avatar URL:', user?.avatarUrl);
       console.log('🔗 Full Avatar URL:', getAvatarUrl());
     }
-  }, [user, authLoading, avatarKey]);
+  }, [user, authLoading]);
 
   // ✅ Xử lý click vào avatar
   const handleAvatarClick = () => {
@@ -117,91 +119,77 @@ const getAvatarUrl = () => {
 
   // ✅ Xử lý upload file - ĐÃ SỬA
   const handleFileChange = async (event) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
+  const file = event.target.files?.[0];
+  if (!file) return;
 
-    // Validate file type
-    const validTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
-    if (!validTypes.includes(file.type)) {
-      setError('Chỉ chấp nhận file ảnh (JPEG, PNG, GIF, WebP)');
-      return;
+  const validTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
+  if (!validTypes.includes(file.type)) {
+    setError('Chỉ chấp nhận file ảnh (JPEG, PNG, GIF, WebP)');
+    return;
+  }
+
+  if (file.size > 5 * 1024 * 1024) {
+    setError('Kích thước file không được vượt quá 5MB');
+    return;
+  }
+
+  try {
+    setUploadingAvatar(true);
+    setError(null);
+    setSuccess(null);
+
+    const formData = new FormData();
+    formData.append('avatar', file);
+
+    const token = sessionStorage.getItem("accessToken");
+    if (!token) {
+      throw new Error("Vui lòng đăng nhập lại");
     }
 
-    // Validate file size (5MB)
-    if (file.size > 5 * 1024 * 1024) {
-      setError('Kích thước file không được vượt quá 5MB');
-      return;
+    const baseURL =
+      window.location.hostname === "localhost"
+        ? "http://localhost:8080"
+        : "https://kltn-2025-ehsx.onrender.com";
+    
+    const response = await fetch(`${baseURL}/api/profile/upload-avatar`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`
+      },
+      body: formData
+    });
+
+    const contentType = response.headers.get("content-type");
+    
+    if (!contentType || !contentType.includes("application/json")) {
+      const text = await response.text();
+      throw new Error(`Server error: ${text.substring(0, 200)}`);
     }
 
-    try {
-      setUploadingAvatar(true);
-      setError(null);
-      setSuccess(null);
+    const data = await response.json();
+    console.log("✅ Upload response:", data);
 
-      const formData = new FormData();
-      formData.append('avatar', file);
-
-      const token = sessionStorage.getItem("accessToken");
-      if (!token) {
-        throw new Error("Vui lòng đăng nhập lại");
-      }
-
-      const baseURL =
-  window.location.hostname === "localhost"
-    ? "http://localhost:8080"
-    : "https://kltn-2025-ehsx.onrender.com";
-      
-      console.log("📤 Uploading to:", `${baseURL}/api/profile/upload-avatar`);
-      console.log("📦 File:", file.name, file.type, file.size);
-
-     const response = await fetch(`${baseURL}/api/profile/upload-avatar`, {
-  method: 'POST',
-  headers: {
-    'Authorization': `Bearer ${token}`
-  },
-        body: formData
-      });
-
-      const contentType = response.headers.get("content-type");
-      console.log("📥 Response status:", response.status);
-      console.log("📥 Content-Type:", contentType);
-      
-      if (!contentType || !contentType.includes("application/json")) {
-        const text = await response.text();
-        console.error("❌ Server response:", text);
-        throw new Error(`Server error: ${text.substring(0, 200)}`);
-      }
-
-      const data = await response.json();
-      console.log("✅ Upload response:", data);
-
-      if (!response.ok) {
-        throw new Error(data.message || 'Upload thất bại');
-      }
-
-      setSuccess('Upload avatar thành công! 🎉');
-      
-      // ✅ Force reload avatar ngay lập tức
-      setAvatarKey(Date.now());
-      
-      // Refresh user data để lấy avatarUrl mới từ server
-      await refreshUser();
-      
-      // Reload page sau 1 giây để đảm bảo mọi thứ đồng bộ
-      setTimeout(() => {
-        window.location.reload();
-      }, 1000);
-      
-    } catch (err) {
-      console.error("❌ Lỗi upload avatar:", err);
-      setError(err.message || 'Không thể upload avatar');
-    } finally {
-      setUploadingAvatar(false);
-      if (fileInputRef.current) {
-        fileInputRef.current.value = '';
-      }
+    if (!response.ok) {
+      throw new Error(data.message || 'Upload thất bại');
     }
-  };
+
+    setSuccess('Upload avatar thành công! 🎉');
+    
+    // ✅ Refresh user data
+    await refreshUser();
+    
+    // ✅ KHÔNG CẦN reload page nữa
+    
+  } catch (err) {
+    console.error("❌ Lỗi upload avatar:", err);
+    setError(err.message || 'Không thể upload avatar');
+  } finally {
+    setUploadingAvatar(false);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  }
+};
 
   const handleRegisterMemberCard = async () => {
     try {
@@ -501,7 +489,7 @@ const getAvatarUrl = () => {
               {/* ✅ Avatar với nút upload - ĐÃ SỬA */}
               <Box sx={{ position: 'relative', display: 'inline-block' }}>
                 <Avatar
-                  key={avatarKey}  // ← Force re-render khi avatarKey thay đổi
+                  // key={avatarKey}  // ← Force re-render khi avatarKey thay đổi
                   src={getAvatarUrl()}
                   sx={{
                     width: 120,
