@@ -217,13 +217,27 @@ export default function DocumentDetail() {
       console.log("📥 Raw API Response:", response.data);
       
       if (response.data.success) {
-        const { reviews: reviewList, stats } = response.data.data;
-        
-        setReviews(reviewList);
-        setReviewStats(stats);
-        setCurrentPage(1); // ✅ Reset về trang 1
+     const { reviews: reviewList, stats } = response.data.data;
 
-        const currentAccountId = getCurrentAccountId();
+const currentAccountId = getCurrentAccountId();
+
+// Tách review của user
+const myReviews = reviewList.filter(
+  r => Number(r.Reader?.accountId) === currentAccountId
+);
+
+// Tách review của người khác
+const otherReviews = reviewList.filter(
+  r => Number(r.Reader?.accountId) !== currentAccountId
+);
+
+// Ghép lại: My review lên đầu
+const sortedReviews = [...myReviews, ...otherReviews];
+
+setReviews(sortedReviews);
+setReviewStats(stats);
+setCurrentPage(1);
+
         
         console.log("🔍 Current AccountId:", currentAccountId, `(type: ${typeof currentAccountId})`);
         
