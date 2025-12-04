@@ -146,16 +146,19 @@ const getAvatarUrl = () => {
         throw new Error("Vui lòng đăng nhập lại");
       }
 
-      const baseURL = import.meta.env.VITE_API_URL || "http://localhost:8080";
+      const baseURL =
+  window.location.hostname === "localhost"
+    ? "http://localhost:8080"
+    : "https://kltn-2025-ehsx.onrender.com";
       
       console.log("📤 Uploading to:", `${baseURL}/api/profile/upload-avatar`);
       console.log("📦 File:", file.name, file.type, file.size);
 
-      const response = await fetch(`${baseURL}/api/profile/upload-avatar`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`
-        },
+     const response = await fetch(`${baseURL}/api/profile/upload-avatar`, {
+  method: 'POST',
+  headers: {
+    'Authorization': `Bearer ${token}`
+  },
         body: formData
       });
 
