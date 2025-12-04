@@ -3,7 +3,13 @@
 // ==========================================
 const express = require("express");
 const router = express.Router();
+const { requireAuth, requireRole } = require("../middleware/auth");
 const statisticController = require("../controller/statisticController");
+
+// ✅ Áp dụng middleware cho toàn bộ router
+// Chỉ Admin (1) và Thủ thư (2) được truy cập
+router.use(requireAuth);
+router.use(requireRole([1, 2]));
 
 // ========== ROUTES CŨ (GIỮ NGUYÊN) ==========
 

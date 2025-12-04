@@ -59,6 +59,7 @@ const paymentRoutes = require('./route/payment');
 const chatRoutes = require("./route/chat.route");
 const memberCardRoutes = require("./route/memberCard.routes");
 const reviewRoutes = require("./route/reviewRoutes");
+const fineStatisticRoutes = require("./route/fineStatisticRoutes");
 // ============================================================
 // CORS CONFIGURATION
 // ============================================================
@@ -124,6 +125,7 @@ app.use('/api', paymentRoutes);
 app.use("/api/chat", chatRoutes);
 app.use('/api/member-cards', memberCardRoutes);
 app.use('/api/reviews', reviewRoutes);
+app.use('/api/fine-statistics', fineStatisticRoutes);
 // ============================================================
 // HEALTH CHECK
 // ============================================================
