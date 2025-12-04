@@ -96,7 +96,7 @@ app.use(express.urlencoded({ extended: true, limit: '10mb', verify: rawBodySaver
 // Khởi tạo Passport
 app.use(passport.initialize());
 // ✅ THÊM: Serve static files cho avatars
-app.use('/api/files/avatars', express.static(path.join(__dirname, 'uploads/avatars')));
+// app.use('/api/files/avatars', express.static(path.join(__dirname, 'uploads/avatars')));
 app.set('trust proxy', 1);
 app.use(httpsRedirect);
 

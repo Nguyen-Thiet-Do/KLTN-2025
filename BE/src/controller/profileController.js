@@ -74,6 +74,7 @@ const updateFullProfile = async (req, res) => {
 };
 
 // ✅ Upload avatar
+
 const uploadAvatar = async (req, res) => {
   try {
     const accountId = req.user.accountId;
@@ -85,8 +86,14 @@ const uploadAvatar = async (req, res) => {
       });
     }
 
-    const avatarUrl = `/api/files/avatars/${req.file.filename}`;
+    // ✅ Cloudinary tự động trả về URL trong req.file.path
+    const avatarUrl = req.file.path;
     
+    console.log("✅ Avatar uploaded to Cloudinary:");
+    console.log("   URL:", avatarUrl);
+    console.log("   Public ID:", req.file.filename);
+    console.log("   Size:", req.file.size, "bytes");
+
     const result = await profileService.updateReaderByAccountId(accountId, {
       avatarUrl: avatarUrl
     });
@@ -106,7 +113,10 @@ const uploadAvatar = async (req, res) => {
     });
   } catch (err) {
     console.error("❌ Lỗi khi upload avatar:", err);
-    res.status(500).json({ success: false, message: err.message });
+    res.status(500).json({ 
+      success: false, 
+      message: err.message 
+    });
   }
 };
 
