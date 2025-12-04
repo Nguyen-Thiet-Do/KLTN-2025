@@ -408,6 +408,190 @@ const getReportSummary = async () => {
   }
 };
 
+const getReportByDateRange = async (from, to) => {
+  const fromDate = new Date(from);
+  fromDate.setHours(0, 0, 0, 0);
+
+  const toDate = new Date(to);
+  toDate.setHours(23, 59, 59, 999);
+
+  // =============================
+  // 1) TỔNG SỐ PHIẾU MƯỢN
+  // =============================
+  const [slipRows] = await sequelize.query(`
+    SELECT COUNT(*) AS totalSlips
+    FROM LoanSlips ls
+    WHERE ls.deleted = FALSE
+      AND ls.created_at BETWEEN :from AND :to
+  `, { replacements: { from: fromDate, to: toDate } });
+
+  const totalSlips = slipRows[0]?.totalSlips || 0;
+
+
+  // =============================
+  // 2) TỔNG SỐ CUỐN SÁCH (LoanDetails)
+  // =============================
+  const [bookRows] = await sequelize.query(`
+    SELECT COUNT(*) AS totalBooks
+    FROM LoanDetails ld
+    JOIN LoanSlips ls ON ls.loanSlipId = ld.loanSlipId
+    WHERE ld.deleted = FALSE
+      AND ls.deleted = FALSE
+      AND ls.created_at BETWEEN :from AND :to
+  `, { replacements: { from: fromDate, to: toDate } });
+
+  const totalBooks = bookRows[0]?.totalBooks || 0;
+
+
+  // =============================
+  // 3) CÁC TRẠNG THÁI CỦA SÁCH
+  // =============================
+  const [detailRows] = await sequelize.query(`
+    SELECT
+      SUM(ld.status = 'BORROWED') AS borrowing,
+      SUM(ld.status = 'RETURNED') AS returned,
+      SUM(ld.status = 'WAITING_FOR_PICKUP') AS waitingPickup,
+      SUM(ld.status = 'LOST') AS lost,
+      SUM(ld.status = 'PENDING') AS pending,
+      SUM(ld.status = 'PENDING_PAYMENT') AS pendingPayment
+    FROM LoanDetails ld
+    JOIN LoanSlips ls ON ls.loanSlipId = ld.loanSlipId
+    WHERE ld.deleted = FALSE 
+      AND ls.deleted = FALSE
+      AND ls.created_at BETWEEN :from AND :to
+  `, { replacements: { from: fromDate, to: toDate } });
+
+  const details = detailRows[0] || {};
+
+
+  // =============================
+  // 4) SÁCH QUÁ HẠN
+  // =============================
+  const overdue = await LoanDetail.count({
+    include: [{
+      model: LoanSlip,
+      required: true,
+      where: {
+        deleted: false,
+        created_at: { [Op.between]: [fromDate, toDate] },
+        dueDate: { [Op.lt]: new Date() }
+      }
+    }],
+    where: {
+      deleted: false,
+      returnDate: null,
+      status: 'BORROWED'
+    }
+  });
+
+
+  // =============================
+  // 5) TRẢ KẾT QUẢ
+  // =============================
+  return {
+    totalSlips,          // số phiếu
+    totalBooks,          // số cuốn sách đúng
+    borrowing: details.borrowing || 0,
+    returned: details.returned || 0,
+    waitingPickup: details.waitingPickup || 0,
+    lost: details.lost || 0,
+    pending: details.pending || 0,
+    pendingPayment: details.pendingPayment || 0,
+    overdue
+  };
+};
+
+
+// ==========================================
+const getFineReportByDateRange = async (from, to) => {
+  const fromDate = new Date(from);
+  fromDate.setHours(0, 0, 0, 0);
+
+  const toDate = new Date(to);
+  toDate.setHours(23, 59, 59, 999);
+
+  // =============================
+  // 1) Tổng quan tiền phạt
+  // =============================
+  const [overviewRows] = await sequelize.query(`
+    SELECT 
+      COUNT(*) as fineCount,
+      SUM(fineAmount) as fineTotal,
+      SUM(CASE WHEN paymentStatus = 'paid' THEN fineAmount ELSE 0 END) as finePaid,
+      SUM(CASE WHEN paymentStatus = 'unpaid' THEN fineAmount ELSE 0 END) as fineUnpaid,
+      AVG(fineAmount) as fineAvg,
+      COUNT(DISTINCT readerId) as fineReaders
+    FROM Violations
+    WHERE deleted = FALSE
+      AND created_at BETWEEN :from AND :to
+  `, { replacements: { from: fromDate, to: toDate } });
+
+  const overview = overviewRows[0] || {
+    fineCount: 0,
+    fineTotal: 0,
+    finePaid: 0,
+    fineUnpaid: 0,
+    fineAvg: 0,
+    fineReaders: 0
+  };
+
+  // =============================
+  // 2) Tiền phạt theo loại vi phạm
+  // =============================
+  const [typeRows] = await sequelize.query(`
+    SELECT 
+      type,
+      SUM(fineAmount) as total
+    FROM Violations
+    WHERE deleted = FALSE
+      AND created_at BETWEEN :from AND :to
+    GROUP BY type
+  `, { replacements: { from: fromDate, to: toDate } });
+
+  const fineType = {
+    overdueFine: parseFloat(typeRows.find(t => t.type === "OVERDUE")?.total || 0),
+    lostFine: parseFloat(typeRows.find(t => t.type === "LOST")?.total || 0),
+    damagedFine: parseFloat(typeRows.find(t => t.type === "DAMAGED" || t.type === "DAMAGE")?.total || 0)
+  };
+
+  // =============================
+  // 3) Top độc giả vi phạm
+  // =============================
+  const [topRows] = await sequelize.query(`
+    SELECT 
+      r.readerId,
+      r.fullName,
+      COUNT(v.violationId) AS soLanViPham,
+      SUM(v.fineAmount) AS tongTienPhat,
+      SUM(CASE WHEN v.paymentStatus = 'paid' THEN v.fineAmount ELSE 0 END) AS daThu,
+      SUM(CASE WHEN v.paymentStatus = 'unpaid' THEN v.fineAmount ELSE 0 END) AS conNo
+    FROM Readers r
+    JOIN Violations v ON r.readerId = v.readerId
+    WHERE v.deleted = FALSE
+      AND v.created_at BETWEEN :from AND :to
+    GROUP BY r.readerId, r.fullName
+    ORDER BY tongTienPhat DESC
+    LIMIT 5
+  `, { replacements: { from: fromDate, to: toDate } });
+
+  const topViolators = topRows.map(r => ({
+    readerId: r.readerId,
+    fullName: r.fullName,
+    soLanViPham: parseInt(r.soLanViPham),
+    tongTienPhat: parseFloat(r.tongTienPhat) || 0,
+    daThu: parseFloat(r.daThu) || 0,
+    conNo: parseFloat(r.conNo) || 0
+  }));
+
+  // =============================
+  // 4) Trả về
+  // =============================
+  return {
+    ...overview,
+    ...fineType,
+    topViolators
+  };
+};
 module.exports = {
   getLibraryStatistics,
   getMonthlyLoans,
@@ -417,5 +601,7 @@ module.exports = {
   getBorrowByDayOfWeek,
   getNeverBorrowedBooks,
   getInactiveReaders,
-  getReportSummary
+  getReportSummary,
+  getReportByDateRange,
+  getFineReportByDateRange
 };
