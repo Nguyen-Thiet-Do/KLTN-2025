@@ -170,6 +170,15 @@ export default function Settings() {
         return "Vui lòng kiểm tra lại thông tin mật khẩu.";
       }
     }
+     // ✅ Validate số điện thoại 10 số
+  if (!/^[0-9]{10}$/.test(form.phoneNumber)) {
+    return "Số điện thoại phải gồm đúng 10 chữ số.";
+  }
+
+  // ✅ Validate CCCD 12 số
+  if (!/^[0-9]{12}$/.test(form.cccd)) {
+    return "CCCD phải gồm đúng 12 chữ số.";
+  }
     
     return null;
   };

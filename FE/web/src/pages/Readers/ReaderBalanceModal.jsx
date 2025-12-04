@@ -32,6 +32,22 @@ export default function ReaderBalanceModal({ open, onClose, reader, onSuccess })
   const [paymentModalOpen, setPaymentModalOpen] = useState(false);
   const [currentPaymentData, setCurrentPaymentData] = useState(null);
 
+
+  const getAvatarUrl = () => {
+  if (!reader?.avatarUrl) return null;
+
+  const baseURL =
+    window.location.hostname === "localhost"
+      ? "http://localhost:8080"
+      : "https://kltn-2025-ehsx.onrender.com";
+
+  if (reader.avatarUrl.startsWith("http")) {
+    return reader.avatarUrl;
+  }
+
+  return `${baseURL}${reader.avatarUrl}`;
+};
+
   const formatCurrency = (amount) => {
     return new Intl.NumberFormat('vi-VN', {
       style: 'currency',
@@ -346,31 +362,102 @@ export default function ReaderBalanceModal({ open, onClose, reader, onSuccess })
           </Card>
 
           {/* Thông tin độc giả */}
-          <Card sx={{ borderRadius: 2, backgroundColor: "rgba(102,126,234,0.04)" }}>
-            <CardContent>
-              <Typography variant="subtitle2" fontWeight={700} gutterBottom>
-                Thông tin độc giả
-              </Typography>
-              <Grid container spacing={2}>
-                <Grid item xs={6}>
-                  <Typography variant="caption" color="text.secondary">
-                    Email
-                  </Typography>
-                  <Typography variant="body2" fontWeight={600}>
-                    {reader.email || "-"}
-                  </Typography>
-                </Grid>
-                <Grid item xs={6}>
-                  <Typography variant="caption" color="text.secondary">
-                    Số điện thoại
-                  </Typography>
-                  <Typography variant="body2" fontWeight={600}>
-                    {reader.phoneNumber || "-"}
-                  </Typography>
-                </Grid>
-              </Grid>
-            </CardContent>
-          </Card>
+         <Card
+  sx={{
+    borderRadius: 3,
+    backgroundColor: "rgba(102,126,234,0.04)",
+    mt: 3
+  }}
+>
+  <CardContent>
+    <Typography
+      variant="subtitle2"
+      fontWeight={700}
+      gutterBottom
+      sx={{ mb: 2, color: "#667EEA" }}
+    >
+      Thông tin độc giả
+    </Typography>
+
+    <Stack direction="row" spacing={2} alignItems="center" sx={{ mb: 3 }}>
+      {/* Avatar */}
+     {getAvatarUrl() ? (
+  <Box
+    component="img"
+    src={getAvatarUrl()}
+    alt="avatar"
+    sx={{
+      width: 56,
+      height: 56,
+      borderRadius: "50%",
+      objectFit: "cover",
+      border: "2px solid #667EEA"
+    }}
+  />
+) : (
+  <Box
+    sx={{
+      width: 56,
+      height: 56,
+      borderRadius: "50%",
+      backgroundColor: "#667EEA",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      color: "white",
+      fontWeight: 700,
+      fontSize: 20
+    }}
+  >
+    {reader.fullName?.charAt(0)?.toUpperCase() || "U"}
+  </Box>
+)}
+
+
+      <Box>
+        <Typography variant="h6" fontWeight={700}>
+          {reader.fullName}
+        </Typography>
+        <Typography variant="body2" color="text.secondary">
+          DG{reader.readerId}
+        </Typography>
+      </Box>
+    </Stack>
+
+    {/* Thông tin chi tiết */}
+    <Grid container spacing={2}>
+
+      <Grid item xs={12} sm={4}>
+        <Typography variant="caption" color="text.secondary">
+          Email
+        </Typography>
+        <Typography variant="body2" fontWeight={600}>
+          {reader.email || "-"}
+        </Typography>
+      </Grid>
+
+      <Grid item xs={12} sm={4}>
+        <Typography variant="caption" color="text.secondary">
+          Số điện thoại
+        </Typography>
+        <Typography variant="body2" fontWeight={600}>
+          {reader.phoneNumber || "-"}
+        </Typography>
+      </Grid>
+
+      <Grid item xs={12} sm={4}>
+        <Typography variant="caption" color="text.secondary">
+          CCCD
+        </Typography>
+        <Typography variant="body2" fontWeight={600}>
+          {reader.cccd || "-"}
+        </Typography>
+      </Grid>
+
+    </Grid>
+  </CardContent>
+</Card>
+
         </DialogContent>
 
         <Divider />

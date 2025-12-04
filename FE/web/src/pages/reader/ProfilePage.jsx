@@ -49,6 +49,7 @@ export default function ProfilePage() {
   const [paymentModalOpen, setPaymentModalOpen] = useState(false);
   const [currentPaymentData, setCurrentPaymentData] = useState(null);
   // const [avatarKey, setAvatarKey] = useState(Date.now());
+// const [validateError, setValidateError] = useState(null);
 
   const getGenderDisplay = (gender) => {
     if (!gender) return "Chưa cập nhật";
@@ -593,7 +594,7 @@ const getAvatarUrl = () => {
                       transition: "all 0.3s ease",
                     }}
                   >
-                    {processingPayment ? "Đang xử lý..." : "Đăng ký thẻ thành viên - 10.000đ"}
+                    {processingPayment ? "Đang xử lý..." : "Đăng ký thẻ thành viên - 100.000đ"}
                   </Button>
 
                   <Typography
@@ -721,7 +722,7 @@ const getAvatarUrl = () => {
                         fontStyle: "italic",
                       }}
                     >
-                      💡 Nạp tiền để đủ số dư mặc định của loại thẻ
+                      💡 Nạp tiền để đủ số dư mặc định của loại thẻ(Số dư mặc định 100.00đ)
                     </Typography>
                   </CardContent>
                 </Card>
