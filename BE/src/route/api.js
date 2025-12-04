@@ -543,7 +543,7 @@ routeApi.get('/', (req, res) => {
           deleted: 'boolean',
           created_at: 'datetime',
           updated_at: 'datetime',
-
+ avatarUrl: 'string | null',
           email: 'string',
           phoneNumber: 'string | null',
           status: 'active | locked | inactive',
