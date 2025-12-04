@@ -41,5 +41,10 @@ export const adminMenuItems = [
     ],
   },
 
-  { path: "/admin/reports", icon: FaClipboardList, label: "Báo cáo" },
+  { path: "/admin/reports", icon: FaClipboardList, label: "Báo cáo" ,
+     children: [
+      { path: "/admin/reports", label: "Tổng quan", icon: FaChartLine },
+      { path: "/admin/borrow-return-report", label: "Báo Cáo Mượn Trả", icon: FaExchangeAlt },
+    ],
+  },
 ];

@@ -17,7 +17,7 @@ export const statisticApi = {
     if (!res.data?.success) {
       throw new Error(res.data?.message || "Không lấy được thống kê theo tháng");
     }
-    return res.data.data; // ⭐ SỬA: Thêm .data
+    return res.data.data;
   },
 
   // 🔹 Thống kê theo danh mục
@@ -41,7 +41,7 @@ export const statisticApi = {
     return res.data.data;
   },
 
-  // Tổng hợp báo cáo
+  // 🔹 Tổng hợp báo cáo
   async getReportSummary() {
     const res = await api.get("/statistics/report-summary");
     if (!res.data?.success) {
@@ -50,7 +50,7 @@ export const statisticApi = {
     return res.data.data;
   },
 
-  // Lượt mượn theo ngày trong tuần
+  // 🔹 Lượt mượn theo ngày trong tuần
   async getBorrowByDay() {
     const res = await api.get("/statistics/borrow-by-day");
     if (!res.data?.success) {
@@ -59,7 +59,7 @@ export const statisticApi = {
     return res.data.data;
   },
 
-  // Sách chưa từng được mượn
+  // 🔹 Sách chưa từng được mượn
   async getNeverBorrowed() {
     const res = await api.get("/statistics/never-borrowed");
     if (!res.data?.success) {
@@ -68,12 +68,69 @@ export const statisticApi = {
     return res.data.data;
   },
 
-  // Độc giả không hoạt động
+  // 🔹 Độc giả không hoạt động
   async getInactiveReaders() {
     const res = await api.get("/statistics/inactive-readers");
     if (!res.data?.success) {
       throw new Error(res.data?.message || "Không lấy được danh sách");
     }
     return res.data.data;
+  },
+
+  // ⭐ Báo cáo theo khoảng thời gian (GỘP 2 HÀM TRÙNG)
+  async getReportLoans(from, to) {
+    try {
+      console.log('📡 Calling API with params:', { from, to });
+      
+      const response = await api.get("/statistics/report-loans", {
+        params: { from, to }
+      });
+
+      console.log('📡 API Response:', response.data);
+
+      if (!response.data?.success) {
+        throw new Error(response.data?.message || "Lỗi không xác định");
+      }
+
+      return response.data.data;
+
+    } catch (error) {
+      console.error('❌ API Error:', error);
+      
+      if (error.response) {
+        // Server trả về lỗi
+        throw new Error(error.response.data?.message || "Lỗi từ server");
+      } else if (error.request) {
+        // Không nhận được response
+        throw new Error("Không thể kết nối đến server");
+      } else {
+        // Lỗi khác
+        throw new Error(error.message || "Đã có lỗi xảy ra");
+      }
+    }
+  },
+  // 🔹 Thống kê tiền phạt theo khoảng thời gian
+async getFineReport(from, to) {
+  try {
+    const res = await api.get("/statistics/fine-report", {
+      params: { from, to }
+    });
+
+    if (!res.data?.success) {
+      throw new Error(res.data?.message || "Không lấy được báo cáo tiền phạt");
+    }
+
+    return res.data.data;
+
+  } catch (error) {
+    if (error.response) {
+      throw new Error(error.response.data?.message || "Lỗi server");
+    }
+    if (error.request) {
+      throw new Error("Không kết nối được server");
+    }
+    throw new Error(error.message);
   }
+}
+
 };

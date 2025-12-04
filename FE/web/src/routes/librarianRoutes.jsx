@@ -8,6 +8,7 @@ import Newspaper from "../pages/Documents/Newspapers/Newspaper";
 import Magazine from "../pages/Documents/Magazines/Magazine";
 import AdminDashboard from "../pages/AdminDashboard/AdminDashboard";
 import FineStatisticsDashboard from "../pages/AdminDashboard/FineStatisticsDashboard";
+import BorrowReturnReport from "../pages/AdminDashboard/BorrowReturnReport";
 export const librarianRoutes = {
   path: "/librarian",
   element: <ProtectedRoute allowedRoles={[2]} />,
@@ -22,7 +23,8 @@ export const librarianRoutes = {
         { path: "documents/magazines", element: <Magazine /> },
         { path: "borrow", element: <Borrow /> },
         { path: "statistics", element: <AdminDashboard />},
-         { path: "fine-statistics", element: <FineStatisticsDashboard /> }
+         { path: "fine-statistics", element: <FineStatisticsDashboard /> },
+         { path: "borrow-return-report", element: <BorrowReturnReport /> },
       ],
     },
   ],

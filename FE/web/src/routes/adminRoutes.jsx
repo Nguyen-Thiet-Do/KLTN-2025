@@ -11,6 +11,7 @@ import Magazine from "../pages/Documents/Magazines/Magazine";
 import AdminDashboard from "../pages/AdminDashboard/AdminDashboard";
 import Reports from "../pages/AdminDashboard/Reports";
 import FineStatisticsDashboard from "../pages/AdminDashboard/FineStatisticsDashboard";
+import BorrowReturnReport from "../pages/AdminDashboard/BorrowReturnReport";
 export const adminRoutes = {
   path: "/admin",
   element: <ProtectedRoute allowedRoles={[1]} />,
@@ -27,7 +28,8 @@ export const adminRoutes = {
         { path: "dashboard", element: <AdminDashboard /> }, 
          { path: "reports", element: <Reports /> },
         { path: "borrow", element: <Borrow /> },
-        { path: "fine-statistics", element: <FineStatisticsDashboard /> }
+        { path: "fine-statistics", element: <FineStatisticsDashboard /> },
+        { path: "borrow-return-report", element: <BorrowReturnReport /> },
       ],
     },
   ],
