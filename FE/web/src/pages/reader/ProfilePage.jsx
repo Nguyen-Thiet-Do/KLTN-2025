@@ -82,19 +82,24 @@ export default function ProfilePage() {
   };
 
   // ✅ Sửa hàm getAvatarUrl - thêm cache busting
-  const getAvatarUrl = () => {
-    if (!user?.avatarUrl) return null;
-    
-    const baseURL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8080";
-    
-    // Nếu avatarUrl đã là full URL
-    if (user.avatarUrl.startsWith('http')) {
-      return `${user.avatarUrl}?t=${avatarKey}`;
-    }
-    
-    // Nếu avatarUrl là relative path
-    return `${baseURL}${user.avatarUrl}?t=${avatarKey}`;
-  };
+const getAvatarUrl = () => {
+  if (!user?.avatarUrl) return null;
+
+  // Tự nhận base URL theo môi trường chạy
+  const baseURL =
+    window.location.hostname === "localhost"
+      ? "http://localhost:8080"
+      : "https://kltn-2025-ehsx.onrender.com";
+
+  // Nếu avatarUrl đã là URL đầy đủ
+  if (user.avatarUrl.startsWith("http")) {
+    return `${user.avatarUrl}?t=${avatarKey}`;
+  }
+
+  // Nếu là đường dẫn tương đối từ server
+  return `${baseURL}${user.avatarUrl}?t=${avatarKey}`;
+};
+
 
   useEffect(() => {
     if (!authLoading) {
@@ -141,7 +146,7 @@ export default function ProfilePage() {
         throw new Error("Vui lòng đăng nhập lại");
       }
 
-      const baseURL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8080";
+      const baseURL = import.meta.env.VITE_API_URL || "http://localhost:8080";
       
       console.log("📤 Uploading to:", `${baseURL}/api/profile/upload-avatar`);
       console.log("📦 File:", file.name, file.type, file.size);
