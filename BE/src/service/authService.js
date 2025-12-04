@@ -549,7 +549,13 @@ async function verifyOtpAndCreateAccountService(payload) {
 // =============================
 // 🎫 COMPLETE REGISTRATION
 // =============================
-async function completeRegistrationService({ readerId, cardTypeId, action = 'SKIP', extraInfo = {}, avatarUrl = null }) {
+async function completeRegistrationService({
+  readerId,
+  cardTypeId,
+  action = 'SKIP',
+  extraInfo = {},
+  avatarUrl = null
+}) {
   if (!readerId || !cardTypeId) {
     throw Object.assign(new Error('MISSING_FIELDS'), { statusCode: 400 });
   }
@@ -560,35 +566,27 @@ async function completeRegistrationService({ readerId, cardTypeId, action = 'SKI
     throw Object.assign(new Error('CARD_TYPE_NOT_FOUND'), { statusCode: 404 });
   }
 
-  // optional: validate avatarUrl format if provided
-  if (avatarUrl) {
-    try {
-      const appBase = (process.env.APP_BASE_URL || '').replace(/\/$/, '');
-      const allowedPrefix1 = `${appBase}/files/avatars/`;
-      const allowedPrefix2 = `/files/avatars/`; // allow relative proxy path
-      if (!(String(avatarUrl).startsWith(allowedPrefix1) || String(avatarUrl).startsWith(allowedPrefix2))) {
-        throw Object.assign(new Error('INVALID_AVATAR_URL'), { statusCode: 400 });
-      }
-    } catch (e) {
-      throw e;
-    }
-  }
+  // ❌ BỎ HOÀN TOÀN ĐOẠN VALIDATE avatarUrl
 
   // Lấy reader và thực hiện update avatar + create card/payment trong transaction
   const tx = await sequelize.transaction();
   try {
-    const reader = await Reader.findByPk(readerId, { transaction: tx, lock: tx.LOCK.UPDATE });
+    const reader = await Reader.findByPk(readerId, {
+      transaction: tx,
+      lock: tx.LOCK.UPDATE
+    });
+
     if (!reader) {
       throw Object.assign(new Error('READER_NOT_FOUND'), { statusCode: 404 });
     }
 
-    // Nếu avatarUrl gửi lên thì lưu vào Reader (cập nhật)
+    // Nếu avatarUrl gửi lên thì lưu vào Reader
     if (avatarUrl && String(avatarUrl).trim() !== '') {
       reader.avatarUrl = avatarUrl;
       await reader.save({ transaction: tx });
     }
 
-    // Nếu là SKIP (free) hoặc cardType.price <= 0 thì tạo MemberCard ngay trong transaction
+    // Nếu là SKIP hoặc FREE → tạo thẻ ngay
     if (action === 'SKIP' || Number(cardType.price) <= 0) {
       const cardNumber = generateCardNumber();
       const today = new Date();
@@ -612,8 +610,7 @@ async function completeRegistrationService({ readerId, cardTypeId, action = 'SKI
       return { ok: true, free: true, memberCard: mc };
     }
 
-    // Nếu phải thanh toán: tạo Payment rồi commit (luồng payment tiếp diễn)
-    // Tạo payment trong transaction để đảm bảo reader.avatarUrl đã được lưu trước khi trả link
+    // Nếu phải thanh toán → tạo Payment trước khi trả link thanh toán
     const orderCode = Date.now();
     const payment = await Payment.create({
       loanSlipId: null,
@@ -629,10 +626,9 @@ async function completeRegistrationService({ readerId, cardTypeId, action = 'SKI
       note: `cardType:${cardType.cardTypeId}`
     }, { transaction: tx });
 
-    // Commit here so frontend nhận được payment/paymentLink (payment persisted)
     await tx.commit();
 
-    // tạo link với PayOS (ngoài transaction)
+    // tạo link PayOS (ngoài transaction)
     const baseUrl = (process.env.APP_BASE_URL || '').replace(/\/$/, '');
     const returnUrl = `${baseUrl}/pay/return`;
     const cancelUrl = `${baseUrl}/pay/cancel`;
@@ -640,7 +636,7 @@ async function completeRegistrationService({ readerId, cardTypeId, action = 'SKI
     let payosResp;
     try {
       payosResp = await payosService.createPaymentLink({
-        orderCode: orderCode,
+        orderCode,
         amount: Number(cardType.price),
         description: `Thanh toán thẻ thành viên`,
         returnUrl,
@@ -652,11 +648,11 @@ async function completeRegistrationService({ readerId, cardTypeId, action = 'SKI
         }]
       });
     } catch (err) {
-      // Nếu tạo payment link thất bại, bạn có thể cập nhật payment.status = 'FAILED'
       await Payment.update({
         status: 'FAILED',
         note: (payment.note || '') + '|payos_create_failed:' + err.message
       }, { where: { paymentId: payment.paymentId } }).catch(() => { });
+
       throw Object.assign(new Error('PAYOS_CREATE_FAILED'), { statusCode: 500 });
     }
 
@@ -681,6 +677,7 @@ async function completeRegistrationService({ readerId, cardTypeId, action = 'SKI
         paymentLinkId: payosData.paymentLinkId || payosData.id
       }
     };
+
   } catch (err) {
     await tx.rollback().catch(() => { });
     throw err;
