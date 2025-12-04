@@ -69,7 +69,7 @@ const getReaderByAccountId = async (accountId) => {
       deleted: r.deleted,
       created_at: r.created_at,
       updated_at: r.updated_at,
-
+  avatarUrl: r.avatarUrl,
       email: r.Account?.email ?? null,
       phoneNumber: r.Account?.phoneNumber ?? null,
       status: r.Account?.status ?? null,
