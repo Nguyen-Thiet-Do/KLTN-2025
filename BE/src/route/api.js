@@ -1,6 +1,5 @@
 const express = require('express')
 const routeApi = express.Router()
-const testController = require('../controller/test');
 
 
 
@@ -1883,6 +1882,5 @@ routeApi.get('/', (req, res) => {
   res.render('api-docs', apiDocs);
 });
 
-routeApi.get('/tests', testController.getAll);
 
 module.exports = routeApi;
