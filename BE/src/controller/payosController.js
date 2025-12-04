@@ -1,12 +1,14 @@
-// src/controller/payosController.js
+// ==========================
+//  IMPORTS (không lazy nữa)
+// ==========================
 const payosService = require('../service/payosService');
-const { Payment } = require('../model');
+const { Payment, MemberCard } = require('../model');  // lấy luôn MemberCard
+const sequelize = require('../config/database');       // lấy đúng instance Sequelize
 const authService = require('../service/authService');
-const { emitToUser } = require('../config/socket'); // đảm bảo đường dẫn đúng
+const { emitToUser } = require('../config/socket'); 
 
 /**
  * POST /api/payos/create
- * body: { orderCode, amount, description, returnUrl, cancelUrl, items }
  */
 async function createPayment(req, res) {
     try {
@@ -35,16 +37,9 @@ async function createPayment(req, res) {
     }
 }
 
+
 /**
  * POST /api/payos/webhook
- * payload: { data: {...}, signature: "..." } or PayOS default shape
- *
- * Flow:
- *  - Verify signature (payosService.verifyPaymentWebhookData)
- *  - Find Payment by transactionCode = orderCode
- *  - Idempotency: nếu payment đã COMPLETED/PAID -> return 200
- *  - Nếu thành công (code === '00'), cập nhật payment, gọi finalize -> tạo member card
- *  - Nếu tạo member card thành công, emit socket event 'payment_success' cho room user_<readerId>
  */
 async function webhookHandler(req, res) {
     try {
@@ -54,9 +49,8 @@ async function webhookHandler(req, res) {
 
         const webhookData = req.body;
 
-        // Verify webhook bằng SDK / fallback
+        // Verify signature
         const isValid = payosService.verifyPaymentWebhookData(webhookData);
-
         if (!isValid) {
             console.warn('❌ Invalid webhook signature');
             return res.status(403).json({ error: 'invalid signature' });
@@ -64,7 +58,6 @@ async function webhookHandler(req, res) {
 
         console.log('✅ Webhook signature valid');
 
-        // Lấy payload chính
         const data = webhookData.data || webhookData;
         const orderCode = data.orderCode || data.order_code || data.order;
         const code = data.code || data.statusCode || data.status;
@@ -72,175 +65,136 @@ async function webhookHandler(req, res) {
         console.log('📦 Webhook data:', { orderCode, code });
 
         if (!orderCode) {
-            console.warn('❌ No orderCode in webhook data');
             return res.status(400).json({ error: 'no orderCode' });
         }
 
-        // Tìm Payment theo transactionCode
+        // Find payment
         let payment = await Payment.findOne({
             where: { transactionCode: String(orderCode) }
         });
 
         if (!payment) {
             console.warn('⚠️ Payment not found for orderCode:', orderCode);
-            // Trả 200 để tránh PayOS retry nếu bạn không muốn xử lý sau
             return res.status(200).json({ message: 'payment not found' });
         }
 
-        // Idempotency: nếu đã xử lý -> trả 200
-        const processedStatuses = ['COMPLETED', 'PAID'];
-        if (processedStatuses.includes((payment.status || '').toUpperCase())) {
-            console.log('✅ Payment already processed:', payment.paymentId, payment.status);
+        if (['COMPLETED', 'PAID'].includes((payment.status || '').toUpperCase())) {
+            console.log('⚡ Already processed');
             return res.status(200).json({ message: 'already processed' });
         }
 
-        // Xác định thành công: PayOS trả code "00" cho success (điều chỉnh nếu khác)
         const isSuccess = String(code) === '00' || String(code).toUpperCase() === 'SUCCESS';
 
         if (isSuccess) {
-            console.log('✅ Payment successful, updating payment record...');
-
+            console.log('✅ Payment successful, updating payment...');
             await payment.update({
                 status: 'COMPLETED',
-                paymentDate: new Date()
+                paymentDate: new Date(),
             });
 
-            // --- BỔ SUNG: xử lý DEPOSIT / CARD_TOPUP trước khi gọi finalize ---
-            try {
-                // lazy-require models để không phá vỡ import ở đầu file
-                const { MemberCard } = require('../model');
-                const sequelize = require('./config/database');
+            // ================================
+            //  HANDLE TOP-UP (DEPOSIT / CARD_TOPUP)
+            // ================================
+            const pType = (payment.paymentType || '').toUpperCase();
 
-                const pType = (payment.paymentType || '').toUpperCase();
-                if (pType === 'DEPOSIT' || pType === 'CARD_TOPUP') {
-                    console.log('ℹ️ Payment type is DEPOSIT/CARD_TOPUP — attempting to apply topup');
+            if (pType === 'DEPOSIT' || pType === 'CARD_TOPUP') {
+                console.log('💳 Applying topup...');
 
-                    const note = payment.note || '';
-                    const m = /memberCardId:(\d+)/.exec(note);
-                    const memberCardId = m ? Number(m[1]) : null;
+                const note = payment.note || '';
+                const match = /memberCardId:(\d+)/.exec(note);
+                const memberCardId = match ? Number(match[1]) : null;
 
-                    if (!memberCardId) {
-                        console.warn('⚠️ No memberCardId found in payment.note — cannot auto-apply topup');
-                        // vẫn tiếp tục (không finalize tạo thẻ) — trả về OK để provider không retry
-                        return res.status(200).json({ message: 'no memberCardId' });
-                    }
+                if (!memberCardId) {
+                    console.warn('⚠ No memberCardId found in payment.note');
+                    return res.status(200).json({ message: 'no memberCardId' });
+                }
 
-                    // Thực hiện cập nhật balance trong transaction (idempotency & atomic)
+                try {
                     await sequelize.transaction(async (tx) => {
-                        const mc = await MemberCard.findByPk(memberCardId, { transaction: tx, lock: tx.LOCK.UPDATE });
-                        if (!mc) throw new Error('MemberCard not found for topup: ' + memberCardId);
+                        let mc = await MemberCard.findByPk(memberCardId, {
+                            transaction: tx,
+                            lock: tx.LOCK.UPDATE
+                        });
 
-                        // Idempotency: nếu payment.note đã chứa applied_to_memberCard thì coi như đã apply
+                        if (!mc) throw new Error('MemberCard not found');
+
                         if ((payment.note || '').includes(`applied_to_memberCard:${memberCardId}`)) {
-                            console.log('ℹ️ Topup already applied for memberCard:', memberCardId);
+                            console.log('⚡ Topup already applied previously.');
                             return;
                         }
 
-                        const currentBalance = Number(mc.balance || 0);
                         const addAmount = Number(payment.amount || 0);
-                        if (isNaN(addAmount) || addAmount <= 0) {
-                            throw new Error('Invalid payment.amount for topup: ' + payment.amount);
-                        }
+                        const newBalance = Number(mc.balance || 0) + addAmount;
 
-                        const newBalance = Number((currentBalance + addAmount).toFixed(2));
                         await mc.update({ balance: newBalance }, { transaction: tx });
 
-                        // Ghi note để tránh apply lại
-                        await payment.update({ note: (payment.note || '') + `|applied_to_memberCard:${memberCardId}` }, { transaction: tx });
+                        await payment.update({
+                            note: (payment.note || '') + `|applied_to_memberCard:${memberCardId}`
+                        }, { transaction: tx });
 
-                        console.log(`✅ Top-up applied: +${addAmount} to memberCard ${memberCardId}. New balance: ${newBalance}`);
+                        console.log(`✅ Top-up success! +${addAmount} → new balance = ${newBalance}`);
                     });
+                } catch (err) {
+                    console.error('❌ Error applying topup:', err.message);
+                    return res.status(200).json({ message: 'topup error logged' });
+                }
 
-                    // Sau khi apply topup, emit socket event tới reader nếu có (giống luồng payment success)
-                    try {
-                        const payload = {
+                // Emit socket
+                try {
+                    if (payment.readerId) {
+                        emitToUser(payment.readerId, 'payment_success', {
                             paymentId: payment.paymentId,
-                            transactionCode: payment.transactionCode,
                             amount: payment.amount,
                             status: 'COMPLETED',
                             topupApplied: true
-                        };
-                        const readerId = payment.readerId;
-                        if (readerId) {
-                            try {
-                                emitToUser(readerId, 'payment_success', payload);
-                                console.log('🚀 Socket emitted payment_success to user', readerId);
-                            } catch (emitErr) {
-                                console.error('❌ Emit socket failed:', emitErr?.message || emitErr);
-                            }
-                        } else {
-                            console.warn('⚠️ Payment has no readerId - cannot emit socket event');
-                        }
-                    } catch (emitErr) {
-                        console.error('❌ Error emitting socket after topup:', emitErr?.message || emitErr);
+                        });
                     }
-
-                    return res.status(200).json({ message: 'topup applied' });
+                } catch (err) {
+                    console.error('❌ Emit socket error:', err.message);
                 }
-            } catch (topupErr) {
-                // Nếu xảy ra lỗi ở phần topup, log và trả 200 để provider không retry nhiều lần.
-                console.error('❌ Error applying topup (DEPOSIT/CARD_TOPUP):', topupErr?.message || topupErr);
-                return res.status(200).json({ message: 'topup error logged' });
+
+                return res.status(200).json({ message: 'topup applied' });
             }
 
-            // --- Nếu không phải DEPOSIT/CARD_TOPUP thì giữ nguyên luồng finalize tạo member card ---
+            // ================================
+            // NOT TOPUP → CREATE MEMBER CARD
+            // ================================
             try {
                 const result = await authService.finalizePaymentAndCreateMemberCard(payment);
-                // result: { payment: updatedPayment, memberCard }
 
-                // Chuẩn bị payload nhỏ gọn gửi cho client
-                const payload = {
-                    paymentId: payment.paymentId,
-                    transactionCode: payment.transactionCode,
-                    amount: payment.amount,
-                    status: 'COMPLETED',
-                    memberCard: result.memberCard ? {
-                        memberCardId: result.memberCard.memberCardId,
-                        cardNumber: result.memberCard.cardNumber,
-                        cardTypeId: result.memberCard.cardTypeId,
-                        issueDate: result.memberCard.issueDate,
-                        expiryDate: result.memberCard.expiryDate
-                    } : null
-                };
-
-                // Emit event qua Socket.IO tới user room
-                const readerId = payment.readerId;
-                if (readerId) {
-                    try {
-                        emitToUser(readerId, 'payment_success', payload);
-                        console.log('🚀 Socket emitted payment_success to user', readerId);
-                    } catch (emitErr) {
-                        console.error('❌ Emit socket failed:', emitErr?.message || emitErr);
-                    }
-                } else {
-                    console.warn('⚠️ Payment has no readerId - cannot emit socket event');
+                if (payment.readerId) {
+                    emitToUser(payment.readerId, 'payment_success', {
+                        paymentId: payment.paymentId,
+                        transactionCode: payment.transactionCode,
+                        amount: payment.amount,
+                        status: 'COMPLETED',
+                        memberCard: result.memberCard
+                    });
                 }
-
-            } catch (finalizeErr) {
-                console.error('❌ finalizePaymentAndCreateMemberCard error:', finalizeErr?.message || finalizeErr);
-                // Không rollback payment; chỉ log — có thể retry bằng job admin
+            } catch (err) {
+                console.error('❌ finalize error:', err.message);
             }
-
         } else {
-            console.log('❌ Payment failed according to webhook code:', code);
+            console.log('❌ Payment failed');
             await payment.update({ status: 'FAILED' });
         }
 
         return res.status(200).json({ message: 'OK' });
+
     } catch (err) {
-        console.error('❌ Webhook error:', err?.message || err);
+        console.error('❌ Webhook error:', err.message);
         return res.status(500).json({ error: 'internal error' });
     }
 }
 
 
-/**
- * Optional simple pages for browser flow
- */
+// =====================================================================
+
 function returnPage(req, res) {
     const orderCode = req.query.orderCode || req.query.order_code || '';
     res.send(`<html><body><h3>Thanh toán: ${orderCode} - đang xử lý</h3></body></html>`);
 }
+
 function cancelPage(req, res) {
     const orderCode = req.query.orderCode || req.query.order_code || '';
     res.send(`<html><body><h3>Thanh toán: ${orderCode} đã hủy</h3></body></html>`);
