@@ -1772,128 +1772,132 @@ routeApi.get('/', (req, res) => {
         ]
       }
       ,
-      {
-        group: 'Reviews',
-        icon: '⭐',
-        routes: [
-          {
-            method: 'GET',
-            path: '/api/reviews/:documentId',
-            description: 'Lấy danh sách review của 1 tài liệu (kèm thông tin người review)',
-            auth: false,
-            params: {
-              documentId: 'number (required) - ID của tài liệu'
-            },
-            response: {
-              success: 'boolean',
-              data: {
-                reviews: 'array [{ reviewId, readerId, rating, comment, created_at, Reader: { fullName } }]',
-                stats: '{ averageRating, totalReviews }'
-              }
-            },
-            example: {
-              request: 'GET /api/reviews/20',
-              response: {
-                success: true,
-                data: {
-                  reviews: [
-                    {
-                      reviewId: 1,
-                      readerId: 33,
-                      rating: 4,
-                      comment: 'Sách hay',
-                      Reader: { fullName: 'Nguyễn Văn A' }
-                    }
-                  ],
-                  stats: {
-                    averageRating: 4.0,
-                    totalReviews: 1
-                  }
+     {
+  group: 'Reviews',
+  icon: '⭐',
+  routes: [
+    {
+      method: 'GET',
+      path: '/api/reviews/:documentId',
+      description: 'Lấy danh sách review của 1 tài liệu (kèm thông tin người review)',
+      auth: false,
+      params: {
+        documentId: 'number (required) - ID của tài liệu'
+      },
+      response: {
+        success: 'boolean',
+        data: {
+          reviews: 'array [{ reviewId, readerId, rating, comment, created_at, Reader: { fullName, avatarUrl } }]',
+          stats: '{ averageRating, totalReviews }'
+        }
+      },
+      example: {
+        request: 'GET /api/reviews/20',
+        response: {
+          success: true,
+          data: {
+            reviews: [
+              {
+                reviewId: 1,
+                readerId: 33,
+                rating: 4,
+                comment: 'Sách hay',
+                created_at: '2025-01-10',
+                Reader: { 
+                  fullName: 'Nguyễn Văn A',
+                  avatarUrl: '/uploads/avatars/a1b2c3.png'
                 }
               }
-            }
-          },
-
-          {
-            method: 'GET',
-            path: '/api/reviews/:documentId/stats',
-            description: 'Lấy thống kê rating (averageRating, totalReviews)',
-            auth: false,
-            params: {
-              documentId: 'number (required)'
-            },
-            response: {
-              success: 'boolean',
-              data: '{ averageRating, totalReviews }'
-            }
-          },
-
-          {
-            method: 'POST',
-            path: '/api/reviews',
-            description: 'Tạo review mới (Reader roleId=3)',
-            auth: true,
-            role: 'Reader (roleId = 3)',
-            body: {
-              documentId: 'number (required)',
-              rating: 'number (required, 1–5)',
-              comment: 'string (optional)'
-            },
-            response: {
-              success: 'boolean',
-              message: 'string',
-              data: '{ reviewId, readerId, rating, comment, created_at }'
-            },
-            error: {
-              '409': 'Bạn đã nhận xét tài liệu này rồi',
-              '404': 'Không tìm thấy tài liệu'
-            }
-          },
-
-          {
-            method: 'PATCH',
-            path: '/api/reviews/:reviewId',
-            description: 'Cập nhật review của chính độc giả',
-            auth: true,
-            role: 'Reader (roleId = 3)',
-            params: {
-              reviewId: 'number (required)'
-            },
-            body: {
-              rating: 'number (optional)',
-              comment: 'string (optional)'
-            },
-            response: {
-              success: 'boolean',
-              message: 'string'
-            },
-            error: {
-              '403': 'Không có quyền sửa nhận xét này',
-              '404': 'Không tìm thấy nhận xét'
-            }
-          },
-
-          {
-            method: 'DELETE',
-            path: '/api/reviews/:reviewId',
-            description: 'Xóa review của chính độc giả',
-            auth: true,
-            role: 'Reader (roleId = 3)',
-            params: {
-              reviewId: 'number (required)'
-            },
-            response: {
-              success: 'boolean',
-              message: 'string'
-            },
-            error: {
-              '403': 'Không có quyền xóa nhận xét này',
-              '404': 'Không tìm thấy nhận xét'
+            ],
+            stats: {
+              averageRating: 4.0,
+              totalReviews: 1
             }
           }
-        ]
-      },
+        }
+      }
+    },
 
+    {
+      method: 'GET',
+      path: '/api/reviews/:documentId/stats',
+      description: 'Lấy thống kê rating (averageRating, totalReviews)',
+      auth: false,
+      params: {
+        documentId: 'number (required)'
+      },
+      response: {
+        success: 'boolean',
+        data: '{ averageRating, totalReviews }'
+      }
+    },
+
+    {
+      method: 'POST',
+      path: '/api/reviews',
+      description: 'Tạo review mới (Reader roleId=3)',
+      auth: true,
+      role: 'Reader (roleId = 3)',
+      body: {
+        documentId: 'number (required)',
+        rating: 'number (required, 1–5)',
+        comment: 'string (optional)'
+      },
+      response: {
+        success: 'boolean',
+        message: 'string',
+        data: '{ reviewId, readerId, rating, comment, created_at }'
+      },
+      error: {
+        '409': 'Bạn đã nhận xét tài liệu này rồi',
+        '404': 'Không tìm thấy tài liệu'
+      }
+    },
+
+    {
+      method: 'PATCH',
+      path: '/api/reviews/:reviewId',
+      description: 'Cập nhật review của chính độc giả',
+      auth: true,
+      role: 'Reader (roleId = 3)',
+      params: {
+        reviewId: 'number (required)'
+      },
+      body: {
+        rating: 'number (optional)',
+        comment: 'string (optional)'
+      },
+      response: {
+        success: 'boolean',
+        message: 'string'
+      },
+      error: {
+        '403': 'Không có quyền sửa nhận xét này',
+        '404': 'Không tìm thấy nhận xét'
+      }
+    },
+
+    {
+      method: 'DELETE',
+      path: '/api/reviews/:reviewId',
+      description: 'Xóa review của chính độc giả',
+      auth: true,
+      role: 'Reader (roleId = 3)',
+      params: {
+        reviewId: 'number (required)'
+      },
+      response: {
+        success: 'boolean',
+        message: 'string'
+      },
+      error: {
+        '403': 'Không có quyền xóa nhận xét này',
+        '404': 'Không tìm thấy nhận xét'
+      }
+    }
+  ]
+}
+,
       {
         group: 'Test',
         icon: '🧪',

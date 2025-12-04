@@ -10,20 +10,22 @@ const reviewService = {
       console.log(`🔍 Fetching reviews for documentId: ${documentId}`);
       
       const reviews = await sequelize.query(`
-        SELECT 
-          r.reviewId,
-          r.readerId,
-          r.documentId,
-          r.rating,
-          r.comment,
-          r.created_at,
-          r.updated_at,
-          COALESCE(readers.fullName, 'Người dùng ẩn danh') as readerFullName,
-          readers.accountId as readerAccountId
-        FROM Reviews r
-        LEFT JOIN Readers readers ON r.readerId = readers.readerId
-        WHERE r.documentId = :documentId
-        ORDER BY r.created_at DESC
+      SELECT 
+  r.reviewId,
+  r.readerId,
+  r.documentId,
+  r.rating,
+  r.comment,
+  r.created_at,
+  r.updated_at,
+  COALESCE(rd.fullName, 'Người dùng ẩn danh') AS readerFullName,
+  rd.accountId AS readerAccountId,
+  rd.avatarUrl AS avatarUrl      -- ⭐ thêm dòng này
+FROM Reviews r
+LEFT JOIN Readers rd ON r.readerId = rd.readerId
+WHERE r.documentId = :documentId
+ORDER BY r.created_at DESC
+
       `, {
         replacements: { documentId },
         type: sequelize.QueryTypes.SELECT,
@@ -52,6 +54,7 @@ const reviewService = {
           readerId: review.readerId,
           fullName: review.readerFullName,
           accountId: review.readerAccountId,
+            avatarUrl: review.avatarUrl || null,
         },
       }));
       
@@ -178,6 +181,7 @@ const reviewService = {
           readerId: readerInfo.readerId,
           fullName: readerInfo.fullName,
           accountId: readerInfo.accountId,
+            avatarUrl: readerInfo.avatarUrl || null,
         } : {
           readerId: actualReaderId,
           fullName: 'Người dùng ẩn danh',
