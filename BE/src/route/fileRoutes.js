@@ -4,7 +4,8 @@ const { upload } = require("../middleware/upload");
 const {
   uploadCoverCtrl,
   uploadEbookCtrl,
-  deleteObjectCtrl
+  deleteObjectCtrl,
+  uploadAvatarCtrl
 } = require("../controller/fileController");
 const { getObject } = require("../service/r2Service");
 
@@ -73,6 +74,7 @@ router.options("/ebooks/:file", (req, res) => {
 /** ========================= Upload ========================= */
 router.post("/upload/cover", upload.single("cover"), uploadCoverCtrl);
 router.post("/upload/ebook", upload.single("ebook"), uploadEbookCtrl);
+router.post("/upload/avatar", upload.single("avatar"), uploadAvatarCtrl);
 
 /** =================== Proxy stream: ổn định cho FE =================== */
 
@@ -99,6 +101,33 @@ router.get("/covers/:file", async (req, res) => {
     obj.Body.pipe(res);
   } catch {
     res.status(404).json({ ok: false, message: "Cover not found" });
+  }
+});
+
+
+router.get("/avatars/:file", async (req, res) => {
+  const key = `avatars/${req.params.file}`;
+  try {
+    const range = req.headers.range;
+    const obj = await getObject({ key, range });
+
+    // CORS (để fetch qua JS nếu cần).
+    allowCors(req, res);
+
+    // Cache ngắn vì avatar người dùng có thể cập nhật
+    res.setHeader("Cache-Control", "public, max-age=86400"); // 1 ngày
+    res.setHeader("Accept-Ranges", "bytes");
+
+    if (obj.ContentType) res.setHeader("Content-Type", obj.ContentType);
+    if (obj.ContentLength) res.setHeader("Content-Length", String(obj.ContentLength));
+    if (obj.ETag) res.setHeader("ETag", obj.ETag.replace(/"/g, ""));
+    if (obj.LastModified) res.setHeader("Last-Modified", obj.LastModified.toUTCString());
+    if (obj.ContentRange) res.setHeader("Content-Range", obj.ContentRange);
+
+    res.status(range ? 206 : 200);
+    obj.Body.pipe(res);
+  } catch {
+    res.status(404).json({ ok: false, message: "Avatar not found" });
   }
 });
 
@@ -151,5 +180,7 @@ router.get("/ebooks/:file", async (req, res) => {
 
 /** ================ Xoá object ================ */
 router.delete("/object", deleteObjectCtrl);
+
+
 
 module.exports = router;

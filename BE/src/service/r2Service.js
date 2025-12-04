@@ -52,4 +52,18 @@ async function deleteObject(key) {
   await s3.send(new DeleteObjectCommand({ Bucket: r2.bucket, Key: key }));
 }
 
-module.exports = { uploadCover, uploadEbook, getObject, deleteObject };
+async function uploadAvatar(file) {
+  const key = makeKey("avatars/", file.originalname);
+  await s3.send(new PutObjectCommand({
+    Bucket: r2.bucket,
+    Key: key,
+    Body: file.buffer,
+    ContentType: file.mimetype,
+    // avatar: cache ngắn hơn cover vì có thể thay đổi (1 ngày)
+    CacheControl: "public, max-age=86400"
+  }));
+  return { key };
+}
+
+
+module.exports = { uploadCover, uploadEbook, getObject, deleteObject, uploadAvatar };

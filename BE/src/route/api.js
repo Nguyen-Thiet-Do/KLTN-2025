@@ -123,43 +123,75 @@ routeApi.get('/', (req, res) => {
           },
           {
             method: 'POST',
+            path: '/api/files/upload/avatar',
+            description: 'Bước 2.5: Upload ảnh chân dung độc giả dùng cho phát hành thẻ',
+            detailedDescription: 'Endpoint này dùng để tải lên ảnh chân dung của độc giả sau khi đã tạo Reader ở bước 2. Người dùng phải upload ảnh trước khi chuyển sang bước 3 (hoàn tất đăng ký và phát hành thẻ). Ảnh được lưu vào hệ thống và trả về avatarUrl để gửi kèm trong request /api/auth/register/complete.',
+            auth: false,
+            body: 'form-data',
+            formData: {
+              avatar: 'file (required) - Ảnh chân dung định dạng PNG/JPG/JPEG/WebP'
+            },
+            response: {
+              success: {
+                ok: true,
+                avatarUrl: 'string - URL ảnh đã upload, dùng để gửi vào bước 3'
+              },
+              error: {
+                'INVALID_FILE_TYPE': 'Định dạng file không hợp lệ',
+                'MISSING_FILE': 'Thiếu file avatar'
+              }
+            },
+            example: {
+              request: '(form-data) avatar=<file>',
+              response: {
+                ok: true,
+                avatarUrl: 'https://your-api.com/files/avatars/abc123.png'
+              }
+            }
+          },
+
+          {
+            method: 'POST',
             path: '/api/auth/register/complete',
-            description: 'Bước 3: Chọn loại thẻ thành viên và hoàn tất đăng ký',
-            detailedDescription: 'Endpoint cuối cùng trong quy trình đăng ký, cho phép người dùng chọn loại thẻ thành viên (FREE hoặc PREMIUM). Nếu chọn SKIP hoặc thẻ miễn phí, hệ thống sẽ tạo MemberCard ngay lập tức. Nếu chọn PAY với thẻ trả phí (PREMIUM - 150,000đ), hệ thống sẽ tạo payment record và trả về QR code PayOS để thanh toán. Sau khi thanh toán thành công, webhook sẽ tự động tạo MemberCard với balance = số tiền đã trả.',
+            description: 'Bước 3: Chọn loại thẻ và hoàn tất đăng ký thành viên',
+            detailedDescription: 'Đây là bước cuối trong quy trình đăng ký. Người dùng phải cung cấp avatarUrl (được trả về từ API upload avatar ở bước 2.5). Hệ thống sẽ lưu avatarUrl vào Reader trước khi tạo thẻ. Nếu chọn SKIP hoặc thẻ miễn phí, thẻ sẽ được tạo ngay. Nếu chọn PAY với thẻ trả phí, hệ thống sẽ tạo payment record và trả về QR PayOS để thanh toán.',
             auth: false,
             body: {
               readerId: 'number (required) - ID độc giả từ bước 2',
-              cardTypeId: 'number (required) - Loại thẻ: 1=FREE (miễn phí), 2=PREMIUM (150,000đ)',
-              action: 'string (required) - Hành động: "SKIP" (bỏ qua/miễn phí) hoặc "PAY" (thanh toán)',
-              extraInfo: 'object (optional) - Thông tin bổ sung (nếu cần)'
+              cardTypeId: 'number (required) - 1=FREE, 2=PREMIUM (150.000đ)',
+              action: 'string (required) - SKIP (miễn phí) hoặc PAY (thanh toán)',
+              avatarUrl: 'string (required) - URL ảnh avatar từ bước upload ảnh',
+              extraInfo: 'object (optional) - thông tin bổ sung'
             },
             response: {
               skip_or_free: {
                 ok: true,
                 free: true,
                 memberCard: {
-                  memberCardId: 'number - ID thẻ thành viên',
-                  cardNumber: 'string - Mã số thẻ (dạng C + timestamp)',
-                  cardTypeId: 'number - Loại thẻ đã chọn',
-                  balance: 'number - Số dư trong thẻ (0 nếu FREE, hoặc = giá thẻ)',
-                  status: 'string - Trạng thái thẻ (ACTIVE)',
-                  issueDate: 'date - Ngày cấp thẻ',
-                  expiryDate: 'date - Ngày hết hạn (issueDate + duration)'
+                  memberCardId: 'number',
+                  cardNumber: 'string',
+                  cardTypeId: 'number',
+                  balance: 'number (0)',
+                  status: 'ACTIVE',
+                  issueDate: 'date',
+                  expiryDate: 'date'
                 }
               },
               pay: {
                 ok: true,
-                paymentId: 'number - ID bản ghi thanh toán',
-                orderCode: 'number - Mã đơn hàng PayOS (timestamp)',
-                amount: 'number - Số tiền cần thanh toán',
+                paymentId: 'number',
+                orderCode: 'number',
+                amount: 'number',
                 payos: {
-                  checkoutUrl: 'string - URL trang thanh toán PayOS',
-                  qrCode: 'string - Mã QR code để quét thanh toán',
-                  paymentLinkId: 'string - ID link thanh toán PayOS'
+                  checkoutUrl: 'string',
+                  qrCode: 'string',
+                  paymentLinkId: 'string'
                 }
               },
               error: {
-                'CARD_TYPE_NOT_FOUND': 'Loại thẻ không tồn tại hoặc đã bị xóa',
+                'AVATAR_REQUIRED_FOR_CARD': 'Thiếu avatarUrl — bắt buộc phải có ảnh để làm thẻ',
+                'INVALID_AVATAR_URL': 'avatarUrl không hợp lệ',
+                'CARD_TYPE_NOT_FOUND': 'Loại thẻ không tồn tại',
                 'MISSING_FIELDS': 'Thiếu readerId hoặc cardTypeId',
                 'PAYOS_CREATE_FAILED': 'Không thể tạo link thanh toán PayOS'
               }
@@ -168,7 +200,8 @@ routeApi.get('/', (req, res) => {
               request_skip: {
                 readerId: 120351,
                 cardTypeId: 1,
-                action: 'SKIP'
+                action: 'SKIP',
+                avatarUrl: 'https://your-api.com/files/avatars/abc123.png'
               },
               response_skip: {
                 ok: true,
@@ -186,7 +219,8 @@ routeApi.get('/', (req, res) => {
               request_pay: {
                 readerId: 120351,
                 cardTypeId: 2,
-                action: 'PAY'
+                action: 'PAY',
+                avatarUrl: 'https://your-api.com/files/avatars/abc123.png'
               },
               response_pay: {
                 ok: true,
@@ -194,14 +228,15 @@ routeApi.get('/', (req, res) => {
                 orderCode: 1763173347531,
                 amount: 150000,
                 payos: {
-                  checkoutUrl: 'https://pay.payos.vn/web/2c43f9579705408dbf2a0723950211aa',
-                  qrCode: '00020101021238570010A000000727012700069704220113VQRQAFHJG27860208QRIBFTTA530370454061500005802VN62190815Mua the PREMIUM6304CB92',
+                  checkoutUrl: 'https://pay.payos.vn/web/2c43f957...',
+                  qrCode: '000201010212...',
                   paymentLinkId: '2c43f9579705408dbf2a0723950211aa'
                 }
               }
             },
-            note: '⚠️ Quan trọng: Với action="PAY", sau khi user thanh toán thành công qua QR code, PayOS sẽ gửi webhook đến /api/payos/webhook. Webhook sẽ tự động tạo MemberCard với balance = 150,000đ. User cần đăng nhập lại hoặc gọi /api/auth/profile để xem thẻ vừa được tạo.'
+            note: '⚠️ Người dùng PHẢI upload ảnh avatar trước khi gọi API này. Nếu thiếu avatarUrl → hệ thống từ chối vì ảnh là bắt buộc để phát hành thẻ.'
           },
+
           {
             method: 'POST',
             path: '/api/member-cards/topup',
@@ -1725,126 +1760,126 @@ routeApi.get('/', (req, res) => {
       }
       ,
       {
-  group: 'Reviews',
-  icon: '⭐',
-  routes: [
-    {
-      method: 'GET',
-      path: '/api/reviews/:documentId',
-      description: 'Lấy danh sách review của 1 tài liệu (kèm thông tin người review)',
-      auth: false,
-      params: {
-        documentId: 'number (required) - ID của tài liệu'
-      },
-      response: {
-        success: 'boolean',
-        data: {
-          reviews: 'array [{ reviewId, readerId, rating, comment, created_at, Reader: { fullName } }]',
-          stats: '{ averageRating, totalReviews }'
-        }
-      },
-      example: {
-        request: 'GET /api/reviews/20',
-        response: {
-          success: true,
-          data: {
-            reviews: [
-              {
-                reviewId: 1,
-                readerId: 33,
-                rating: 4,
-                comment: 'Sách hay',
-                Reader: { fullName: 'Nguyễn Văn A' }
+        group: 'Reviews',
+        icon: '⭐',
+        routes: [
+          {
+            method: 'GET',
+            path: '/api/reviews/:documentId',
+            description: 'Lấy danh sách review của 1 tài liệu (kèm thông tin người review)',
+            auth: false,
+            params: {
+              documentId: 'number (required) - ID của tài liệu'
+            },
+            response: {
+              success: 'boolean',
+              data: {
+                reviews: 'array [{ reviewId, readerId, rating, comment, created_at, Reader: { fullName } }]',
+                stats: '{ averageRating, totalReviews }'
               }
-            ],
-            stats: {
-              averageRating: 4.0,
-              totalReviews: 1
+            },
+            example: {
+              request: 'GET /api/reviews/20',
+              response: {
+                success: true,
+                data: {
+                  reviews: [
+                    {
+                      reviewId: 1,
+                      readerId: 33,
+                      rating: 4,
+                      comment: 'Sách hay',
+                      Reader: { fullName: 'Nguyễn Văn A' }
+                    }
+                  ],
+                  stats: {
+                    averageRating: 4.0,
+                    totalReviews: 1
+                  }
+                }
+              }
+            }
+          },
+
+          {
+            method: 'GET',
+            path: '/api/reviews/:documentId/stats',
+            description: 'Lấy thống kê rating (averageRating, totalReviews)',
+            auth: false,
+            params: {
+              documentId: 'number (required)'
+            },
+            response: {
+              success: 'boolean',
+              data: '{ averageRating, totalReviews }'
+            }
+          },
+
+          {
+            method: 'POST',
+            path: '/api/reviews',
+            description: 'Tạo review mới (Reader roleId=3)',
+            auth: true,
+            role: 'Reader (roleId = 3)',
+            body: {
+              documentId: 'number (required)',
+              rating: 'number (required, 1–5)',
+              comment: 'string (optional)'
+            },
+            response: {
+              success: 'boolean',
+              message: 'string',
+              data: '{ reviewId, readerId, rating, comment, created_at }'
+            },
+            error: {
+              '409': 'Bạn đã nhận xét tài liệu này rồi',
+              '404': 'Không tìm thấy tài liệu'
+            }
+          },
+
+          {
+            method: 'PATCH',
+            path: '/api/reviews/:reviewId',
+            description: 'Cập nhật review của chính độc giả',
+            auth: true,
+            role: 'Reader (roleId = 3)',
+            params: {
+              reviewId: 'number (required)'
+            },
+            body: {
+              rating: 'number (optional)',
+              comment: 'string (optional)'
+            },
+            response: {
+              success: 'boolean',
+              message: 'string'
+            },
+            error: {
+              '403': 'Không có quyền sửa nhận xét này',
+              '404': 'Không tìm thấy nhận xét'
+            }
+          },
+
+          {
+            method: 'DELETE',
+            path: '/api/reviews/:reviewId',
+            description: 'Xóa review của chính độc giả',
+            auth: true,
+            role: 'Reader (roleId = 3)',
+            params: {
+              reviewId: 'number (required)'
+            },
+            response: {
+              success: 'boolean',
+              message: 'string'
+            },
+            error: {
+              '403': 'Không có quyền xóa nhận xét này',
+              '404': 'Không tìm thấy nhận xét'
             }
           }
-        }
-      }
-    },
-
-    {
-      method: 'GET',
-      path: '/api/reviews/:documentId/stats',
-      description: 'Lấy thống kê rating (averageRating, totalReviews)',
-      auth: false,
-      params: {
-        documentId: 'number (required)'
+        ]
       },
-      response: {
-        success: 'boolean',
-        data: '{ averageRating, totalReviews }'
-      }
-    },
-
-    {
-      method: 'POST',
-      path: '/api/reviews',
-      description: 'Tạo review mới (Reader roleId=3)',
-      auth: true,
-      role: 'Reader (roleId = 3)',
-      body: {
-        documentId: 'number (required)',
-        rating: 'number (required, 1–5)',
-        comment: 'string (optional)'
-      },
-      response: {
-        success: 'boolean',
-        message: 'string',
-        data: '{ reviewId, readerId, rating, comment, created_at }'
-      },
-      error: {
-        '409': 'Bạn đã nhận xét tài liệu này rồi',
-        '404': 'Không tìm thấy tài liệu'
-      }
-    },
-
-    {
-      method: 'PATCH',
-      path: '/api/reviews/:reviewId',
-      description: 'Cập nhật review của chính độc giả',
-      auth: true,
-      role: 'Reader (roleId = 3)',
-      params: {
-        reviewId: 'number (required)'
-      },
-      body: {
-        rating: 'number (optional)',
-        comment: 'string (optional)'
-      },
-      response: {
-        success: 'boolean',
-        message: 'string'
-      },
-      error: {
-        '403': 'Không có quyền sửa nhận xét này',
-        '404': 'Không tìm thấy nhận xét'
-      }
-    },
-
-    {
-      method: 'DELETE',
-      path: '/api/reviews/:reviewId',
-      description: 'Xóa review của chính độc giả',
-      auth: true,
-      role: 'Reader (roleId = 3)',
-      params: {
-        reviewId: 'number (required)'
-      },
-      response: {
-        success: 'boolean',
-        message: 'string'
-      },
-      error: {
-        '403': 'Không có quyền xóa nhận xét này',
-        '404': 'Không tìm thấy nhận xét'
-      }
-    }
-  ]
-},
 
       {
         group: 'Test',

@@ -6,9 +6,13 @@ const upload = multer({
   limits: { fileSize: 50 * 1024 * 1024 }, // 50MB
   fileFilter: (req, file, cb) => {
     const isCover = file.fieldname === "cover";
-    const okCover = /^image\/(png|jpeg|jpg|webp)$/.test(file.mimetype);
+    const isAvatar = file.fieldname === "avatar";
+    const okImage = /^image\/(png|jpeg|jpg|webp)$/.test(file.mimetype);
+
     const okEbook = /\.(pdf|epub)$/i.test(file.originalname || "");
-    if ((isCover && okCover) || (!isCover && okEbook)) cb(null, true);
+
+    if ((isCover && okImage) || (isAvatar && okImage)) cb(null, true);
+    else if (!isCover && !isAvatar && okEbook) cb(null, true);
     else cb(new Error("Định dạng file không hợp lệ"));
   }
 });

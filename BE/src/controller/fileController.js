@@ -1,4 +1,4 @@
-const { uploadCover, uploadEbook, deleteObject } = require("../service/r2Service");
+const { uploadCover, uploadEbook, deleteObject, uploadAvatar } = require("../service/r2Service");
 const { absApiUrl } = require("../utils/url");
 
 // map key -> đường ổn định
@@ -40,4 +40,20 @@ async function deleteObjectCtrl(req, res, next) {
     } catch (e) { next(e); }
 }
 
-module.exports = { uploadCoverCtrl, uploadEbookCtrl, deleteObjectCtrl };
+// helper map key -> path ổn định
+const toAvatarPath = (key) => `/files/avatars/${key.split("/").pop()}`;
+
+// Upload avatar: trả absolute URL public dùng ngay
+async function uploadAvatarCtrl(req, res, next) {
+    try {
+        const f = req.file;
+        if (!f) throw new Error("Thiếu file 'avatar'");
+        const r = await uploadAvatar(f);          // { key }
+        const avatarPath = toAvatarPath(r.key);
+        const avatarUrl = absApiUrl(req, avatarPath);  // absolute URL cho FE
+        // TODO: lưu r.key (và avatarUrl nếu muốn) vào DB khi cần
+        res.json({ ok: true, key: r.key, avatarUrl });
+    } catch (e) { next(e); }
+}
+
+module.exports = { uploadCoverCtrl, uploadEbookCtrl, deleteObjectCtrl, uploadAvatarCtrl };

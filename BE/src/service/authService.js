@@ -549,110 +549,144 @@ async function verifyOtpAndCreateAccountService(payload) {
 // =============================
 // 🎫 COMPLETE REGISTRATION
 // =============================
-async function completeRegistrationService({ readerId, cardTypeId, action = 'SKIP', extraInfo = {} }) {
+async function completeRegistrationService({ readerId, cardTypeId, action = 'SKIP', extraInfo = {}, avatarUrl = null }) {
   if (!readerId || !cardTypeId) {
     throw Object.assign(new Error('MISSING_FIELDS'), { statusCode: 400 });
   }
 
+  // Validate cardType
   const cardType = await CardType.findOne({ where: { cardTypeId, deleted: false } });
   if (!cardType) {
     throw Object.assign(new Error('CARD_TYPE_NOT_FOUND'), { statusCode: 404 });
   }
 
-  if (action === 'SKIP' || Number(cardType.price) <= 0) {
-    const cardNumber = generateCardNumber();
-    const today = new Date();
-    const issueDate = today.toISOString().slice(0, 10);
-    const expiryDate = new Date(
-      today.getTime() + (cardType.duration || 365) * 24 * 3600 * 1000
-    ).toISOString().slice(0, 10);
-
-    const mc = await MemberCard.create({
-      readerId,
-      cardNumber,
-      cardTypeId: cardType.cardTypeId,
-      balance: 0.0,
-      issueDate,
-      expiryDate,
-      status: 'ACTIVE',
-      note: 'created_via_registration_skip_or_free'
-    });
-
-    return { ok: true, free: true, memberCard: mc };
+  // optional: validate avatarUrl format if provided
+  if (avatarUrl) {
+    try {
+      const appBase = (process.env.APP_BASE_URL || '').replace(/\/$/, '');
+      const allowedPrefix1 = `${appBase}/files/avatars/`;
+      const allowedPrefix2 = `/files/avatars/`; // allow relative proxy path
+      if (!(String(avatarUrl).startsWith(allowedPrefix1) || String(avatarUrl).startsWith(allowedPrefix2))) {
+        throw Object.assign(new Error('INVALID_AVATAR_URL'), { statusCode: 400 });
+      }
+    } catch (e) {
+      throw e;
+    }
   }
 
-  const orderCode = Date.now();
-
-  const payment = await Payment.create({
-    loanSlipId: null,
-    violationId: null,
-    readerId,
-    librarianId: Number(process.env.SYSTEM_LIBRARIAN_ID || 120401),
-    paymentType: 'CARD_PURCHASE',
-    amount: Number(cardType.price),
-    paymentMethod: 'PAYOS_QR',
-    paymentDate: null,
-    transactionCode: String(orderCode),
-    status: 'PENDING',
-    note: `cardType:${cardType.cardTypeId}`
-  });
-
-  console.log(`💳 Payment created: ${payment.paymentId} | orderCode: ${orderCode}`);
-
-  const baseUrl = (process.env.APP_BASE_URL || '').replace(/\/$/, '');
-  const returnUrl = `${baseUrl}/pay/return`;
-  const cancelUrl = `${baseUrl}/pay/cancel`;
-
-  let payosResp;
+  // Lấy reader và thực hiện update avatar + create card/payment trong transaction
+  const tx = await sequelize.transaction();
   try {
-    payosResp = await payosService.createPaymentLink({
-      orderCode: orderCode,
+    const reader = await Reader.findByPk(readerId, { transaction: tx, lock: tx.LOCK.UPDATE });
+    if (!reader) {
+      throw Object.assign(new Error('READER_NOT_FOUND'), { statusCode: 404 });
+    }
+
+    // Nếu avatarUrl gửi lên thì lưu vào Reader (cập nhật)
+    if (avatarUrl && String(avatarUrl).trim() !== '') {
+      reader.avatarUrl = avatarUrl;
+      await reader.save({ transaction: tx });
+    }
+
+    // Nếu là SKIP (free) hoặc cardType.price <= 0 thì tạo MemberCard ngay trong transaction
+    if (action === 'SKIP' || Number(cardType.price) <= 0) {
+      const cardNumber = generateCardNumber();
+      const today = new Date();
+      const issueDate = today.toISOString().slice(0, 10);
+      const expiryDate = new Date(
+        today.getTime() + (cardType.duration || 365) * 24 * 3600 * 1000
+      ).toISOString().slice(0, 10);
+
+      const mc = await MemberCard.create({
+        readerId,
+        cardNumber,
+        cardTypeId: cardType.cardTypeId,
+        balance: 0.0,
+        issueDate,
+        expiryDate,
+        status: 'ACTIVE',
+        note: 'created_via_registration_skip_or_free'
+      }, { transaction: tx });
+
+      await tx.commit();
+      return { ok: true, free: true, memberCard: mc };
+    }
+
+    // Nếu phải thanh toán: tạo Payment rồi commit (luồng payment tiếp diễn)
+    // Tạo payment trong transaction để đảm bảo reader.avatarUrl đã được lưu trước khi trả link
+    const orderCode = Date.now();
+    const payment = await Payment.create({
+      loanSlipId: null,
+      violationId: null,
+      readerId,
+      librarianId: Number(process.env.SYSTEM_LIBRARIAN_ID || 120401),
+      paymentType: 'CARD_PURCHASE',
       amount: Number(cardType.price),
-      description: `Thanh toán thẻ thành viên`,
-      returnUrl,
-      cancelUrl,
-      items: [{
-        name: cardType.cardTypeName || cardType.typeName || 'Membership Card',
-        quantity: 1,
-        price: Number(cardType.price)
-      }]
-    });
+      paymentMethod: 'PAYOS_QR',
+      paymentDate: null,
+      transactionCode: String(orderCode),
+      status: 'PENDING',
+      note: `cardType:${cardType.cardTypeId}`
+    }, { transaction: tx });
 
-    console.log('✅ PayOS response:', JSON.stringify(payosResp, null, 2));
+    // Commit here so frontend nhận được payment/paymentLink (payment persisted)
+    await tx.commit();
 
-  } catch (err) {
-    console.error('❌ PayOS create failed:', err.message);
+    // tạo link với PayOS (ngoài transaction)
+    const baseUrl = (process.env.APP_BASE_URL || '').replace(/\/$/, '');
+    const returnUrl = `${baseUrl}/pay/return`;
+    const cancelUrl = `${baseUrl}/pay/cancel`;
+
+    let payosResp;
+    try {
+      payosResp = await payosService.createPaymentLink({
+        orderCode: orderCode,
+        amount: Number(cardType.price),
+        description: `Thanh toán thẻ thành viên`,
+        returnUrl,
+        cancelUrl,
+        items: [{
+          name: cardType.cardTypeName || cardType.typeName || 'Membership Card',
+          quantity: 1,
+          price: Number(cardType.price)
+        }]
+      });
+    } catch (err) {
+      // Nếu tạo payment link thất bại, bạn có thể cập nhật payment.status = 'FAILED'
+      await Payment.update({
+        status: 'FAILED',
+        note: (payment.note || '') + '|payos_create_failed:' + err.message
+      }, { where: { paymentId: payment.paymentId } }).catch(() => { });
+      throw Object.assign(new Error('PAYOS_CREATE_FAILED'), { statusCode: 500 });
+    }
+
+    const payosData = payosResp?.data || payosResp || {};
 
     await payment.update({
-      status: 'FAILED',
-      note: (payment.note || '') + '|payos_create_failed:' + err.message
+      note: (payment.note || '') + `|payos:${JSON.stringify({
+        paymentLinkId: payosData.paymentLinkId || payosData.id,
+        checkoutUrl: payosData.checkoutUrl,
+        qrCode: payosData.qrCode || payosData.qr
+      })}`
     });
 
-    throw Object.assign(new Error('PAYOS_CREATE_FAILED'), { statusCode: 500 });
+    return {
+      ok: true,
+      paymentId: payment.paymentId,
+      orderCode,
+      amount: payment.amount,
+      payos: {
+        checkoutUrl: payosData.checkoutUrl,
+        qrCode: payosData.qrCode || payosData.qr,
+        paymentLinkId: payosData.paymentLinkId || payosData.id
+      }
+    };
+  } catch (err) {
+    await tx.rollback().catch(() => { });
+    throw err;
   }
-
-  const payosData = payosResp?.data || payosResp || {};
-
-  await payment.update({
-    note: (payment.note || '') + `|payos:${JSON.stringify({
-      paymentLinkId: payosData.paymentLinkId || payosData.id,
-      checkoutUrl: payosData.checkoutUrl,
-      qrCode: payosData.qrCode || payosData.qr
-    })}`
-  });
-
-  return {
-    ok: true,
-    paymentId: payment.paymentId,
-    orderCode: orderCode,
-    amount: payment.amount,
-    payos: {
-      checkoutUrl: payosData.checkoutUrl,
-      qrCode: payosData.qrCode || payosData.qr,
-      paymentLinkId: payosData.paymentLinkId || payosData.id
-    }
-  };
 }
+
 
 // =============================
 // 💳 FINALIZE PAYMENT AND CREATE MEMBER CARD (WITH EMAIL NOTIFICATION)

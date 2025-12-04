@@ -16,6 +16,8 @@ const Reader = sequelize.define('Reader', {
   deleted: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false, field: 'deleted' },
   created_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW, field: 'created_at' },
   updated_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW, field: 'updated_at' },
+  avatarUrl: { type: DataTypes.STRING(255), allowNull: true, field: 'avatarUrl' },
+
 }, { tableName: 'Readers', timestamps: false });
 
 module.exports = Reader;
