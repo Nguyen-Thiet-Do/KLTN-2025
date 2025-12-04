@@ -52,7 +52,8 @@ import {
 import AddReader from "./AddReader";
 import EditReader from "./EditReader";
 import ViewReaderDetail from "./ViewReaderDetail";
-
+import ReaderBalanceModal from "./ReaderBalanceModal";
+import { AccountBalanceWallet } from "@mui/icons-material";
 import QRPaymentModal from "./QRPaymentModal";
 import { completeRegistration } from "../../services/authService";
 
@@ -70,7 +71,7 @@ export default function Readers() {
   const [paymentModalOpen, setPaymentModalOpen] = useState(false);
   const [currentPaymentData, setCurrentPaymentData] = useState(null);
 const [viewingReader, setViewingReader] = useState(null);
-
+const [balanceReader, setBalanceReader] = useState(null);
   const fetchData = async () => {
     try {
       const token = sessionStorage.getItem("accessToken");
@@ -598,7 +599,21 @@ Vui lòng liên hệ quản trị viên hoặc thử lại sau.`;
   </IconButton>
 </Tooltip>
 
-
+{/* ✅ THÊM NÚT XEM SỐ DƯ - Chỉ hiện cho reader có thẻ */}
+{r.memberCard && !r.deleted && (
+  <Tooltip title="Xem số dư & Nạp tiền">
+    <IconButton
+      size="small"
+      onClick={() => setBalanceReader(r)}
+      sx={{
+        color: "#38A169",
+        "&:hover": { backgroundColor: "rgba(56,161,105,0.1)" },
+      }}
+    >
+      <AccountBalanceWallet />
+    </IconButton>
+  </Tooltip>
+)}
     {/* Tạo thẻ thành viên (chỉ hiện ở tab 'Chưa có thẻ') */}
     {tabValue === 1 && !r.deleted && (
       <Tooltip title="Tạo thẻ thành viên">
@@ -742,7 +757,15 @@ Vui lòng liên hệ quản trị viên hoặc thử lại sau.`;
           )}
         </Card>
       )}
-
+{/* Modal xem số dư */}
+{balanceReader && (
+  <ReaderBalanceModal
+    open={!!balanceReader}
+    reader={balanceReader}
+    onClose={() => setBalanceReader(null)}
+    onSuccess={fetchData}
+  />
+)}
       {paymentModalOpen && currentPaymentData && (
         <QRPaymentModal
           open={paymentModalOpen}
