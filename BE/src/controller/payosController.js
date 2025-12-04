@@ -108,7 +108,8 @@ async function webhookHandler(req, res) {
             // --- BỔ SUNG: xử lý DEPOSIT / CARD_TOPUP trước khi gọi finalize ---
             try {
                 // lazy-require models để không phá vỡ import ở đầu file
-                const { MemberCard, sequelize } = require('../model');
+                const { MemberCard } = require('../model');
+                const sequelize = require('./config/database');
 
                 const pType = (payment.paymentType || '').toUpperCase();
                 if (pType === 'DEPOSIT' || pType === 'CARD_TOPUP') {
