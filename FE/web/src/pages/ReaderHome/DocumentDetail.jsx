@@ -249,6 +249,7 @@ export default function DocumentDetail() {
   }, [doc]);
 
   useEffect(() => {
+     window.scrollTo(0, 0);
     load();
     loadSimilar();
     return () => {
