@@ -42,4 +42,10 @@ router.get("/never-borrowed", statisticController.getNeverBorrowedBooks);
 // 🔹 Độc giả không hoạt động
 router.get("/inactive-readers", statisticController.getInactiveReaders);
 
+router.get("/report-loans", statisticController.getReportByDateRange);
+
+
+// 🔹 Thống kê tiền phạt theo khoảng thời gian
+router.get("/fine-report", statisticController.getFineReportByDateRange);
+
 module.exports = router;
