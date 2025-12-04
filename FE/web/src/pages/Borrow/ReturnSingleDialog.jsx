@@ -37,7 +37,7 @@ function parseDateOnly(d = null) {
 const CONDITION_RANGES = [
     { key: "100-90", label: "Mới", upper: 100, lower: 90 },
     { key: "90-70", label: "Tốt/ Trầy nhẹ", upper: 90, lower: 70 },
-    { key: "70-50", label: "Rách bìa, trang", upper: 70, lower: 50 },
+    { key: "70-50", label: "Rách bìa, trang", upper: 69, lower: 50 },
     { key: "50-0", label: "Hư nặng", upper: 50, lower: 0 },
 ];
 
@@ -599,7 +599,7 @@ export default function ReturnSingleDialog({
 
                         {/* Cảnh báo nếu representative < 70 */}
                         {!isLost && Number(conditionReturn) < 70 && (
-                            <Alert severity="warning">Lưu ý: ở mức dưới 70% sẽ tính phạt hư hỏng.</Alert>
+                            <Alert severity="warning"></Alert>
                         )}
 
                         <TextField

@@ -41,7 +41,7 @@ function parseDateOnly(d = null) {
 const CONDITION_RANGES = [
   { key: "100-90", label: "Mới", upper: 100, lower: 90 },
   { key: "90-70", label: "Tốt/ Trầy nhẹ", upper: 90, lower: 70 },
-  { key: "70-50", label: "Rách bìa, trang", upper: 70, lower: 50 },
+  { key: "70-50", label: "Rách bìa, trang", upper: 69, lower: 50 },
   { key: "50-0", label: "Hư nặng", upper: 50, lower: 0 },
 ];
 
@@ -599,7 +599,7 @@ export default function ReturnBulkDialog({ open, onClose, slip, onReturned }) {
                           </TextField>
 
                           {Number(it.conditionReturn) < 70 && !it.isLost && (
-                            <Typography variant="caption" color="error">Sẽ tính phạt hư hỏng</Typography>
+                            <Typography variant="caption" color="error"></Typography>
                           )}
                         </TableCell>
                         <TableCell>
