@@ -33,6 +33,28 @@ import ReaderCard from "../../components/layouts/ReaderCard";
 import { documentApi } from "../../services/documentApi";
 import { reviewApi } from "../../services/reviewApi";
 import ButtonLoader from "../../components/Loading/ButtonLoader";
+const getAvatarUrl = (avatarUrl) => {
+  if (!avatarUrl) return null;
+
+  const baseURL =
+    window.location.hostname === "localhost"
+      ? "http://localhost:8080"
+      : "https://kltn-2025-ehsx.onrender.com";
+
+  if (avatarUrl.startsWith("http")) return avatarUrl;
+
+  return `${baseURL}${avatarUrl}`;
+};
+
+const getAvatarFullUrl = (path) => {
+  const baseURL =
+    window.location.hostname === "localhost"
+      ? "http://localhost:8080"
+      : "https://kltn-2025-ehsx.onrender.com";
+
+  return path.startsWith("http") ? path : `${baseURL}${path}`;
+};
+
 
 const isAbort = (e) =>
   e?.code === "ERR_CANCELED" ||
@@ -692,15 +714,17 @@ const openEbook = async () => {
                         >
                           <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
                             <Stack direction="row" spacing={2} sx={{ flex: 1 }}>
-                              <Avatar 
-                                sx={{ 
-                                  bgcolor: isMyReview ? 'primary.main' : 'grey.400',
-                                  width: 40,
-                                  height: 40
-                                }}
-                              >
-                                {review.Reader?.fullName?.charAt(0)?.toUpperCase() || 'U'}
-                              </Avatar>
+                           <Avatar
+   src={review.Reader?.avatarUrl ? getAvatarFullUrl(review.Reader.avatarUrl) : undefined}
+  sx={{
+    width: 40,
+    height: 40,
+    bgcolor: isMyReview ? "primary.main" : "grey.400",
+  }}
+>
+    {(!review.Reader?.avatarUrl) && (review.Reader?.fullName?.[0]?.toUpperCase() || "U")}
+</Avatar>
+
                               
                               <Box sx={{ flex: 1 }}>
                                 <Stack direction="row" alignItems="center" spacing={1} mb={0.5}>
