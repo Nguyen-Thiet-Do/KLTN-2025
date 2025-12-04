@@ -1,15 +1,13 @@
 // ==========================================
-// 📁 src/services/fineStatisticApi.js
+// 📁 src/services/fineStatisticApi.js (SỬA LẠI)
 // ==========================================
-import axios from 'axios';
-
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
+import api from "./api";  // ← QUAN TRỌNG: Dùng api instance có sẵn
 
 export const fineStatisticApi = {
   // 🔹 1. Thống kê tổng quan tiền phạt
   async getOverview() {
     try {
-      const res = await axios.get(`${API_URL}/fine-statistics/overview`);
+      const res = await api.get('/fine-statistics/overview');
       if (!res.data?.success) {
         throw new Error(res.data?.message || "Không lấy được thống kê tổng quan");
       }
@@ -23,7 +21,7 @@ export const fineStatisticApi = {
   // 🔹 2. Thống kê theo trạng thái thanh toán
   async getByStatus() {
     try {
-      const res = await axios.get(`${API_URL}/fine-statistics/by-status`);
+      const res = await api.get('/fine-statistics/by-status');
       if (!res.data?.success) {
         throw new Error(res.data?.message || "Không lấy được thống kê theo trạng thái");
       }
@@ -37,7 +35,7 @@ export const fineStatisticApi = {
   // 🔹 3. Thống kê tiền phạt theo 12 tháng
   async getMonthly() {
     try {
-      const res = await axios.get(`${API_URL}/fine-statistics/monthly`);
+      const res = await api.get('/fine-statistics/monthly');
       if (!res.data?.success) {
         throw new Error(res.data?.message || "Không lấy được thống kê theo tháng");
       }
@@ -51,7 +49,7 @@ export const fineStatisticApi = {
   // 🔹 4. Top 10 độc giả vi phạm nhiều nhất
   async getTopViolators() {
     try {
-      const res = await axios.get(`${API_URL}/fine-statistics/top-violators`);
+      const res = await api.get('/fine-statistics/top-violators');
       if (!res.data?.success) {
         throw new Error(res.data?.message || "Không lấy được top độc giả vi phạm");
       }
@@ -65,7 +63,7 @@ export const fineStatisticApi = {
   // 🔹 5. Thống kê theo loại vi phạm
   async getByType() {
     try {
-      const res = await axios.get(`${API_URL}/fine-statistics/by-type`);
+      const res = await api.get('/fine-statistics/by-type');
       if (!res.data?.success) {
         throw new Error(res.data?.message || "Không lấy được thống kê theo loại vi phạm");
       }
@@ -79,7 +77,7 @@ export const fineStatisticApi = {
   // 🔹 BONUS: Danh sách độc giả còn nợ tiền phạt
   async getUnpaid() {
     try {
-      const res = await axios.get(`${API_URL}/fine-statistics/unpaid`);
+      const res = await api.get('/fine-statistics/unpaid');
       if (!res.data?.success) {
         throw new Error(res.data?.message || "Không lấy được danh sách nợ");
       }
@@ -93,7 +91,7 @@ export const fineStatisticApi = {
   // 🔹 BONUS: Thống kê theo phương thức thanh toán
   async getByPaymentMethod() {
     try {
-      const res = await axios.get(`${API_URL}/fine-statistics/by-payment-method`);
+      const res = await api.get('/fine-statistics/by-payment-method');
       if (!res.data?.success) {
         throw new Error(res.data?.message || "Không lấy được thống kê phương thức thanh toán");
       }
