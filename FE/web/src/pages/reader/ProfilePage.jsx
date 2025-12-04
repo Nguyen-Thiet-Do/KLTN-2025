@@ -1,5 +1,4 @@
-// src/components/reader/ProfilePage.jsx 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useAuth } from "../../contexts/AuthContext";
 import { 
   Box, 
@@ -13,7 +12,10 @@ import {
   Alert,
   Card,
   CardContent,
-  Grid
+  Grid,
+  IconButton,
+  CircularProgress,
+  Tooltip
 } from "@mui/material";
 import ReaderHeader from "../../components/layouts/ReaderHeader";
 import { useNavigate } from "react-router-dom";
@@ -27,7 +29,9 @@ import {
   Email,
   Edit,
   CardMembership,
-  AddCard
+  AddCard,
+  PhotoCamera,
+  Delete
 } from "@mui/icons-material";
 import QRPaymentModal from "../Readers/QRPaymentModal";
 import { completeRegistration, topupMemberCard } from "../../services/authService";
@@ -36,13 +40,15 @@ export default function ProfilePage() {
   const { user, loading: authLoading, refreshUser } = useAuth();
   const [loading, setLoading] = useState(true);
   const [processingPayment, setProcessingPayment] = useState(false);
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
   const navigate = useNavigate();
+  const fileInputRef = useRef(null);
 
-  // ✅ State cho payment modal
   const [paymentModalOpen, setPaymentModalOpen] = useState(false);
   const [currentPaymentData, setCurrentPaymentData] = useState(null);
+  const [avatarKey, setAvatarKey] = useState(Date.now());
 
   const getGenderDisplay = (gender) => {
     if (!gender) return "Chưa cập nhật";
@@ -75,16 +81,120 @@ export default function ProfilePage() {
     }).format(amount || 0);
   };
 
+  // ✅ Sửa hàm getAvatarUrl - thêm cache busting
+  const getAvatarUrl = () => {
+    if (!user?.avatarUrl) return null;
+    
+    const baseURL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8080";
+    
+    // Nếu avatarUrl đã là full URL
+    if (user.avatarUrl.startsWith('http')) {
+      return `${user.avatarUrl}?t=${avatarKey}`;
+    }
+    
+    // Nếu avatarUrl là relative path
+    return `${baseURL}${user.avatarUrl}?t=${avatarKey}`;
+  };
+
   useEffect(() => {
     if (!authLoading) {
       setLoading(false);
       console.log('👤 Current user data:', user);
+      console.log('🖼️ Avatar URL:', user?.avatarUrl);
+      console.log('🔗 Full Avatar URL:', getAvatarUrl());
     }
-  }, [user, authLoading]);
+  }, [user, authLoading, avatarKey]);
 
-  // ========================================
-  // ✅ USE CASE 1: ĐĂNG KÝ THẺ MỚI (chưa có thẻ)
-  // ========================================
+  // ✅ Xử lý click vào avatar
+  const handleAvatarClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  // ✅ Xử lý upload file - ĐÃ SỬA
+  const handleFileChange = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    // Validate file type
+    const validTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
+    if (!validTypes.includes(file.type)) {
+      setError('Chỉ chấp nhận file ảnh (JPEG, PNG, GIF, WebP)');
+      return;
+    }
+
+    // Validate file size (5MB)
+    if (file.size > 5 * 1024 * 1024) {
+      setError('Kích thước file không được vượt quá 5MB');
+      return;
+    }
+
+    try {
+      setUploadingAvatar(true);
+      setError(null);
+      setSuccess(null);
+
+      const formData = new FormData();
+      formData.append('avatar', file);
+
+      const token = sessionStorage.getItem("accessToken");
+      if (!token) {
+        throw new Error("Vui lòng đăng nhập lại");
+      }
+
+      const baseURL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8080";
+      
+      console.log("📤 Uploading to:", `${baseURL}/api/profile/upload-avatar`);
+      console.log("📦 File:", file.name, file.type, file.size);
+
+      const response = await fetch(`${baseURL}/api/profile/upload-avatar`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        },
+        body: formData
+      });
+
+      const contentType = response.headers.get("content-type");
+      console.log("📥 Response status:", response.status);
+      console.log("📥 Content-Type:", contentType);
+      
+      if (!contentType || !contentType.includes("application/json")) {
+        const text = await response.text();
+        console.error("❌ Server response:", text);
+        throw new Error(`Server error: ${text.substring(0, 200)}`);
+      }
+
+      const data = await response.json();
+      console.log("✅ Upload response:", data);
+
+      if (!response.ok) {
+        throw new Error(data.message || 'Upload thất bại');
+      }
+
+      setSuccess('Upload avatar thành công! 🎉');
+      
+      // ✅ Force reload avatar ngay lập tức
+      setAvatarKey(Date.now());
+      
+      // Refresh user data để lấy avatarUrl mới từ server
+      await refreshUser();
+      
+      // Reload page sau 1 giây để đảm bảo mọi thứ đồng bộ
+      setTimeout(() => {
+        window.location.reload();
+      }, 1000);
+      
+    } catch (err) {
+      console.error("❌ Lỗi upload avatar:", err);
+      setError(err.message || 'Không thể upload avatar');
+    } finally {
+      setUploadingAvatar(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  };
+
   const handleRegisterMemberCard = async () => {
     try {
       setProcessingPayment(true);
@@ -100,7 +210,7 @@ export default function ProfilePage() {
       const res = await completeRegistration(
         {
           readerId: user.readerId,
-          cardTypeId: 2, // PREMIUM card
+          cardTypeId: 2,
           action: "PAY"
         },
         token
@@ -159,9 +269,6 @@ export default function ProfilePage() {
     }
   };
 
-  // ========================================
-  // ✅ USE CASE 2: NẠP TIỀN VÀO THẺ (đã có thẻ)
-  // ========================================
   const handleTopupBalance = async () => {
     try {
       setProcessingPayment(true);
@@ -189,11 +296,7 @@ export default function ProfilePage() {
       );
 
       console.log("✅ Topup response:", res);
-      console.log("📦 Full response structure:", JSON.stringify(res, null, 2));
 
-      // ✅ Xử lý trường hợp đã đủ tiền
-      // Backend có thể trả về nhiều format khác nhau:
-      // Format 1: { already_sufficient: {...} }
       if (res.already_sufficient) {
         const balanceInfo = res.already_sufficient;
         setSuccess(
@@ -204,7 +307,6 @@ export default function ProfilePage() {
         return;
       }
       
-      // Format 2: { success: true, message: "Thẻ đã có đủ số dư...", data: {...} }
       if (res.success === true && res.message?.includes("đủ số dư")) {
         const balanceData = res.data || {};
         setSuccess(
@@ -215,7 +317,6 @@ export default function ProfilePage() {
         return;
       }
       
-      // Format 3: Check data có currentBalance >= targetBalance
       if (res.success && res.data?.currentBalance !== undefined && 
           res.data?.targetBalance !== undefined &&
           res.data.currentBalance >= res.data.targetBalance) {
@@ -227,23 +328,14 @@ export default function ProfilePage() {
         return;
       }
 
-      // ✅ Xử lý trường hợp cần thanh toán
-      // Backend có thể trả về: res.created hoặc res.data
       let responseData = res.created || res.data || res;
       
-      console.log("📋 Response data:", responseData);
-      console.log("💳 Payment ID:", responseData.paymentId);
-      console.log("💰 Amount:", responseData.amount);
-      console.log("🔗 Checkout URL:", responseData.checkoutUrl);
-      console.log("📱 QR Code:", responseData.qrCode);
-
       const paymentId = responseData.paymentId;
       const amount = responseData.amount;
       const qrCode = responseData.qrCode;
       const checkoutUrl = responseData.checkoutUrl;
       
       if (!paymentId) {
-        console.error("❌ Missing paymentId in response:", responseData);
         throw new Error("Không nhận được thông tin thanh toán từ server. Vui lòng kiểm tra console.");
       }
 
@@ -253,8 +345,6 @@ export default function ProfilePage() {
         checkoutUrl: checkoutUrl || null,
         amount: amount
       };
-
-      console.log("🎯 Payment info (topup):", paymentInfo);
 
       if (!paymentInfo.qrCode && !paymentInfo.checkoutUrl) {
         throw new Error("Không có thông tin thanh toán. Vui lòng liên hệ quản trị viên.");
@@ -290,12 +380,9 @@ export default function ProfilePage() {
 
   const handlePaymentSuccess = () => {
     console.log("✅ Thanh toán thành công - Đang reload trang...");
-    
     setPaymentModalOpen(false);
     setCurrentPaymentData(null);
-    
     alert("🎉 Thanh toán thành công!");
-    
     window.location.reload();
   };
 
@@ -384,7 +471,6 @@ export default function ProfilePage() {
             mx: "auto",
           }}
         >
-          {/* Profile Card */}
           <Paper
             elevation={0}
             sx={{
@@ -404,26 +490,67 @@ export default function ProfilePage() {
                 position: "relative",
               }}
             >
-              <Avatar
-                sx={{
-                  width: 120,
-                  height: 120,
-                  mx: "auto",
-                  mb: 2,
-                  border: "4px solid white",
-                  boxShadow: "0 8px 24px rgba(0,0,0,0.2)",
-                  fontSize: "3rem",
-                  fontWeight: 700,
-                }}
-              >
-                {user?.fullName?.[0]?.toUpperCase() || "U"}
-              </Avatar>
+              {/* ✅ Avatar với nút upload - ĐÃ SỬA */}
+              <Box sx={{ position: 'relative', display: 'inline-block' }}>
+                <Avatar
+                  key={avatarKey}  // ← Force re-render khi avatarKey thay đổi
+                  src={getAvatarUrl()}
+                  sx={{
+                    width: 120,
+                    height: 120,
+                    border: "4px solid white",
+                    boxShadow: "0 8px 24px rgba(0,0,0,0.2)",
+                    fontSize: "3rem",
+                    fontWeight: 700,
+                    bgcolor: !getAvatarUrl() ? "primary.main" : undefined,
+                  }}
+                >
+                  {!getAvatarUrl() && (user?.fullName?.[0]?.toUpperCase() || "U")}
+                </Avatar>
+                
+                {/* Nút upload avatar */}
+                <Tooltip title="Thay đổi ảnh đại diện">
+                  <IconButton
+                    onClick={handleAvatarClick}
+                    disabled={uploadingAvatar}
+                    sx={{
+                      position: 'absolute',
+                      bottom: 0,
+                      right: 0,
+                      backgroundColor: 'white',
+                      boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
+                      '&:hover': {
+                        backgroundColor: 'rgba(255,255,255,0.9)',
+                      },
+                      width: 40,
+                      height: 40,
+                    }}
+                  >
+                    {uploadingAvatar ? (
+                      <CircularProgress size={20} />
+                    ) : (
+                      <PhotoCamera sx={{ fontSize: 20, color: '#667eea' }} />
+                    )}
+                  </IconButton>
+                </Tooltip>
+                
+                {/* Hidden file input */}
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/jpeg,image/jpg,image/png,image/gif,image/webp"
+                  onChange={handleFileChange}
+                  style={{ display: 'none' }}
+                />
+              </Box>
+              
               <Typography
                 variant="h4"
                 sx={{
                   color: "white",
                   fontWeight: 700,
                   mb: 1,
+                  mt: 2,
                 }}
               >
                 {user?.fullName || "Người dùng"}
@@ -440,9 +567,6 @@ export default function ProfilePage() {
                 }}
               />
 
-              {/* ========================================
-                  ✅ USE CASE 1: NÚT ĐĂNG KÝ THẺ (chưa có thẻ)
-                  ======================================== */}
               {!user?.memberCard && (
                 <Box sx={{ mt: 3 }}>
                   <Button
@@ -493,7 +617,6 @@ export default function ProfilePage() {
 
             {/* Info Section */}
             <Box sx={{ p: 4 }}>
-              {/* ✅ Hiển thị thông báo */}
               {error && (
                 <Alert 
                   severity="error" 
@@ -514,9 +637,6 @@ export default function ProfilePage() {
                 </Alert>
               )}
 
-              {/* ========================================
-                  ✅ USE CASE 2: THÔNG TIN THẺ + NÚT NẠP TIỀN (đã có thẻ)
-                  ======================================== */}
               {user?.memberCard && (
                 <Card
                   sx={{
@@ -546,13 +666,6 @@ export default function ProfilePage() {
                       </Grid>
 
                       <Grid item xs={6}>
-                        {/* <Typography variant="caption" sx={{ opacity: 0.8 }}>
-                          Loại thẻ
-                        </Typography> */}
-                        {/* <Typography variant="body1" sx={{ fontWeight: 600 }}>
-                          {user.memberCard.cardType?.cardTypeName || 
-                           user.memberCard.cardType?.typeName || "N/A"}
-                        </Typography> */}
                       </Grid>
 
                       <Grid item xs={6}>
@@ -574,7 +687,6 @@ export default function ProfilePage() {
                       </Grid>
                     </Grid>
 
-                    {/* ✅ NÚT NẠP TIỀN (chỉ hiện khi ĐÃ CÓ THẺ) */}
                     <Button
                       variant="contained"
                       fullWidth
@@ -669,7 +781,6 @@ export default function ProfilePage() {
         </Box>
       </Box>
 
-      {/* ✅ Payment Modal (dùng chung cho cả 2 use case) */}
       {paymentModalOpen && currentPaymentData && (
         <QRPaymentModal
           open={paymentModalOpen}
