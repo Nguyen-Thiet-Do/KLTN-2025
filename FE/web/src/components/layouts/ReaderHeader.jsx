@@ -74,6 +74,23 @@ export default function ReaderHeader() {
     console.log("🔔 ReaderHeader - unreadCount changed:", unreadCount);
   }, [unreadCount]);
 
+const getAvatarUrl = () => {
+  if (!user?.avatarUrl) return null;
+
+  const baseURL =
+    window.location.hostname === "localhost"
+      ? "http://localhost:8080"
+      : "https://kltn-2025-ehsx.onrender.com";
+
+  // Nếu avatar đã là URL đầy đủ
+  if (user.avatarUrl.startsWith("http")) {
+    return user.avatarUrl;
+  }
+
+  return `${baseURL}${user.avatarUrl}`;
+};
+
+
   const tabs = useMemo(
     () => [
       { path: "/", label: "Trang chủ", icon: "🏠", iconComponent: <Home /> },
@@ -304,17 +321,19 @@ export default function ReaderHeader() {
                 },
               }}
             >
-              <Avatar
-                sx={{
-                  width: { xs: 32, sm: 36 },
-                  height: { xs: 32, sm: 36 },
-                  bgcolor: "primary.main",
-                  fontWeight: 700,
-                  fontSize: "0.9rem",
-                }}
-              >
-                {initials}
-              </Avatar>
+            <Avatar
+  src={getAvatarUrl() || undefined}
+  sx={{
+    width: { xs: 32, sm: 36 },
+    height: { xs: 32, sm: 36 },
+    bgcolor: "primary.main",
+    fontWeight: 700,
+    fontSize: "0.9rem",
+  }}
+>
+  {!getAvatarUrl() && initials}
+</Avatar>
+
             </IconButton>
           </Tooltip>
 
