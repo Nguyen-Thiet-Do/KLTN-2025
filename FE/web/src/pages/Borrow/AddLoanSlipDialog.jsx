@@ -160,7 +160,7 @@ export default function AddLoanSlipDialog({ open, onClose, onCreated }) {
             // Nếu độc giả không đủ điều kiện mượn, báo warn (vẫn show thông tin)
             if (!readerCanBorrow(reader)) {
                 // không set error blocking ở đây, chỉ cảnh báo; validate khi tạo phiếu sẽ chặn
-                const msg = "Độc giả hiện chưa có thẻ hợp lệ để mượn (chỉ thẻ PREMIUM được phép).";
+                const msg = "Độc giả hiện chưa có thẻ hợp lệ để mượn (chỉ thẻ thành viên được phép).";
                 setError(msg);
                 notify.warn(msg);
             } else {
