@@ -129,6 +129,17 @@ async function getReaderBorrowSnapshot(readerId, t) {
 /**
  * Helper kiểm tra quota mượn sách
  */
+// --- START PATCH: ensureReaderBorrowQuota (readerReserveLoan.service.js) ---
+function getBorrowLimitByBalance(balance) {
+  const b = Number(balance || 0);
+
+  if (b >= 70000) return 3;              // > 70.000₫ => 3 quyển
+  if (b >= 40000 && b < 70000) return 2; // 40.000₫ – 70.000₫ => 2 quyển
+  if (b >= 10000 && b < 40000) return 1;  // 10.000₫ – 39.999₫ => 1 quyển
+  return 0;                                // < 10.000₫ => 0 quyển
+}
+
+
 async function ensureReaderBorrowQuota({
   readerId,
   cardType,
@@ -150,7 +161,24 @@ async function ensureReaderBorrowQuota({
     throw e;
   }
 
+  // Lấy snapshot
   const snap = await getReaderBorrowSnapshot(readerId, t);
+
+  // Lấy thẻ active để đọc balance
+  let memberCard = null;
+  try {
+    memberCard = await MemberCard.findOne({
+      where: { readerId, deleted: false, status: 'ACTIVE' },
+      order: [['issueDate', 'DESC']],
+      transaction: t,
+      lock: t?.LOCK?.UPDATE
+    });
+  } catch (err) {
+    memberCard = null;
+  }
+  const balance = Number(memberCard?.balance || 0);
+  const bracketLimit = getBorrowLimitByBalance(balance);
+  const effectiveMaxLimit = Math.min(maxBorrowLimit, bracketLimit);
 
   const currentTotal =
     (snap.pendingApprovalCount || 0) +
@@ -158,7 +186,7 @@ async function ensureReaderBorrowQuota({
     (snap.borrowingCount || 0);
 
   const requested = Number(extraRequested) || 0;
-  const remaining = maxBorrowLimit - currentTotal;
+  const remaining = effectiveMaxLimit - currentTotal;
 
   const blockingReasons = [];
 
@@ -171,71 +199,50 @@ async function ensureReaderBorrowQuota({
     }
   }
 
-  // ❌ Có sách trễ hạn / vi phạm => ghép hết lý do vào message
   if (blockingReasons.length) {
-    const combinedMessage =
-      'Độc giả chưa đủ điều kiện mượn: ' + blockingReasons.join('; ');
-
+    const combinedMessage = 'Độc giả chưa đủ điều kiện mượn: ' + blockingReasons.join('; ');
     const e = new Error(combinedMessage);
     e.status = 409;
     throw e;
   }
 
-  // ❌ Vượt hạn mức mượn cho lần request này
   if (requested > 0) {
     if (remaining <= 0 || requested > remaining) {
-      const hint = `Bạn chỉ có thể mượn thêm tối đa ${Math.max(0, remaining)} tài liệu.`;
-      const combinedMessage = `Vượt quá hạn mức mượn. ${hint}`;
-
+      const hint = `Số dư hiện tại: ${balance.toLocaleString('vi-VN')}₫ → hạn mức theo số dư: ${bracketLimit} quyển; giới hạn thực tế (tối đa theo thẻ): ${effectiveMaxLimit} quyển. Hiện đang giữ ${currentTotal} quyển.`;
+      const combinedMessage = `Bạn chỉ có thể mượn thêm tối đa ${Math.max(0, remaining)} tài liệu.`;
       const e = new Error(combinedMessage);
       e.status = 409;
       e.details = {
         message: combinedMessage,
-        context,
-        breakdown: {
-          maxBorrowLimit,
-          pendingApprovalCount: snap.pendingApprovalCount,
-          waitingForPickupCount: snap.waitingForPickupCount,
-          borrowingCount: snap.borrowingCount,
-          overdueCount: snap.overdueCount,
-          unresolvedViolationCount: snap.unresolvedViolationCount,
-          quota: {
-            max: maxBorrowLimit,
-            using: currentTotal,
-            remaining: Math.max(0, remaining),
-            requested
-          }
-        },
-        hint
+        balance,
+        bracketLimit,
+        effectiveMaxLimit,
+        currentTotal,
+        remaining
       };
       throw e;
     }
   } else {
-    // ❌ Tổng hiện tại đã vượt maxBorrowLimit
-    if (currentTotal > maxBorrowLimit) {
-      const combinedMessage = `Vượt quá số sách tối đa cho phép theo loại thẻ (tối đa ${maxBorrowLimit}, hiện đang dùng ${currentTotal}).`;
-
-      const e = new Error(combinedMessage);
+    if (currentTotal > effectiveMaxLimit) {
+      const hint = `Số dư hiện tại: ${balance.toLocaleString('vi-VN')}₫ → hạn mức theo số dư: ${bracketLimit} quyển; giới hạn thực tế: ${effectiveMaxLimit} quyển. Hiện đang giữ ${currentTotal} quyển (vượt giới hạn).`;
+      const e = new Error(`Độc giả đang giữ quá số lượng tối đa theo số dư/thẻ. ${hint}`);
       e.status = 409;
-      e.details = {
-        message: combinedMessage,
-        context,
-        breakdown: {
-          maxBorrowLimit,
-          pendingApprovalCount: snap.pendingApprovalCount,
-          waitingForPickupCount: snap.waitingForPickupCount,
-          borrowingCount: snap.borrowingCount,
-          overdueCount: snap.overdueCount,
-          unresolvedViolationCount: snap.unresolvedViolationCount,
-          totalUsing: currentTotal
-        }
-      };
+      e.details = { balance, bracketLimit, effectiveMaxLimit, currentTotal };
       throw e;
     }
   }
 
-  return { snap, maxBorrowLimit, currentTotal, remaining };
+  return {
+    snap,
+    currentTotal,
+    maxBorrowLimit,
+    bracketLimit,
+    effectiveMaxLimit,
+    remaining
+  };
 }
+
+
 
 /**
  * Helper: Kiểm tra các tài liệu đã có trong phiếu mượn hiện tại của độc giả
@@ -434,7 +441,7 @@ async function reserveLoanForReaderService(user, payload) {
       }
       const today = fmtToday();
       if (daysDiff(today, memberCard.expiryDate) < 0) {
-        const e = new Error('Thẻ hội viên đã hết hạn, không được mượn.');
+        const e = new Error('Thẻ hội viên đã hết hạn, hãy gia hạn thẻ để tiếp tục mượn sách');
         e.status = 403;
         throw e;
       }

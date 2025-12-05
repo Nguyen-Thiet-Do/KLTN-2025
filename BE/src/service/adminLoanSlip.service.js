@@ -149,14 +149,26 @@ async function getReaderBorrowSnapshot(readerId, t) {
   };
 }
 
+
 /**
  * Helper kiểm tra quota mượn sách theo loại thẻ của độc giả.
  *
- * - Luôn dùng snapshot: pendingApprovalCount + waitingForPickupCount + borrowingCount
- * - Nếu extraRequested > 0: kiểm tra tổng hiện tại + số mượn thêm
- * - Nếu extraRequested = 0: chỉ kiểm tra tổng hiện tại không vượt maxBorrowLimit
- * - Nếu checkOverdueAndViolation = true: chặn khi còn sách trễ hạn / vi phạm chưa xử lý
+ * giới hạn thực tế = min(cardType.maxBorrowLimit, bracketLimitTínhTheoBalance)
+ * Bracket theo balance:
+ *  - balance >= 100000 -> bracketLimit = 3
+ *  - 50000 <= balance < 100000 -> bracketLimit = 2
+ *  - 10000 <= balance < 50000 -> bracketLimit = 1
+ *  - balance < 10000 -> bracketLimit = 0
  */
+function getBorrowLimitByBalance(balance) {
+  const b = Number(balance || 0);
+
+  if (b >= 70000) return 3;              // > 70.000₫ => 3 quyển
+  if (b >= 40000 && b < 70000) return 2; // 40.000₫ – 70.000₫ => 2 quyển
+  if (b >= 10000 && b < 40000) return 1;  // 10.000₫ – 39.999₫ => 1 quyển
+  return 0;                                // < 10.000₫ => 0 quyển
+}
+
 async function ensureReaderBorrowQuota({
   readerId,
   cardType,
@@ -181,13 +193,32 @@ async function ensureReaderBorrowQuota({
   // Lấy snapshot hiện tại
   const snap = await getReaderBorrowSnapshot(readerId, t);
 
+  // Lấy thẻ active mới nhất để đọc balance (nếu có)
+  let memberCard = null;
+  try {
+    memberCard = await MemberCard.findOne({
+      where: { readerId, deleted: false, status: 'ACTIVE' },
+      order: [['issueDate', 'DESC']],
+      transaction: t,
+      lock: t?.LOCK?.UPDATE
+    });
+  } catch (err) {
+    // nếu lỗi khi đọc thẻ, không fail hàm ngay, coi như không có thẻ (balance = 0)
+    memberCard = null;
+  }
+  const balance = Number(memberCard?.balance || 0);
+  const bracketLimit = getBorrowLimitByBalance(balance);
+
+  // Giới hạn thực tế là min giữa giới hạn theo loại thẻ và bracket theo balance
+  const effectiveMaxLimit = Math.min(maxBorrowLimit, bracketLimit);
+
   const currentTotal =
     (snap.pendingApprovalCount || 0) +
     (snap.waitingForPickupCount || 0) +
     (snap.borrowingCount || 0);
 
   const requested = Number(extraRequested) || 0;
-  const remaining = maxBorrowLimit - currentTotal;
+  const remaining = effectiveMaxLimit - currentTotal;
 
   const blockingReasons = [];
 
@@ -196,87 +227,58 @@ async function ensureReaderBorrowQuota({
       blockingReasons.push(`Có ${snap.overdueCount} quyển trễ hạn chưa trả`);
     }
     if (snap.unresolvedViolationCount > 0) {
-      blockingReasons.push(`Có ${snap.unresolvedViolationCount} vi phạm/chứng từ phạt chưa giải quyết`);
+      blockingReasons.push(`Có ${snap.unresolvedViolationCount} vi phạm chưa giải quyết`);
     }
   }
 
-  // Nếu chặn do trễ hạn / vi phạm
+  // Nếu có lý do chặn (trễ hạn/vi phạm) -> báo và throw
   if (blockingReasons.length) {
-    const e = new Error('Độc giả chưa đủ điều kiện mượn');
+    const combinedMessage = 'Độc giả chưa đủ điều kiện mượn: ' + blockingReasons.join('; ');
+    const e = new Error(combinedMessage);
     e.status = 409;
-    e.details = {
-      message: 'Độc giả chưa đủ điều kiện mượn',
-      context,
-      breakdown: {
-        maxBorrowLimit,
-        pendingApprovalCount: snap.pendingApprovalCount,
-        waitingForPickupCount: snap.waitingForPickupCount,
-        borrowingCount: snap.borrowingCount,
-        overdueCount: snap.overdueCount,
-        unresolvedViolationCount: snap.unresolvedViolationCount,
-        quota: {
-          max: maxBorrowLimit,
-          using: currentTotal,
-          remaining: Math.max(0, remaining),
-          requested
-        }
-      },
-      reasons: blockingReasons
-    };
     throw e;
   }
 
-  // Nếu có mượn thêm
+  // Kiểm quota theo effectiveMaxLimit
   if (requested > 0) {
     if (remaining <= 0 || requested > remaining) {
-      const e = new Error('Vượt quá hạn mức mượn');
+      const hint = `Số dư hiện tại: ${balance.toLocaleString('vi-VN')}₫ → hạn mức theo số dư: ${bracketLimit} quyển; giới hạn thực tế (tối đa theo thẻ): ${effectiveMaxLimit} quyển. Hiện đang giữ ${currentTotal} quyển.`;
+      const combinedMessage = `Vượt quá hạn mức mượn. ${hint} Bạn chỉ có thể mượn thêm tối đa ${Math.max(0, remaining)} tài liệu.`;
+      const e = new Error(combinedMessage);
       e.status = 409;
       e.details = {
-        message: 'Vượt quá hạn mức mượn',
-        context,
-        breakdown: {
-          maxBorrowLimit,
-          pendingApprovalCount: snap.pendingApprovalCount,
-          waitingForPickupCount: snap.waitingForPickupCount,
-          borrowingCount: snap.borrowingCount,
-          overdueCount: snap.overdueCount,
-          unresolvedViolationCount: snap.unresolvedViolationCount,
-          quota: {
-            max: maxBorrowLimit,
-            using: currentTotal,
-            remaining: Math.max(0, remaining),
-            requested
-          }
-        },
-        hint: `Bạn chỉ có thể mượn thêm tối đa ${Math.max(0, remaining)} tài liệu.`
+        message: combinedMessage,
+        balance,
+        bracketLimit,
+        effectiveMaxLimit,
+        currentTotal,
+        remaining
       };
       throw e;
     }
   } else {
-    // Không mượn thêm, chỉ check tổng hiện tại
-    if (currentTotal > maxBorrowLimit) {
-      const e = new Error('Vượt quá số sách tối đa cho phép theo loại thẻ');
+    // Khi extraRequested = 0, chỉ đảm bảo tổng hiện tại không vượt effectiveMaxLimit
+    if (currentTotal > effectiveMaxLimit) {
+      const hint = `Số dư hiện tại: ${balance.toLocaleString('vi-VN')}₫ → hạn mức theo số dư: ${bracketLimit} quyển; giới hạn thực tế: ${effectiveMaxLimit} quyển. Hiện đang giữ ${currentTotal} quyển (vượt giới hạn).`;
+      const e = new Error(`Độc giả đang giữ quá số lượng tối đa theo số dư/thẻ. ${hint}`);
       e.status = 409;
-      e.details = {
-        message: 'Vượt quá số sách tối đa cho phép',
-        context,
-        breakdown: {
-          maxBorrowLimit,
-          pendingApprovalCount: snap.pendingApprovalCount,
-          waitingForPickupCount: snap.waitingForPickupCount,
-          borrowingCount: snap.borrowingCount,
-          overdueCount: snap.overdueCount,
-          unresolvedViolationCount: snap.unresolvedViolationCount,
-          totalUsing: currentTotal
-        }
-      };
+      e.details = { balance, bracketLimit, effectiveMaxLimit, currentTotal };
       throw e;
     }
   }
 
-  // Không lỗi thì trả về thông tin cho ai cần dùng tiếp
-  return { snap, maxBorrowLimit, currentTotal, remaining };
+  // Trả về thông tin snap + remaining để caller có thể dùng
+  return {
+    snap,
+    currentTotal,
+    maxBorrowLimit,
+    bracketLimit,
+    effectiveMaxLimit,
+    remaining
+  };
 }
+
+
 
 // ==============================
 // HELPER: Chuẩn hóa librarianId (có thể là librarianId hoặc accountId)
@@ -1415,7 +1417,7 @@ function calculateDamageFine(conditionBorrow, conditionReturn, coverPrice) {
   if (degradation <= 30) return 0;
 
   // tiền phạt = (degradation%) * giá bìa
-  return Math.round(((degradation - 15)/100) * price);
+  return Math.round(((degradation - 15) / 100) * price);
 }
 
 
@@ -3078,14 +3080,15 @@ async function returnBulkItemsService(body, rawLibrarianId) {
             conditionNote: String(p.conditionReturn),
             conditionGrade:
               p.conditionReturn >= 90 ? 'A' :
-              p.conditionReturn >= 70 ? 'B' :
-              p.conditionReturn >= 50 ? 'C' : 'D'
+                p.conditionReturn >= 70 ? 'B' :
+                  p.conditionReturn >= 50 ? 'C' : 'D'
           }, { where: { documentCopyId: detail.documentCopyId }, transaction: t });
         } else {
-          await DocumentCopy.update({ status: 'AVAILABLE', conditionNote: String(p.conditionReturn), conditionGrade:
-            p.conditionReturn >= 90 ? 'A' :
-            p.conditionReturn >= 70 ? 'B' :
-            p.conditionReturn >= 50 ? 'C' : 'D'
+          await DocumentCopy.update({
+            status: 'AVAILABLE', conditionNote: String(p.conditionReturn), conditionGrade:
+              p.conditionReturn >= 90 ? 'A' :
+                p.conditionReturn >= 70 ? 'B' :
+                  p.conditionReturn >= 50 ? 'C' : 'D'
           }, { where: { documentCopyId: detail.documentCopyId }, transaction: t });
         }
       }
