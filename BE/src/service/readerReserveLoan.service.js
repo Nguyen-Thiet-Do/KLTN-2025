@@ -21,10 +21,11 @@ const { getDocumentDetailWithDeposit } = require('./documentService');
 /** Helpers: xử lý ngày (giống admin service) */
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 function parseDateOnly(str) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(str || ''))) return null;
-  const d = new Date(`${str}T00:00:00Z`);
+  if (!str) return null;
+  const d = new Date(str);
   return Number.isNaN(d.getTime()) ? null : d;
 }
+
 function fmtToday() {
   return new Date().toISOString().slice(0, 10);
 }
@@ -72,12 +73,17 @@ async function getReaderBorrowSnapshot(readerId, t) {
     })
     : 0;
 
-  const borrowingSlips = await LoanSlip.findAll({
-    where: { readerId, deleted: false, status: 'BORROWING' },
-    attributes: ['loanSlipId', 'dueDate'],
-    transaction: t,
-    lock: t?.LOCK?.UPDATE
-  });
+ const borrowingSlips = await LoanSlip.findAll({
+  where: { 
+    readerId, 
+    deleted: false, 
+    status: { [Op.in]: ['BORROWING', 'OVERDUE'] }
+  },
+  attributes: ['loanSlipId', 'dueDate'],
+  transaction: t,
+  lock: t?.LOCK?.UPDATE
+});
+
   const borrowingSlipIds = borrowingSlips.map(s => s.loanSlipId);
   const borrowingCount = borrowingSlipIds.length
     ? await LoanDetail.count({
