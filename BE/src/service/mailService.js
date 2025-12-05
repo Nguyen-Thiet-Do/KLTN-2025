@@ -1,20 +1,40 @@
 // src/service/mailService.js
-const sgMail = require('@sendgrid/mail');
 require('dotenv').config();
 
+const sgMail = require('@sendgrid/mail');
+const mailjet = require('node-mailjet');
+
+// =====================
+// Config
+// =====================
 const SENDGRID_API_KEY = process.env.SENDGRID_API_KEY;
-const MAIL_FROM = process.env.MAIL_FROM || 'thietdo345@gmail.com'; // Email đã verify trong SendGrid
+const MAILJET_API_KEY = process.env.MAILJET_API_KEY;
+const MAILJET_API_SECRET = process.env.MAILJET_API_SECRET;
+const MAIL_FROM = process.env.MAIL_FROM || 'thietdo345@gmail.com'; // Email đã verify trong SendGrid / Mailjet
 
 // Hỗ trợ liên hệ mặc định (dùng trong template)
 const SUPPORT_EMAIL = process.env.SUPPORT_EMAIL || 'support@booktechv2.net';
 const SUPPORT_PHONE = process.env.SUPPORT_PHONE || '0123-456-789';
 
-// Khởi tạo SendGrid
+// =====================
+// Init providers
+// =====================
+let mj = null;
+
+// Khởi tạo SendGrid (nếu có)
 if (SENDGRID_API_KEY) {
   sgMail.setApiKey(SENDGRID_API_KEY);
   console.log('✅ SendGrid initialized');
 } else {
-  console.warn('⚠️ SENDGRID_API_KEY missing — email will not be sent! (DEV MODE)');
+  console.warn('⚠️ SENDGRID_API_KEY missing — SendGrid disabled for sending.');
+}
+
+// Khởi tạo Mailjet (nếu có)
+if (MAILJET_API_KEY && MAILJET_API_SECRET) {
+  mj = mailjet.apiConnect(MAILJET_API_KEY, MAILJET_API_SECRET);
+  console.log('✅ Mailjet initialized');
+} else {
+  console.warn('⚠️ MAILJET not configured');
 }
 
 // --- helper escapeHtml (bảo vệ nội dung HTML) ---
@@ -29,16 +49,110 @@ function escapeHtml(str) {
 }
 
 // =============================
-// SEND OTP EMAIL (existing)
+// Send helpers for each provider
 // =============================
-async function sendOtpEmail(to, otp) {
-  // Nếu không có API key, chỉ log ra console (dev mode)
-  if (!SENDGRID_API_KEY) {
-    console.log('--- SEND MAIL (DEV MODE) ---');
-    console.log({ to, otp, from: MAIL_FROM });
+async function sendViaSendGrid(msg) {
+  if (!SENDGRID_API_KEY) throw new Error('SendGrid not configured');
+  try {
+    const res = await sgMail.send(msg);
+    console.log(`✅ SendGrid: email sent to ${Array.isArray(msg.to) ? msg.to.join(',') : msg.to}`);
+    return res;
+  } catch (err) {
+    console.error('❌ SendGrid send error:', err.response?.body || err.message || err);
+    throw err;
+  }
+}
+
+async function sendViaMailjet({ to, subject, html, text, from }) {
+  if (!mj) throw new Error('Mailjet not configured');
+
+  const message = {
+    Messages: [
+      {
+        From: { Email: from || MAIL_FROM, Name: process.env.MAIL_FROM_NAME || 'Book Tech' },
+        To: Array.isArray(to) ? to.map(t => ({ Email: t })) : [{ Email: to }],
+        Subject: subject,
+        TextPart: text || '',
+        HTMLPart: html || ''
+      }
+    ]
+  };
+
+  try {
+    const result = await mj.post("send", { version: "v3.1" }).request(message);
+    console.log(`✅ Mailjet: email sent to ${Array.isArray(to) ? to.join(',') : to}`);
+    return result.body;
+  } catch (err) {
+    console.error('❌ Mailjet send error:', err.statusCode ? `${err.statusCode} ${err.message}` : err);
+    throw err;
+  }
+}
+
+// =============================
+// General sendEmail wrapper with SendGrid -> fallback Mailjet
+// =============================
+async function sendEmail(to, subject, html, text) {
+  if (!to) throw new Error('sendEmail: missing "to"');
+
+  const noSendGrid = !SENDGRID_API_KEY;
+  const noMailjet = !MAILJET_API_KEY || !MAILJET_API_SECRET;
+
+  // DEV mode when no provider configured
+  if (noSendGrid && noMailjet) {
+    console.log('--- SEND EMAIL (DEV MODE) ---');
+    console.log({ to, subject, text, from: MAIL_FROM });
     return { accepted: [to], messageId: 'dev-local' };
   }
 
+  const msgForSendGrid = {
+    to,
+    from: MAIL_FROM,
+    subject,
+    text: text || '',
+    html: html || ''
+  };
+
+  // 1) Try SendGrid first (if configured)
+  if (!noSendGrid) {
+    try {
+      return await sendViaSendGrid(msgForSendGrid);
+    } catch (sendGridErr) {
+      // If SendGrid fails and Mailjet is configured, fallback
+      if (!noMailjet) {
+        console.warn('⚠️ SendGrid failed — falling back to Mailjet');
+        try {
+          return await sendViaMailjet({ to, subject, html, text, from: MAIL_FROM });
+        } catch (mjErr) {
+          console.error('❌ Both SendGrid and Mailjet failed to send email');
+          throw new Error('Không thể gửi email bằng SendGrid hoặc Mailjet.');
+        }
+      }
+      // No Mailjet configured -> rethrow SendGrid error
+      throw sendGridErr;
+    }
+  }
+
+  // 2) If SendGrid not configured but Mailjet is, use Mailjet
+  if (!noMailjet) {
+    try {
+      return await sendViaMailjet({ to, subject, html, text, from: MAIL_FROM });
+    } catch (err) {
+      console.error('❌ Mailjet failed:', err);
+      throw new Error('Không thể gửi email qua Mailjet.');
+    }
+  }
+
+  // fallback (shouldn't reach)
+  console.log('--- SEND EMAIL (UNKNOWN STATE) ---');
+  console.log({ to, subject, text, from: MAIL_FROM });
+  return { accepted: [to], messageId: 'dev-local' };
+}
+
+// =============================
+// SEND OTP EMAIL (updated to use sendEmail wrapper)
+// =============================
+async function sendOtpEmail(to, otp) {
+  // Dev / fallback handled inside sendEmail
   const html = `
     <!DOCTYPE html>
     <html>
@@ -93,52 +207,16 @@ async function sendOtpEmail(to, otp) {
     </html>
   `;
 
-  const msg = {
-    to: to,
-    from: MAIL_FROM,
-    subject: 'Mã OTP xác thực - Book Tech',
-    text: `Mã OTP của bạn là: ${otp}. Mã có hiệu lực trong 10 phút.`,
-    html: html
-  };
+  const subject = 'Mã OTP xác thực - Book Tech';
+  const text = `Mã OTP của bạn là: ${otp}. Mã có hiệu lực trong 10 phút.`;
 
   try {
-    const info = await sgMail.send(msg);
-    console.log('✅ OTP sent to', to, 'via SendGrid');
+    const info = await sendEmail(to, subject, html, text);
+    console.log('✅ OTP sent to', to);
     return info;
   } catch (err) {
-    console.error('❌ SendGrid Error:', err.response?.body || err.message || err);
-    throw new Error('Không thể gửi email. Vui lòng thử lại sau.');
-  }
-}
-
-// -----------------------------
-// General sendEmail wrapper
-// -----------------------------
-async function sendEmail(to, subject, html, text) {
-  if (!to) throw new Error('sendEmail: missing "to"');
-
-  // Dev mode: chỉ log khi không có API key
-  if (!SENDGRID_API_KEY) {
-    console.log('--- SEND EMAIL (DEV MODE) ---');
-    console.log({ to, subject, text, from: MAIL_FROM });
-    return { accepted: [to], messageId: 'dev-local' };
-  }
-
-  const msg = {
-    to,
-    from: MAIL_FROM,
-    subject,
-    text: text || '',
-    html: html || ''
-  };
-
-  try {
-    const res = await sgMail.send(msg);
-    console.log(`✅ Email sent to ${to} — subject="${subject}"`);
-    return res;
-  } catch (err) {
-    console.error('❌ sendEmail Error:', err.response?.body || err.message || err);
-    throw err;
+    console.error('❌ sendOtpEmail error:', err);
+    throw new Error('Không thể gửi email OTP. Vui lòng thử lại sau.');
   }
 }
 
@@ -309,10 +387,6 @@ async function sendReservationConfirmationEmail(to, data = {}) {
 
 // -----------------------------
 // Template: gửi mail khi thủ thư duyệt yêu cầu (chuyển sang WAITING_FOR_PICKUP)
-// data: {
-//   fullName, slipId, items: [{ title, documentId, documentCopyId }],
-//   pickupDeadline, pickUpLocation, supportEmail?, supportPhone?, year?
-// }
 // -----------------------------
 async function sendReservationApprovedEmail(to, data = {}) {
   if (!to) throw new Error('sendReservationApprovedEmail: missing "to"');
@@ -321,7 +395,7 @@ async function sendReservationApprovedEmail(to, data = {}) {
     fullName = '',
     slipId = '',
     items = [],
-    pickupDeadline = '', // YYYY-MM-DD
+    pickupDeadline = '',
     pickUpLocation = process.env.LIBRARY_ADDRESS || 'Thư viện Book Tech — Số 1, Đường ABC, Quận XYZ',
     supportEmail = process.env.SUPPORT_EMAIL || SUPPORT_EMAIL,
     supportPhone = process.env.SUPPORT_PHONE || SUPPORT_PHONE,
@@ -331,7 +405,6 @@ async function sendReservationApprovedEmail(to, data = {}) {
 
   const subject = `[${libraryName}] Phiếu #${slipId} — Đã được duyệt, vui lòng đến nhận trong vòng 3 ngày`;
 
-  // Plain text
   const textLines = [
     `Kính gửi ${fullName},`,
     '',
@@ -357,7 +430,6 @@ async function sendReservationApprovedEmail(to, data = {}) {
   ];
   const text = textLines.join('\n');
 
-  // HTML
   const itemsHtml = items.map(it => `<li>${escapeHtml(it.title || `Tài liệu #${it.documentId}`)} — Bản sao: ${escapeHtml(String(it.documentCopyId || '—'))}</li>`).join('');
   const html = `
   <!doctype html>
@@ -398,7 +470,6 @@ async function sendReservationApprovedEmail(to, data = {}) {
 
 // -----------------------------
 // Template: gửi mail khi thủ thư tạo phiếu mượn (TRỰC TIẾP BORROWING)
-// data: { fullName, slipId, items: [{ title, documentId, documentCopyId }], loanDate, dueDate, pickUpLocation?, supportEmail?, supportPhone?, libraryName?, year? }
 // -----------------------------
 async function sendLoanIssuedEmail(to, data = {}) {
   if (!to) throw new Error('sendLoanIssuedEmail: missing "to"');
@@ -418,7 +489,6 @@ async function sendLoanIssuedEmail(to, data = {}) {
 
   const subject = `[${libraryName}] Thông báo phiếu mượn #${slipId} — Vui lòng giữ gìn tài liệu và trả đúng hạn`;
 
-  // Plain text
   const textLines = [
     `Kính gửi ${fullName},`,
     '',
@@ -446,7 +516,6 @@ async function sendLoanIssuedEmail(to, data = {}) {
   ];
   const text = textLines.join('\n');
 
-  // HTML
   const itemsHtml = items.map(it => `<li>${escapeHtml(it.title || `Tài liệu #${it.documentId}`)} — Bản sao: ${escapeHtml(String(it.documentCopyId || '—'))}</li>`).join('');
   const html = `
   <!doctype html>
@@ -487,12 +556,9 @@ async function sendLoanIssuedEmail(to, data = {}) {
 
   return sendEmail(to, subject, html, text);
 }
+
 // -----------------------------
 // Template: gửi mail khi 1 LoanDetail bị xóa (removed from slip)
-// data: {
-//   fullName, slipId, loanDetailId, title, documentId, documentCopyId,
-//   reason, librarianName, supportEmail?, supportPhone?, libraryName?, year?
-// }
 // -----------------------------
 async function sendLoanDetailRemovedEmail(to, data = {}) {
   if (!to) throw new Error('sendLoanDetailRemovedEmail: missing "to"');
@@ -562,10 +628,6 @@ async function sendLoanDetailRemovedEmail(to, data = {}) {
 
 // -----------------------------
 // Template: gửi mail khi toàn bộ phiếu bị hủy (cancel slip)
-// data: {
-//   fullName, slipId, items: [{title, documentId, documentCopyId}], reason, librarianName,
-//   supportEmail?, supportPhone?, libraryName?, year?
-// }
 // -----------------------------
 async function sendLoanSlipCancelledEmail(to, data = {}) {
   if (!to) throw new Error('sendLoanSlipCancelledEmail: missing "to"');
@@ -604,7 +666,6 @@ async function sendLoanSlipCancelledEmail(to, data = {}) {
   const text = textLines.join('\n');
 
   const itemsHtml = items.map(it => `<li>${escapeHtml(it.title || ('ID:' + it.documentId))} — Bản sao: ${escapeHtml(String(it.documentCopyId || '—'))}</li>`).join('');
-
   const html = `
   <!doctype html>
   <html>
@@ -631,12 +692,9 @@ async function sendLoanSlipCancelledEmail(to, data = {}) {
 
   return sendEmail(to, subject, html, text);
 }
+
 // -----------------------------
 // Template: gửi mail khi HỦY PHIẾU ĐẶT TRƯỚC (reservation cancel)
-// data: {
-//   fullName, slipId, items: [{requestedDocumentId?, title?, originalNote?}], reason, librarianName,
-//   supportEmail?, supportPhone?, libraryName?, year?
-// }
 // -----------------------------
 async function sendReservationCancelledEmail(to, data = {}) {
   if (!to) throw new Error('sendReservationCancelledEmail: missing "to"');
@@ -678,7 +736,6 @@ async function sendReservationCancelledEmail(to, data = {}) {
   ];
   const text = textLines.join('\n');
 
-  // HTML
   const itemsHtml = items.length
     ? items.map(it => {
       const titlePart = it.title ? escapeHtml(it.title) : (it.requestedDocumentId ? `ID: ${escapeHtml(String(it.requestedDocumentId))}` : '—');
@@ -713,35 +770,10 @@ async function sendReservationCancelledEmail(to, data = {}) {
 
   return sendEmail(to, subject, html, text);
 }
-/**
- * Gửi email biên nhận trả tài liệu cho độc giả
- *
- * @param {string} to                  Email người nhận
- * @param {object} data                Dữ liệu email
- * @param {string} data.fullName       Tên độc giả
- * @param {number|string} data.slipId  Mã phiếu mượn
- * @param {string} data.title          Tên tài liệu
- * @param {string} data.returnDate     Ngày trả (YYYY-MM-DD)
- * @param {number} data.overdueFine    Phạt trễ hạn
- * @param {number} data.damageFine     Phạt hư hỏng
- * @param {number} data.lostFine       Phạt mất sách
- * @param {number} data.totalFine      Tổng phạt
- */
-/**
- * Gửi email biên nhận trả tài liệu cho độc giả
- *
- * @param {string} to                     Email người nhận
- * @param {object} data                   Dữ liệu email
- * @param {string} data.fullName          Tên độc giả
- * @param {number|string} data.slipId     Mã phiếu mượn
- * @param {string} data.title             Tên tài liệu
- * @param {string} data.returnDate        Ngày trả (YYYY-MM-DD)
- * @param {number} data.overdueFine       Phạt trễ hạn
- * @param {number} data.damageFine        Phạt hư hỏng
- * @param {number} data.lostFine          Phạt mất sách
- * @param {number} data.totalFine         Tổng phạt
- * @param {number} [data.deductedFromCard] Số tiền đã khấu trừ từ thẻ (nếu có)
- */
+
+// -----------------------------
+// Gửi email biên nhận trả tài liệu cho độc giả
+// -----------------------------
 async function sendReturnReceiptEmail(to, data = {}) {
   if (!to) throw new Error('sendReturnReceiptEmail: missing "to"');
 
@@ -754,7 +786,7 @@ async function sendReturnReceiptEmail(to, data = {}) {
     damageFine = 0,
     lostFine = 0,
     totalFine = 0,
-    deductedFromCard = 0,       // 🔴 mới thêm
+    deductedFromCard = 0,
     supportEmail = SUPPORT_EMAIL,
     supportPhone = SUPPORT_PHONE,
     year = new Date().getFullYear()
@@ -767,11 +799,8 @@ async function sendReturnReceiptEmail(to, data = {}) {
       ? Math.max(0, numTotalFine - numDeductedFromCard)
       : 0;
 
-  const subject = `[Book Tech] Biên nhận trả tài liệu — Phiếu #${escapeHtml(
-    String(slipId)
-  )}`;
+  const subject = `[Book Tech] Biên nhận trả tài liệu — Phiếu #${escapeHtml(String(slipId))}`;
 
-  // Plain text fallback
   const textLines = [
     `Kính gửi ${fullName},`,
     '',
@@ -785,25 +814,16 @@ async function sendReturnReceiptEmail(to, data = {}) {
     `- Tổng: ${numTotalFine.toLocaleString('vi-VN')} đ`,
   ];
 
-  // 🔴 Thêm giải thích khấu trừ thẻ trong text
   if (numTotalFine > 0 && numDeductedFromCard > 0) {
     if (numDeductedFromCard >= numTotalFine) {
-      // Trường hợp đang nói: toàn bộ phạt nằm trong khoản thẻ, không cần QR
       textLines.push(
         '',
-        `Lưu ý: Toàn bộ số tiền phạt (${numTotalFine.toLocaleString(
-          'vi-VN'
-        )} đ) đã được khấu trừ trực tiếp từ số dư thẻ thư viện của bạn. Bạn không cần thanh toán thêm.`
+        `Lưu ý: Toàn bộ số tiền phạt (${numTotalFine.toLocaleString('vi-VN')} đ) đã được khấu trừ trực tiếp từ số dư thẻ thư viện của bạn. Bạn không cần thanh toán thêm.`
       );
     } else if (remainingFromFine > 0) {
-      // Trường hợp sau này nếu dùng 1 phần thẻ + 1 phần QR
       textLines.push(
         '',
-        `Lưu ý: Đã khấu trừ ${numDeductedFromCard.toLocaleString(
-          'vi-VN'
-        )} đ từ số dư thẻ thư viện của bạn. Số còn lại cần thanh toán thêm: ${remainingFromFine.toLocaleString(
-          'vi-VN'
-        )} đ.`
+        `Lưu ý: Đã khấu trừ ${numDeductedFromCard.toLocaleString('vi-VN')} đ từ số dư thẻ thư viện của bạn. Số còn lại cần thanh toán thêm: ${remainingFromFine.toLocaleString('vi-VN')} đ.`
       );
     }
   }
@@ -819,7 +839,6 @@ async function sendReturnReceiptEmail(to, data = {}) {
 
   const text = textLines.join('\n');
 
-  // Chuẩn bị đoạn HTML "Lưu ý" (nếu có khấu trừ thẻ)
   let fineNoteHtml = '';
   if (numTotalFine > 0 && numDeductedFromCard > 0) {
     if (numDeductedFromCard >= numTotalFine) {
@@ -844,7 +863,6 @@ async function sendReturnReceiptEmail(to, data = {}) {
     }
   }
 
-  // HTML content
   const html = `
   <!doctype html>
   <html>
@@ -854,9 +872,7 @@ async function sendReturnReceiptEmail(to, data = {}) {
       <h2 style="color:#0b5cff; margin-top:0;">Biên nhận trả tài liệu</h2>
       <p>Xin chào <strong>${escapeHtml(fullName)}</strong>,</p>
 
-      <p>Chúng tôi xác nhận bạn đã trả tài liệu thuộc <strong>Phiếu #${escapeHtml(
-    String(slipId)
-  )}</strong> vào ngày <strong>${escapeHtml(returnDate)}</strong>.</p>
+      <p>Chúng tôi xác nhận bạn đã trả tài liệu thuộc <strong>Phiếu #${escapeHtml(String(slipId))}</strong> vào ngày <strong>${escapeHtml(returnDate)}</strong>.</p>
 
       <p><strong>Tên tài liệu:</strong> ${escapeHtml(title)}</p>
 
@@ -883,9 +899,7 @@ async function sendReturnReceiptEmail(to, data = {}) {
       ${fineNoteHtml}
 
       <p style="margin-top:12px;">Nếu bạn cần hỗ trợ hoặc có thắc mắc, vui lòng liên hệ:</p>
-      <p style="font-size:13px; color:#555;">Email: ${escapeHtml(
-    supportEmail
-  )} — SĐT: ${escapeHtml(supportPhone)}</p>
+      <p style="font-size:13px; color:#555;">Email: ${escapeHtml(supportEmail)} — SĐT: ${escapeHtml(supportPhone)}</p>
 
       <hr style="border:none; border-top:1px solid #eee; margin:18px 0;">
       <p style="font-size:12px; color:#999;">Email này được gửi tự động. Vui lòng không trả lời trực tiếp.</p>
@@ -898,8 +912,9 @@ async function sendReturnReceiptEmail(to, data = {}) {
   return sendEmail(to, subject, html, text);
 }
 
-
-
+// -----------------------------
+// Yêu cầu gia hạn nhận
+// -----------------------------
 async function sendRenewalRequestReceivedEmail(to, data = {}) {
   if (!to) throw new Error('sendRenewalRequestReceivedEmail: missing "to"');
   const {
@@ -964,8 +979,9 @@ async function sendRenewalRequestReceivedEmail(to, data = {}) {
   return sendEmail(to, subject, html, text);
 }
 
-
-
+// =============================
+// Exports
+// =============================
 module.exports = {
   sendOtpEmail,
   sendEmail,

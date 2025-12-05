@@ -97,8 +97,9 @@ async function getReaderBorrowSnapshot(readerId, t) {
 
   // 3) Đếm "đang mượn" (slip BORROWING, detail BORROWED)
   const borrowingSlips = await LoanSlip.findAll({
-    where: { readerId, deleted: false, status: { [Op.in]: ['BORROWING', 'OVERDUE'] }
- },
+    where: {
+      readerId, deleted: false, status: { [Op.in]: ['BORROWING', 'OVERDUE'] }
+    },
     attributes: ['loanSlipId', 'dueDate'],
     transaction: t,
     lock: t?.LOCK?.UPDATE
@@ -2969,17 +2970,12 @@ async function returnBulkItemsService(body, rawLibrarianId) {
       e.status = 409; throw e;
     }
 
-    // map incoming items
-    const itemMap = new Map(items.map(i => [Number(i.loanDetailId), i]));
-
     // totals
     let totalDamageFine = 0;
     let totalLostFine = 0;
     let totalOverdueFine = 0; // slip-level
     const processedItems = [];
 
-    // --- compute slip-level overdue once, if there's at least one processed item later we'll use it ---
-    // (we compute after we know if there is any matched LoanDetail to process)
     // Process items: compute damage/lost per-item; do NOT compute per-item overdue here
     for (const itemData of items) {
       const { loanDetailId, conditionReturn, isLost } = itemData;
@@ -2995,7 +2991,6 @@ async function returnBulkItemsService(body, rawLibrarianId) {
 
       const copy = detail.DocumentCopy;
       const doc = copy?.Document;
-      const depositAmount = Number(detail.depositAmount || 0);
       const coverPrice = Number(doc?.coverPrice || 0);
       const condBorrow = Number(detail.conditionBorrow ?? 100);
       const condReturn = isLost ? 0 : Number(conditionReturn ?? condBorrow);
@@ -3014,7 +3009,6 @@ async function returnBulkItemsService(body, rawLibrarianId) {
         conditionReturn: condReturn,
         damageFine,
         lostFine,
-        // overdueFine will be shown at slip level in totals; put 0 here or assign if FE wants
         overdueFine: 0,
         totalFine: Number(damageFine) + Number(lostFine)
       });
@@ -3050,57 +3044,85 @@ async function returnBulkItemsService(body, rawLibrarianId) {
       detail.returnDate = returnDate;
       detail.conditionReturn = p.conditionReturn;
 
+      // Nếu conditionReturn > 40 thì KHÔNG cập nhật `status` của DocumentCopy,
+      // nhưng vẫn phải ghi fineAmount vào LoanDetail và vẫn tạo Violation nếu có phạt.
+      const shouldUpdateStatusField = Number(p.conditionReturn) <= 40;
+
+      // --- TẠO VIOLATION nếu mất hoặc hư (luôn tạo nếu có tiền phạt) ---
       if (p.isLost) {
-        detail.status = 'LOST';
+        // lost: luôn tạo violation và cập nhật DocumentCopy status = 'LOST'
         await Violation.create({
           readerId: slip.readerId,
           loanDetailId: detail.loanDetailId,
           type: 'LOST',
           violationDescription: `Báo mất bản sao #${detail.documentCopyId}`,
-          fineAmount: p.lostFine + 0, // lost fine (damage none)
+          fineAmount: p.lostFine,
           paymentStatus: needExternalPay > 0 ? 'UNPAID' : 'PAID',
           librarianId: resolvedLibrarianId
         }, { transaction: t });
 
         await DocumentCopy.update({ status: 'LOST', conditionNote: '0', conditionGrade: 'C' }, { where: { documentCopyId: detail.documentCopyId }, transaction: t });
-      } else {
-        detail.status = 'RETURNED';
-        if (p.damageFine > 0) {
-          await Violation.create({
-            readerId: slip.readerId,
-            loanDetailId: detail.loanDetailId,
-            type: 'DAMAGE',
-            violationDescription: `Hư hỏng bản sao #${detail.documentCopyId}`,
-            fineAmount: p.damageFine,
-            paymentStatus: needExternalPay > 0 ? 'UNPAID' : 'PAID',
-            librarianId: resolvedLibrarianId
-          }, { transaction: t });
 
+      } else if (Number(p.damageFine) > 0) {
+        // damage: luôn tạo violation NGAY CẢ KHI conditionReturn > 40 (chỉ skip đổi status của copy)
+        await Violation.create({
+          readerId: slip.readerId,
+          loanDetailId: detail.loanDetailId,
+          type: 'DAMAGE',
+          violationDescription: `Hư hỏng bản sao #${detail.documentCopyId}`,
+          fineAmount: p.damageFine,
+          paymentStatus: needExternalPay > 0 ? 'UNPAID' : 'PAID',
+          librarianId: resolvedLibrarianId
+        }, { transaction: t });
+
+        // cập nhật DocumentCopy: nếu conditionReturn <= 40 thì đổi status = 'DAMAGED', else chỉ cập nhật conditionNote/grade
+        const grade =
+          p.conditionReturn >= 90 ? 'A' :
+            p.conditionReturn >= 70 ? 'B' :
+              p.conditionReturn >= 50 ? 'C' : 'D';
+
+        if (shouldUpdateStatusField) {
           await DocumentCopy.update({
             status: 'DAMAGED',
             conditionNote: String(p.conditionReturn),
-            conditionGrade:
-              p.conditionReturn >= 90 ? 'A' :
-                p.conditionReturn >= 70 ? 'B' :
-                  p.conditionReturn >= 50 ? 'C' : 'D'
+            conditionGrade: grade
           }, { where: { documentCopyId: detail.documentCopyId }, transaction: t });
         } else {
+          // KHÔNG đổi status, chỉ cập nhật note/grade
           await DocumentCopy.update({
-            status: 'AVAILABLE', conditionNote: String(p.conditionReturn), conditionGrade:
-              p.conditionReturn >= 90 ? 'A' :
-                p.conditionReturn >= 70 ? 'B' :
-                  p.conditionReturn >= 50 ? 'C' : 'D'
+            conditionNote: String(p.conditionReturn),
+            conditionGrade: grade
+          }, { where: { documentCopyId: detail.documentCopyId }, transaction: t });
+        }
+      } else {
+        // không lost, không damageFine: chỉ cập nhật DocumentCopy tùy ngưỡng
+        const grade =
+          p.conditionReturn >= 90 ? 'A' :
+            p.conditionReturn >= 70 ? 'B' :
+              p.conditionReturn >= 50 ? 'C' : 'D';
+
+        if (shouldUpdateStatusField) {
+          await DocumentCopy.update({
+            status: 'AVAILABLE',
+            conditionNote: String(p.conditionReturn),
+            conditionGrade: grade
+          }, { where: { documentCopyId: detail.documentCopyId }, transaction: t });
+        } else {
+          // KHÔNG đổi status, chỉ cập nhật note/grade
+          await DocumentCopy.update({
+            conditionNote: String(p.conditionReturn),
+            conditionGrade: grade
           }, { where: { documentCopyId: detail.documentCopyId }, transaction: t });
         }
       }
 
-      // save detail's return info and per-item fine (without overdue)
+      // --- LUÔN cập nhật LoanDetail.fineAmount = damageFine + lostFine (không tính overdue tại đây) ---
       await LoanDetail.update({
         returnDate,
         conditionReturn: p.conditionReturn,
         damageFine: p.damageFine,
         lostFine: p.lostFine,
-        fineAmount: Number(p.damageFine || 0) + Number(p.lostFine || 0),
+        fineAmount: Number(p.damageFine || 0) + Number(p.lostFine || 0), // ensure always written
         status: p.isLost ? 'LOST' : 'RETURNED',
       }, { where: { loanDetailId: detail.loanDetailId }, transaction: t });
     }
@@ -3123,7 +3145,6 @@ async function returnBulkItemsService(body, rawLibrarianId) {
 
       await MemberCard.update({ balance: memberCard.balance - deductedFromCard }, { where: { memberCardId: memberCard.memberCardId }, transaction: t });
 
-      // mark related Violations PAID if fully covered (optional: depends on your rule)
       if (needExternalPay === 0) {
         await Violation.update({ paymentStatus: 'PAID', paidAt: new Date() }, {
           where: { readerId: slip.readerId, loanDetailId: { [Op.in]: processedItems.map(x => x.loanDetailId) }, paymentStatus: 'UNPAID' },
@@ -3165,7 +3186,7 @@ async function returnBulkItemsService(body, rawLibrarianId) {
       createdPayments.push(payPending);
     }
 
-    // UPDATE SLIP STATUS: if previously OVERDUE, keep OVERDUE while there remains BORROWED items
+    // UPDATE SLIP STATUS
     const remainingBorrowedCount = await LoanDetail.count({ where: { loanSlipId: slip.loanSlipId, status: 'BORROWED' }, transaction: t });
     const prevStatus = String(slip.status || '').toUpperCase();
     if (prevStatus === 'OVERDUE') {
@@ -3194,6 +3215,8 @@ async function returnBulkItemsService(body, rawLibrarianId) {
     };
   });
 }
+
+
 
 
 
