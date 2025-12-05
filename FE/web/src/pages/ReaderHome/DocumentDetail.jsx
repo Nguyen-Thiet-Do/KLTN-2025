@@ -609,7 +609,7 @@ const openEbook = async () => {
                     <Button variant="contained" onClick={openEbook}>
                       Đọc Ebook
                     </Button>
-
+{available > 0 && (
                     <Button
                       variant="contained"
                       color="success"
@@ -617,7 +617,7 @@ const openEbook = async () => {
                     >
                       Thêm vào giỏ sách
                     </Button>
-
+)}
                     <Button
                       variant="outlined"
                       color="error"
