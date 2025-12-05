@@ -97,7 +97,8 @@ async function getReaderBorrowSnapshot(readerId, t) {
 
   // 3) Đếm "đang mượn" (slip BORROWING, detail BORROWED)
   const borrowingSlips = await LoanSlip.findAll({
-    where: { readerId, deleted: false, status: 'BORROWING' },
+    where: { readerId, deleted: false, status: { [Op.in]: ['BORROWING', 'OVERDUE'] }
+ },
     attributes: ['loanSlipId', 'dueDate'],
     transaction: t,
     lock: t?.LOCK?.UPDATE
