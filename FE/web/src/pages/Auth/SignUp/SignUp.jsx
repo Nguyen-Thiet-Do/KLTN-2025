@@ -18,10 +18,13 @@ import {
   Link,
   MenuItem,
   Chip,
+  FormHelperText,
 } from '@mui/material';
 import Visibility from '@mui/icons-material/Visibility';
 import VisibilityOff from '@mui/icons-material/VisibilityOff';
 import QRCode from 'react-qr-code';
+import PhotoCamera from '@mui/icons-material/PhotoCamera';
+import UploadFileIcon from '@mui/icons-material/UploadFile';
 
 import { authService } from '../../../services/authService';
 import { useAuth } from '../../../contexts/AuthContext';
@@ -30,7 +33,7 @@ export default function SignUp() {
   const navigate = useNavigate();
   const { login } = useAuth();
 
-  // 1: Thông tin + OTP, 2: Làm thẻ
+  // 1: Thông tin + OTP, 2: Làm thẻ (hiện tại)
   const [step, setStep] = useState(1);
   const [readerId, setReaderId] = useState(null);
 
@@ -58,6 +61,13 @@ export default function SignUp() {
   const [paymentData, setPaymentData] = useState(null);
   const [isWaitingPayment, setIsWaitingPayment] = useState(false);
 
+  // --- NEW: avatar upload states ---
+  const [avatarFile, setAvatarFile] = useState(null);
+  const [previewUrl, setPreviewUrl] = useState('');
+  const [avatarUrl, setAvatarUrl] = useState('');
+  const [showUploadArea, setShowUploadArea] = useState(false);
+  const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
+
   // Prefill email nếu có
   useEffect(() => {
     const saved = sessionStorage.getItem('last_login_email');
@@ -80,7 +90,7 @@ export default function SignUp() {
       }, 3000);
     };
 
-    window.addEventListener('payment_success', handlePaymentSuccess); 
+    window.addEventListener('payment_success', handlePaymentSuccess);
 
     return () => {
       window.removeEventListener('payment_success', handlePaymentSuccess);
@@ -100,7 +110,7 @@ export default function SignUp() {
     }
   };
 
-  // ===== VALIDATE =====
+  // ===== VALIDATE (giữ nguyên) =====
   const validateInfo = () => {
     const newErrors = {};
 
@@ -162,7 +172,7 @@ export default function SignUp() {
     return Object.keys(newErrors).length === 0;
   };
 
-  // ===== CALL API =====
+  // ===== CALL API (giữ nguyên các hàm cũ, thay đổi một chút cho avatar) =====
 
   // Gửi OTP
   const handleInitRegister = async () => {
@@ -298,6 +308,12 @@ export default function SignUp() {
           navigate('/login', { replace: true });
         }, 2000);
       } else {
+        // Nếu backend yêu cầu avatar cho SKIP, backend sẽ trả lỗi; chúng ta bật upload area
+        if (data?.error === 'AVATAR_REQUIRED_FOR_CARD' || data?.code === 'AVATAR_REQUIRED_FOR_CARD') {
+          setApiError('Hệ thống yêu cầu ảnh để phát hành thẻ miễn phí. Vui lòng tải ảnh lên.');
+          setShowUploadArea(true);
+          return;
+        }
         setApiError(
           data?.message || res?.message || 'Không thể hoàn tất đăng ký. Vui lòng thử lại.'
         );
@@ -307,6 +323,9 @@ export default function SignUp() {
       const code = err?.response?.data?.code;
       if (code === 'CARD_TYPE_NOT_FOUND') {
         setApiError('Loại thẻ không tồn tại hoặc đã bị xóa.');
+      } else if (code === 'AVATAR_REQUIRED_FOR_CARD') {
+        setApiError('Hệ thống yêu cầu ảnh để phát hành thẻ miễn phí. Vui lòng tải ảnh lên.');
+        setShowUploadArea(true);
       } else {
         setApiError(err?.message || 'Không thể hoàn tất đăng ký. Vui lòng thử lại.');
       }
@@ -315,8 +334,105 @@ export default function SignUp() {
     }
   };
 
-  // LÀM THẺ NGAY → tạo payment + QR (cardTypeId=2, action=PAY)
+  // LÀM THẺ NGAY → trước khi gọi PAY, yêu cầu upload avatar (hiển thị khu vực upload)
+  const handleMakeCardClicked = () => {
+    if (!validateStep2()) return;
+    // show upload area (user will pick file and "Tải ảnh lên")
+    setShowUploadArea(true);
+  };
+
+  // upload avatar then call PAY (after upload success)
+  const handleUploadAvatarAndCreatePay = async () => {
+    if (!avatarFile) {
+      setErrors((p) => ({ ...p, avatar: 'Vui lòng chọn ảnh trước khi tải lên.' }));
+      return;
+    }
+    setIsUploadingAvatar(true);
+    setApiError('');
+    setApiSuccess('');
+    try {
+      const fd = new FormData();
+      fd.append('avatar', avatarFile);
+      const res = await authService.uploadAvatar(fd);
+      const url = res?.avatarUrl || res?.data?.avatarUrl || res?.data?.data?.avatarUrl;
+      if (!url) {
+        setApiError('Upload ảnh thất bại. Vui lòng thử lại.');
+        setIsUploadingAvatar(false);
+        return;
+      }
+      setAvatarUrl(url);
+      setApiSuccess('Upload ảnh thành công. Đang tạo đơn thanh toán...');
+      // Now call registerComplete with avatarUrl + PAY
+      setIsUploadingAvatar(false);
+      await createPayWithAvatar(url);
+    } catch (err) {
+      console.error('Upload avatar error:', err);
+      const code = err?.response?.data?.code;
+      if (code === 'INVALID_FILE_TYPE') {
+        setErrors((prev) => ({ ...prev, avatar: 'Định dạng file không hợp lệ.' }));
+      } else if (code === 'MISSING_FILE') {
+        setErrors((prev) => ({ ...prev, avatar: 'Thiếu file avatar.' }));
+      } else {
+        setApiError(err?.response?.data?.message || 'Không thể upload ảnh. Vui lòng thử lại.');
+      }
+      setIsUploadingAvatar(false);
+    }
+  };
+
+  // create PAY after we have avatarUrl
+  const createPayWithAvatar = async (avatarUrlParam) => {
+    setIsSubmitting(true);
+    setApiError('');
+    setApiSuccess('');
+    setPaymentData(null);
+    setIsWaitingPayment(false);
+
+    try {
+      const payload = {
+        readerId,
+        cardTypeId: 2,
+        action: 'PAY',
+        avatarUrl: avatarUrlParam,
+      };
+
+      const res = await authService.registerComplete(payload);
+      const data = unwrapCompleteResponse(res);
+
+      if (data && data.payos && (data.payos.qrCode || data.payos.checkoutUrl)) {
+        setPaymentData({
+          amount: data.amount,
+          orderCode: data.orderCode,
+          qrCode: data.payos.qrCode,
+        });
+        setIsWaitingPayment(true);
+        setApiSuccess(
+          'Đã tạo đơn thanh toán làm thẻ thư viện (150.000đ). Vui lòng quét QR để thanh toán.'
+        );
+        // keep showing upload area collapsed if you want; currently keep showUploadArea=false to show QR section
+        setShowUploadArea(false);
+      } else {
+        setApiError(
+          data?.message || res?.message || 'Không thể tạo đơn thanh toán. Vui lòng thử lại.'
+        );
+      }
+    } catch (err) {
+      console.error('Create card & payment error:', err);
+      const code = err?.response?.data?.code;
+      if (code === 'CARD_TYPE_NOT_FOUND') {
+        setApiError('Loại thẻ không tồn tại hoặc đã bị xóa.');
+      } else if (code === 'PAYOS_CREATE_FAILED') {
+        setApiError('Không thể tạo link thanh toán PayOS.');
+      } else {
+        setApiError(err?.message || 'Không thể tạo đơn thanh toán. Vui lòng thử lại.');
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // legacy (not used directly) kept for reference
   const handleCreateAndPayCard = async () => {
+    // kept in case you want direct call without avatar (but we now force upload)
     if (!validateStep2()) return;
 
     setIsSubmitting(true);
@@ -368,7 +484,6 @@ export default function SignUp() {
   const handleSubmit = (e) => {
     e.preventDefault();
     if (step === 1) return handleVerifyRegister();
-    if (step === 2) return handleCreateAndPayCard();
   };
 
   const renderStepTitle = () => {
@@ -380,6 +495,26 @@ export default function SignUp() {
     if (isSubmitting) return 'Đang xử lý...';
     if (step === 1) return 'Xác thực & tạo tài khoản';
     return 'Làm thẻ ngay';
+  };
+
+  // avatar file select handler
+  const handleSelectAvatar = (e) => {
+    const file = e.target.files && e.target.files[0];
+    setApiError('');
+    setApiSuccess('');
+    setErrors((prev) => ({ ...prev, avatar: '' }));
+    if (!file) return;
+    const allowed = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp'];
+    if (!allowed.includes(file.type)) {
+      setErrors((prev) => ({ ...prev, avatar: 'Định dạng ảnh không hợp lệ (PNG/JPG/WebP).' }));
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setErrors((prev) => ({ ...prev, avatar: 'Kích thước ảnh quá lớn (max 5MB).' }));
+      return;
+    }
+    setAvatarFile(file);
+    setPreviewUrl(URL.createObjectURL(file));
   };
 
   return (
@@ -428,443 +563,160 @@ export default function SignUp() {
           color: 'text.primary',
           backgroundColor: 'rgba(255,255,255,0.95)',
           backdropFilter: 'blur(16px) saturate(180%)',
-          boxShadow: `
-            0 25px 50px -12px rgba(0,0,0,0.4),
-            0 8px 20px -8px rgba(0,0,0,0.3),
-            inset 0 1px 0 rgba(255,255,255,0.2)
-          `,
-          '&::before': {
-            content: '""',
-            position: 'absolute',
-            inset: 0,
-            padding: '1.5px',
-            borderRadius: 3.5,
-            background:
-              'linear-gradient(135deg, rgba(102,126,234,0.6), rgba(118,75,162,0.6), rgba(102,126,234,0.6))',
-            WebkitMask: 'linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0)',
-            WebkitMaskComposite: 'xor',
-            maskComposite: 'exclude',
-            pointerEvents: 'none',
-          },
-          animation: 'slideUpFade 500ms cubic-bezier(0.16, 1, 0.3, 1)',
-          '@keyframes slideUpFade': {
-            from: { opacity: 0, transform: 'translateY(24px) scale(0.98)' },
-            to: { opacity: 1, transform: 'translateY(0) scale(1)' },
-          },
         }}
       >
         <Stack spacing={3.5} component="form" onSubmit={handleSubmit} noValidate>
           {/* Header + Step */}
           <Stack spacing={2} alignItems="center" textAlign="center">
-            <Box
-              component="img"
-              src="/logoo.png"
-              alt="Logo Thư Viện"
-              sx={{
-                width: 92,
-                height: 92,
-                objectFit: 'contain',
-                filter: `
-                  drop-shadow(0 6px 12px rgba(102,126,234,0.3))
-                  brightness(1.05)
-                  contrast(1.1)
-                `,
-              }}
-            />
+            <Box component="img" src="/logoo.png" alt="Logo Thư Viện" sx={{ width: 92, height: 92 }} />
             <Stack spacing={0.8}>
-              <Typography
-                variant="h5"
-                fontWeight={800}
-                sx={{
-                  background: 'linear-gradient(135deg, #2D3748 0%, #4A5568 100%)',
-                  backgroundClip: 'text',
-                  WebkitBackgroundClip: 'text',
-                  WebkitTextFillColor: 'transparent',
-                  letterSpacing: '-0.02em',
-                  fontFamily: '"Inter", sans-serif',
-                }}
-              >
-                Thư Viện Book-tech
-              </Typography>
-
-              <Typography
-                variant="body2"
-                color="text.secondary"
-                sx={{ mt: 0.5, fontWeight: 500, opacity: 0.8, letterSpacing: '0.02em' }}
-              >
-                {renderStepTitle()}
-              </Typography>
-
+              <Typography variant="h5" fontWeight={800}>Thư Viện Book-tech</Typography>
+              <Typography variant="body2" color="text.secondary">{renderStepTitle()}</Typography>
               <Stack direction="row" spacing={1.5} justifyContent="center" mt={1}>
                 {[1, 2].map((s) => (
-                  <Chip
-                    key={s}
-                    size="small"
-                    label={`B${s}`}
-                    variant={step === s ? 'filled' : 'outlined'}
-                    color={step === s ? 'primary' : 'default'}
-                    sx={{ fontWeight: 600, fontSize: '0.75rem' }}
-                  />
+                  <Chip key={s} size="small" label={`B${s}`} variant={step === s ? 'filled' : 'outlined'} color={step === s ? 'primary' : 'default'} sx={{ fontWeight: 600, fontSize: '0.75rem' }} />
                 ))}
               </Stack>
             </Stack>
           </Stack>
 
           {apiError && (
-            <Alert
-              severity="error"
-              sx={{
-                borderRadius: 2.5,
-                border: '1px solid',
-                borderColor: 'error.light',
-                backgroundColor: 'rgba(254,242,242,0.9)',
-                backdropFilter: 'blur(8px)',
-                fontWeight: 500,
-                '& .MuiAlert-message': { padding: '4px 0' },
-              }}
-            >
-              {apiError}
-            </Alert>
+            <Alert severity="error">{apiError}</Alert>
           )}
 
           {apiSuccess && (
-            <Alert
-              severity="success"
-              sx={{
-                borderRadius: 2.5,
-                border: '1px solid',
-                borderColor: 'success.light',
-                backgroundColor: 'rgba(240,253,244,0.9)',
-                backdropFilter: 'blur(8px)',
-                fontWeight: 500,
-                '& .MuiAlert-message': { padding: '4px 0' },
-              }}
-            >
-              {apiSuccess}
-            </Alert>
+            <Alert severity="success">{apiSuccess}</Alert>
           )}
 
           {/* STEP 1: Thông tin + OTP */}
           {step === 1 && (
             <Stack spacing={2.5}>
-              <TextField
-                id="email"
-                name="email"
-                type="email"
-                label="Email"
-                placeholder="nhapemail@domain.com"
-                value={formData.email}
-                onChange={handleChange}
-                disabled={isSubmitting}
-                error={Boolean(errors.email)}
-                helperText={errors.email || 'Email dùng để đăng nhập và nhận mã OTP'}
-                fullWidth
-              />
+              {/* ... same fields as before (email, password, confirmPassword, fullName, phone, dob, gender, cccd, address, agree, otp) */}
+              <TextField id="email" name="email" type="email" label="Email" placeholder="nhapemail@domain.com" value={formData.email} onChange={handleChange} disabled={isSubmitting} error={Boolean(errors.email)} helperText={errors.email || 'Email dùng để đăng nhập và nhận mã OTP'} fullWidth />
 
-              <TextField
-                id="password"
-                name="password"
-                type={showPwd ? 'text' : 'password'}
-                label="Mật khẩu"
-                placeholder="••••••••"
-                value={formData.password}
-                onChange={handleChange}
-                disabled={isSubmitting}
-                error={Boolean(errors.password)}
-                helperText={errors.password}
-                fullWidth
-                autoComplete="new-password"
-                InputProps={{
-                  endAdornment: (
-                    <InputAdornment position="end">
-                      <IconButton
-                        aria-label={showPwd ? 'Ẩn mật khẩu' : 'Hiện mật khẩu'}
-                        onClick={() => setShowPwd((p) => !p)}
-                        edge="end"
-                        disabled={isSubmitting}
-                      >
-                        {showPwd ? <VisibilityOff /> : <Visibility />}
-                      </IconButton>
-                    </InputAdornment>
-                  ),
-                }}
-              />
+              <TextField id="password" name="password" type={showPwd ? 'text' : 'password'} label="Mật khẩu" placeholder="••••••••" value={formData.password} onChange={handleChange} disabled={isSubmitting} error={Boolean(errors.password)} helperText={errors.password} fullWidth autoComplete="new-password" InputProps={{ endAdornment: (<InputAdornment position="end"><IconButton aria-label={showPwd ? 'Ẩn mật khẩu' : 'Hiện mật khẩu'} onClick={() => setShowPwd((p) => !p)} edge="end" disabled={isSubmitting}>{showPwd ? <VisibilityOff /> : <Visibility />}</IconButton></InputAdornment>) }} />
 
-              <TextField
-                id="confirmPassword"
-                name="confirmPassword"
-                type={showConfirm ? 'text' : 'password'}
-                label="Xác nhận mật khẩu"
-                placeholder="••••••••"
-                value={formData.confirmPassword}
-                onChange={handleChange}
-                disabled={isSubmitting}
-                error={Boolean(errors.confirmPassword)}
-                helperText={errors.confirmPassword}
-                fullWidth
-                autoComplete="new-password"
-                InputProps={{
-                  endAdornment: (
-                    <InputAdornment position="end">
-                      <IconButton
-                        aria-label={showConfirm ? 'Ẩn mật khẩu' : 'Hiện mật khẩu'}
-                        onClick={() => setShowConfirm((p) => !p)}
-                        edge="end"
-                        disabled={isSubmitting}
-                      >
-                        {showConfirm ? <VisibilityOff /> : <Visibility />}
-                      </IconButton>
-                    </InputAdornment>
-                  ),
-                }}
-              />
+              <TextField id="confirmPassword" name="confirmPassword" type={showConfirm ? 'text' : 'password'} label="Xác nhận mật khẩu" placeholder="••••••••" value={formData.confirmPassword} onChange={handleChange} disabled={isSubmitting} error={Boolean(errors.confirmPassword)} helperText={errors.confirmPassword} fullWidth autoComplete="new-password" InputProps={{ endAdornment: (<InputAdornment position="end"><IconButton aria-label={showConfirm ? 'Ẩn mật khẩu' : 'Hiện mật khẩu'} onClick={() => setShowConfirm((p) => !p)} edge="end" disabled={isSubmitting}>{showConfirm ? <VisibilityOff /> : <Visibility />}</IconButton></InputAdornment>) }} />
 
-              <TextField
-                id="fullName"
-                name="fullName"
-                label="Họ và tên"
-                placeholder="Nhập họ và tên"
-                value={formData.fullName}
-                onChange={handleChange}
-                disabled={isSubmitting}
-                error={Boolean(errors.fullName)}
-                helperText={errors.fullName}
-                fullWidth
-              />
+              <TextField id="fullName" name="fullName" label="Họ và tên" placeholder="Nhập họ và tên" value={formData.fullName} onChange={handleChange} disabled={isSubmitting} error={Boolean(errors.fullName)} helperText={errors.fullName} fullWidth />
 
               <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
-                <TextField
-                  id="phoneNumber"
-                  name="phoneNumber"
-                  label="Số điện thoại"
-                  placeholder="Ví dụ: 0987654321"
-                  value={formData.phoneNumber}
-                  onChange={handleChange}
-                  disabled={isSubmitting}
-                  error={Boolean(errors.phoneNumber)}
-                  helperText={errors.phoneNumber}
-                  fullWidth
-                />
-                <TextField
-                  id="dateOfBirth"
-                  name="dateOfBirth"
-                  label="Ngày sinh"
-                  type="date"
-                  value={formData.dateOfBirth}
-                  onChange={handleChange}
-                  disabled={isSubmitting}
-                  fullWidth
-                  InputLabelProps={{ shrink: true }}
-                />
+                <TextField id="phoneNumber" name="phoneNumber" label="Số điện thoại" placeholder="Ví dụ: 0987654321" value={formData.phoneNumber} onChange={handleChange} disabled={isSubmitting} error={Boolean(errors.phoneNumber)} helperText={errors.phoneNumber} fullWidth />
+                <TextField id="dateOfBirth" name="dateOfBirth" label="Ngày sinh" type="date" value={formData.dateOfBirth} onChange={handleChange} disabled={isSubmitting} fullWidth InputLabelProps={{ shrink: true }} />
               </Stack>
 
               <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
-                <TextField
-                  id="gender"
-                  name="gender"
-                  label="Giới tính"
-                  select
-                  value={formData.gender}
-                  onChange={handleChange}
-                  disabled={isSubmitting}
-                  fullWidth
-                >
+                <TextField id="gender" name="gender" label="Giới tính" select value={formData.gender} onChange={handleChange} disabled={isSubmitting} fullWidth>
                   <MenuItem value="">Không chọn</MenuItem>
                   <MenuItem value="male">Nam</MenuItem>
                   <MenuItem value="female">Nữ</MenuItem>
                 </TextField>
-                <TextField
-                  id="cccd"
-                  name="cccd"
-                  label="Số CMND/CCCD"
-                  value={formData.cccd}
-                  onChange={handleChange}
-                  disabled={isSubmitting}
-                  error={Boolean(errors.cccd)}
-                  helperText={errors.cccd}
-                  fullWidth
-                />
+                <TextField id="cccd" name="cccd" label="Số CMND/CCCD" value={formData.cccd} onChange={handleChange} disabled={isSubmitting} error={Boolean(errors.cccd)} helperText={errors.cccd} fullWidth />
               </Stack>
 
-              <TextField
-                id="address"
-                name="address"
-                label="Địa chỉ"
-                placeholder="Nhập địa chỉ"
-                value={formData.address}
-                onChange={handleChange}
-                disabled={isSubmitting}
-                fullWidth
-              />
+              <TextField id="address" name="address" label="Địa chỉ" placeholder="Nhập địa chỉ" value={formData.address} onChange={handleChange} disabled={isSubmitting} fullWidth />
 
-              <FormControlLabel
-                control={
-                  <Checkbox
-                    name="agree"
-                    checked={formData.agree}
-                    onChange={handleChange}
-                    size="small"
-                  />
-                }
-                label={
-                  <Typography variant="body2">
-                    Tôi đồng ý với{' '}
-                    <Link href="/terms" underline="hover" sx={{ fontWeight: 700 }}>
-                      Điều khoản sử dụng
-                    </Link>
-                  </Typography>
-                }
-              />
-              {errors.agree && (
-                <Typography variant="body2" color="error" sx={{ fontWeight: 600 }}>
-                  {errors.agree}
-                </Typography>
-              )}
+              <FormControlLabel control={<Checkbox name="agree" checked={formData.agree} onChange={handleChange} size="small" />} label={<Typography variant="body2">Tôi đồng ý với <Link href="/terms" underline="hover" sx={{ fontWeight: 700 }}>Điều khoản sử dụng</Link></Typography>} />
+              {errors.agree && (<Typography variant="body2" color="error" sx={{ fontWeight: 600 }}>{errors.agree}</Typography>)}
 
-              <TextField
-                id="otp"
-                name="otp"
-                label="Mã OTP (6 số)"
-                placeholder="Nhập mã OTP từ email"
-                value={formData.otp}
-                onChange={handleChange}
-                disabled={isSubmitting}
-                error={Boolean(errors.otp)}
-                helperText={errors.otp || 'Nhấn "Gửi mã OTP" để nhận mã, sau đó nhập vào đây.'}
-                fullWidth
-              />
+              <TextField id="otp" name="otp" label="Mã OTP (6 số)" placeholder="Nhập mã OTP từ email" value={formData.otp} onChange={handleChange} disabled={isSubmitting} error={Boolean(errors.otp)} helperText={errors.otp || 'Nhấn "Gửi mã OTP" để nhận mã, sau đó nhập vào đây.'} fullWidth />
 
               <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
-                <Button
-                  type="button"
-                  variant="outlined"
-                  disabled={isSubmitting}
-                  onClick={handleInitRegister}
-                  fullWidth
-                >
-                  Gửi mã OTP
-                </Button>
-                <Button
-                  type="button"
-                  variant="contained"
-                disabled={isSubmitting}
-                onClick={handleVerifyRegister}
-                fullWidth
-                >
-                {renderPrimaryButtonLabel()}
-              </Button>
-            </Stack>
+                <Button type="button" variant="outlined" disabled={isSubmitting} onClick={handleInitRegister} fullWidth>Gửi mã OTP</Button>
+                <Button type="button" variant="contained" disabled={isSubmitting} onClick={handleVerifyRegister} fullWidth>{renderPrimaryButtonLabel()}</Button>
+              </Stack>
             </Stack>
           )}
 
-        {/* STEP 2: Làm thẻ thư viện */}
-        {step === 2 && (
-          <Stack spacing={2.5}>
-            <Alert severity="info">
-              Tài khoản độc giả đã được tạo. Để có thể <b>mượn sách mang về</b>, bạn cần làm thẻ
-              thư viện.
-            </Alert>
+          {/* STEP 2: Làm thẻ thư viện */}
+          {step === 2 && (
+            <Stack spacing={2.5}>
+              <Alert severity="info">
+                Tài khoản độc giả đã được tạo. Để có thể <b>mượn sách mang về</b>, bạn cần làm thẻ
+                thư viện.
+              </Alert>
 
-            <Typography variant="body2" sx={{ opacity: 0.9 }}>
-              Bạn có thể:
-              <br />• Chọn <b>"Làm thẻ ngay"</b> để thanh toán làm thẻ (150.000đ) và dùng đầy đủ
-              chức năng.
-              <br />• Hoặc chọn <b>"Để sau"</b> nếu hiện tại chưa muốn làm thẻ.
-            </Typography>
-
-            {paymentData && paymentData.qrCode && (
-              <Stack
-                spacing={1.5}
-                alignItems="center"
-                sx={{
-                  p: 2,
-                  borderRadius: 2.5,
-                  border: '1px dashed rgba(0,0,0,0.12)',
-                  backgroundColor: 'rgba(247,250,252,0.9)',
-                }}
-              >
-                <Typography variant="subtitle2" fontWeight={700}>
-                  Quét QR để thanh toán làm thẻ thư viện
-                </Typography>
-                <Typography variant="body2" sx={{ opacity: 0.8 }}>
-                  Số tiền: {paymentData.amount?.toLocaleString('vi-VN')} đ
-                </Typography>
-
-                <Box
-                  sx={{
-                    p: 2,
-                    borderRadius: 2,
-                    backgroundColor: '#fff',
-                  }}
-                >
-                  <QRCode value={paymentData.qrCode} size={180} />
-                </Box>
-
-                <Typography variant="caption" sx={{ opacity: 0.7, textAlign: 'center' }}>
-                  Sau khi thanh toán thành công, hệ thống sẽ tự động xác nhận và chuyển bạn sang
-                  trang đăng nhập.
-                </Typography>
-              </Stack>
-            )}
-
-            {errors.cardType && (
-              <Typography variant="body2" color="error">
-                {errors.cardType}
+              <Typography variant="body2" sx={{ opacity: 0.9 }}>
+                Bạn có thể:
+                <br />• Chọn <b>"Làm thẻ ngay"</b> để thanh toán làm thẻ (150.000đ) và dùng đầy đủ
+                chức năng.
+                <br />• Hoặc chọn <b>"Để sau"</b> nếu hiện tại chưa muốn làm thẻ.
               </Typography>
-            )}
 
-            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
-              <Button
-                type="button"
-                variant="contained"
-                fullWidth
-                disabled={isSubmitting}
-                onClick={handleCreateAndPayCard}
-              >
-                Làm thẻ ngay
-              </Button>
-              <Button
-                type="button"
-                variant="outlined"
-                fullWidth
-                disabled={isSubmitting}
-                onClick={handleCreateLater}
-              >
-                Để sau
-              </Button>
+              {/* If upload area is requested, show it here */}
+              {showUploadArea && (
+                <Box sx={{ p: 2, borderRadius: 2, border: '1px dashed rgba(0,0,0,0.12)', backgroundColor: 'rgba(247,250,252,0.9)' }}>
+                  <Typography variant="subtitle2" sx={{ mb: 1 }}>Tải ảnh chân dung (bắt buộc trước khi tạo QR)</Typography>
+                  <input accept="image/*" id="avatar-file" type="file" style={{ display: 'none' }} onChange={(e) => {
+                    const file = e.target.files && e.target.files[0];
+                    if (!file) return;
+                    const allowed = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp'];
+                    if (!allowed.includes(file.type)) {
+                      setErrors((p) => ({ ...p, avatar: 'Định dạng ảnh không hợp lệ (PNG/JPG/WebP).' }));
+                      return;
+                    }
+                    if (file.size > 5 * 1024 * 1024) {
+                      setErrors((p) => ({ ...p, avatar: 'Kích thước ảnh quá lớn (max 5MB).' }));
+                      return;
+                    }
+                    setAvatarFile(file);
+                    setPreviewUrl(URL.createObjectURL(file));
+                    setErrors((p) => ({ ...p, avatar: '' }));
+                  }} />
+                  <label htmlFor="avatar-file">
+                    <Button variant="outlined" component="span" startIcon={<PhotoCamera />}>Chọn ảnh</Button>
+                  </label>
+
+                  {previewUrl && (
+                    <Stack direction="row" spacing={2} alignItems="center" sx={{ mt: 2 }}>
+                      <Box component="img" src={previewUrl} alt="preview" sx={{ width: 120, height: 120, objectFit: 'cover', borderRadius: 2 }} />
+                      <Stack>
+                        <Typography variant="body2">Ảnh đã chọn</Typography>
+                        <Stack direction="row" spacing={1} sx={{ mt: 1 }}>
+                          <Button variant="contained" size="small" onClick={handleUploadAvatarAndCreatePay} startIcon={<UploadFileIcon />} disabled={isUploadingAvatar}>
+                            {isUploadingAvatar ? 'Đang tải...' : 'Tải ảnh lên & Tạo QR'}
+                          </Button>
+                          <Button variant="outlined" size="small" onClick={() => { setAvatarFile(null); setPreviewUrl(''); setErrors((p) => ({ ...p, avatar: '' })); }}>Chọn lại</Button>
+                        </Stack>
+                        {errors.avatar && <FormHelperText error>{errors.avatar}</FormHelperText>}
+                      </Stack>
+                    </Stack>
+                  )}
+                </Box>
+              )}
+
+              {paymentData && paymentData.qrCode && (
+                <Stack spacing={1.5} alignItems="center" sx={{ p: 2, borderRadius: 2.5, border: '1px dashed rgba(0,0,0,0.12)', backgroundColor: 'rgba(247,250,252,0.9)' }}>
+                  <Typography variant="subtitle2" fontWeight={700}>Quét QR để thanh toán làm thẻ thư viện</Typography>
+                  <Typography variant="body2" sx={{ opacity: 0.8 }}>Số tiền: {paymentData.amount?.toLocaleString('vi-VN')} đ</Typography>
+                  <Box sx={{ p: 2, borderRadius: 2, backgroundColor: '#fff' }}>
+                    <QRCode value={paymentData.qrCode} size={180} />
+                  </Box>
+                  <Typography variant="caption" sx={{ opacity: 0.7, textAlign: 'center' }}>
+                    Sau khi thanh toán thành công, hệ thống sẽ tự động xác nhận và chuyển bạn sang trang đăng nhập.
+                  </Typography>
+                </Stack>
+              )}
+
+              {errors.cardType && (<Typography variant="body2" color="error">{errors.cardType}</Typography>)}
+
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+                <Button type="button" variant="contained" fullWidth disabled={isSubmitting} onClick={handleMakeCardClicked}>Làm thẻ ngay</Button>
+                <Button type="button" variant="outlined" fullWidth disabled={isSubmitting} onClick={handleCreateLater}>Để sau</Button>
+              </Stack>
             </Stack>
-          </Stack>
-        )}
+          )}
 
-        <Divider sx={{ my: 2, opacity: 0.4 }} />
+          <Divider sx={{ my: 2, opacity: 0.4 }} />
 
-        <Typography
-          variant="body2"
-          color="text.secondary"
-          textAlign="center"
-          sx={{ fontFamily: '"Inter", sans-serif', fontWeight: 500 }}
-        >
-          Đã có tài khoản?{' '}
-          <Typography
-            component={RouterLink}
-            to="/login"
-            sx={{
-              color: 'primary.main',
-              fontWeight: 700,
-              textDecoration: 'none',
-              transition: 'all 0.2s ease',
-              fontFamily: '"Inter", sans-serif',
-              '&:hover': {
-                textDecoration: 'underline',
-                color: 'primary.dark',
-              },
-            }}
-          >
-            Đăng nhập
+          <Typography variant="body2" color="text.secondary" textAlign="center" sx={{ fontFamily: '"Inter", sans-serif', fontWeight: 500 }}>
+            Đã có tài khoản?{' '}
+            <Typography component={RouterLink} to="/login" sx={{ color: 'primary.main', fontWeight: 700, textDecoration: 'none', '&:hover': { textDecoration: 'underline' } }}>
+              Đăng nhập
+            </Typography>
           </Typography>
-        </Typography>
-      </Stack>
-    </Paper>
-    </Box >
+        </Stack>
+      </Paper>
+    </Box>
   );
 }

@@ -52,6 +52,7 @@ import PickupDialog from "./PickupDialog";
 import CancelSlipDialog from "./CancelSlipDialog";
 import DeleteDetailDialog from "./DeleteDetailDialog";
 import { useAuth } from "../../contexts/AuthContext"; // điều chỉnh path nếu khác
+import CancelReservationDialog from "./CancelReservationDialog";
 
 // IMPORT: two new dialogs (paste these files into same folder)
 import CreateOnsiteDialog from "./CreateOnsiteDialog";
@@ -924,7 +925,7 @@ function Row({
   );
 }
 
-function CancelReservationDialog({ open, onClose, slip, onCancelled }) {
+function CancelReservationDialog1({ open, onClose, slip, onCancelled, librarianId: propLibrarianId }) {
   const [reason, setReason] = useState("");
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
@@ -935,22 +936,59 @@ function CancelReservationDialog({ open, onClose, slip, onCancelled }) {
     if (!slipId) return;
     setLoading(true);
     setErrorMsg("");
+
     try {
+      // Resolve librarianId: ưu tiên prop, fallback sessionStorage.profile
+      let resolvedLibrarianId = null;
+
+      if (typeof propLibrarianId !== "undefined" && propLibrarianId !== null) {
+        resolvedLibrarianId = Number(propLibrarianId);
+      } else {
+        const raw = sessionStorage.getItem("profile");
+        if (raw) {
+          try {
+            const profile = JSON.parse(raw);
+            if (profile && (profile.librarianId || profile.librarian_id)) {
+              resolvedLibrarianId = Number(profile.librarianId ?? profile.librarian_id);
+            }
+          } catch (e) {
+            console.warn("CancelReservationDialog: cannot parse profile from sessionStorage", e);
+          }
+        }
+      }
+
+      if (resolvedLibrarianId == null) {
+        setErrorMsg("Không xác định thủ thư (librarianId). Vui lòng đăng nhập lại.");
+        setLoading(false);
+        return;
+      }
+
       const res = await cancelReservation(slipId, {
+        librarianId: resolvedLibrarianId,
         reason: reason || undefined,
       });
+
       if (!res?.success) {
         setErrorMsg(res?.message || "Hủy phiếu thất bại");
         return;
       }
+
       onCancelled?.(res);
     } catch (e) {
-      console.error(e);
+      console.error("cancelReservation error", e);
       setErrorMsg(e?.message || "Lỗi khi hủy phiếu");
     } finally {
       setLoading(false);
     }
   }
+
+  useEffect(() => {
+    if (!open) {
+      setReason("");
+      setLoading(false);
+      setErrorMsg("");
+    }
+  }, [open]);
 
   return (
     <Dialog open={open} onClose={loading ? undefined : onClose} fullWidth>
@@ -995,6 +1033,7 @@ function CancelReservationDialog({ open, onClose, slip, onCancelled }) {
     </Dialog>
   );
 }
+
 
 export default function Borrow() {
   const { user } = useAuth(); // lấy user từ AuthContext
@@ -1755,11 +1794,13 @@ export default function Borrow() {
         open={openCancel}
         onClose={() => handleCloseCancel()}
         slip={selectedSlipForCancel}
+        librarianId={resolvedLibrarianId}
         onCancelled={() => {
           handleCloseCancel();
           load();
         }}
       />
+
 
       {/* Pickup dialog (WAITING_FOR_PICKUP) */}
       <PickupDialog

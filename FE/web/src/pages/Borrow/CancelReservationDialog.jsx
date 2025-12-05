@@ -16,7 +16,6 @@ export default function CancelReservationDialog({
   open,
   onClose,
   slip,
-  librarianId, // số (bắt buộc)
   onCancelled, // callback khi thành công
 }) {
   const { enqueueSnackbar } = useSnackbar();
@@ -33,15 +32,45 @@ export default function CancelReservationDialog({
 
   async function handleConfirm() {
     if (!slipId) return;
-    if (!librarianId) {
-      enqueueSnackbar("Không xác định thủ thư (librarianId). Vui lòng đăng nhập lại.", { variant: "warning" });
-      return;
-    }
+
     setLoading(true);
+
     try {
-      const resp = await cancelReservation(slipId, { librarianId, reason });
+      // 🟦 1) Lấy librarianId từ sessionStorage
+      let resolvedLibrarianId = null;
+
+      const rawProfile = sessionStorage.getItem("profile");
+      if (rawProfile) {
+        try {
+          const profile = JSON.parse(rawProfile);
+          resolvedLibrarianId = profile?.librarianId ?? null;
+        } catch (e) {
+          console.warn("Không parse được profile từ sessionStorage", e);
+        }
+      }
+
+      // 🟥 2) Nếu không có librarianId -> báo lỗi + không gọi API
+      if (!resolvedLibrarianId) {
+        enqueueSnackbar("Không xác định thủ thư. Vui lòng đăng nhập lại.", { variant: "warning" });
+        setLoading(false);
+        return;
+      }
+
+      console.debug("CancelReservation =>", {
+        slipId,
+        librarianId: resolvedLibrarianId,
+        reason,
+      });
+
+      // 🟩 3) Gọi API
+      const resp = await cancelReservation(slipId, {
+        librarianId: resolvedLibrarianId,
+        reason,
+      });
+
+      // 🟩 4) Thành công
       if (resp && resp.success) {
-        enqueueSnackbar("Hủy phiếu đặt trước thành công.", { variant: "success" });
+        enqueueSnackbar("Hủy phiếu thành công.", { variant: "success" });
         onCancelled?.(resp);
       } else {
         const msg = resp?.message || "Hủy phiếu thất bại";
@@ -49,12 +78,16 @@ export default function CancelReservationDialog({
       }
     } catch (err) {
       console.error("cancelReservation error", err);
-      const msg = err?.message || err?.response?.data?.message || "Lỗi khi hủy phiếu";
+      const msg =
+        err?.message ||
+        err?.response?.data?.message ||
+        "Lỗi khi hủy phiếu";
       enqueueSnackbar(msg, { variant: "error" });
     } finally {
       setLoading(false);
     }
   }
+
 
   return (
     <Dialog open={Boolean(open)} onClose={onClose} fullWidth maxWidth="sm">
@@ -62,8 +95,7 @@ export default function CancelReservationDialog({
       <DialogContent>
         <Stack spacing={1}>
           <Typography variant="body2" color="text.secondary">
-            Hủy phiếu đặt trước sẽ xóa các bản ghi đặt (LoanDetail) liên quan và gửi thông báo tới độc giả.
-            Vui lòng nhập lý do (không bắt buộc).
+            Vui lòng nhập lý do hủy để thông báo đến độc giả.
           </Typography>
 
           <TextField

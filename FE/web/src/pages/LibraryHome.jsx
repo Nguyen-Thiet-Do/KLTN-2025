@@ -13,7 +13,7 @@ const bannerItems = [
   {
     id: 1,
     title: "Khám phá Thế giới Tri thức",
-    subtitle: "Hơn 50.000 đầu sách đang chờ bạn khám phá",
+    subtitle: "Hơn 10.000 đầu sách đang chờ bạn khám phá",
     image: "https://images.unsplash.com/photo-1507842217343-583bb7270b66?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D&auto=format&fit=crop&w=1950&q=80",
     cta: "Xem ngay",
     color: "primary"
@@ -29,7 +29,7 @@ const bannerItems = [
   {
     id: 3,
     title: "Thư viện Thông minh",
-    subtitle: "Mượn trả sách dễ dàng với công nghệ QR Code",
+    subtitle: "Mượn trả sách dễ dàng ",
     image: "https://images.unsplash.com/photo-1589998059171-988d887df646?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D&auto=format&fit=crop&w=1950&q=80",
     cta: "Tìm hiểu",
     color: "success"

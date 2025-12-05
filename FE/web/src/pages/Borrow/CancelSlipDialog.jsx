@@ -50,7 +50,7 @@ export default function CancelSlipDialog({ open, onClose, slip, librarianId, onC
             <DialogContent>
                 <Stack spacing={1} sx={{ mt: 1 }}>
                     <Typography variant="body2" color="text.secondary">
-                        Bạn sẽ hủy toàn bộ phiếu mượn/đặt trước này. Hành động này không thể hoàn tác.
+                        Vui lòng nhập lý do hủy để thông báo đến độc giả.
                     </Typography>
 
                     <TextField

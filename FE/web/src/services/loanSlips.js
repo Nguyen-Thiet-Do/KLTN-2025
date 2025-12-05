@@ -120,8 +120,10 @@ export async function cancelReservation(
 ) {
   if (!loanSlipId) throw new Error("loanSlipId is required");
 
-  // Guard: librarianId must be provided (backend expects it)
-  if (!librarianId) {
+  // ❗ Sửa tại đây:
+  // Trước đây là: if (!librarianId) -> sai vì librarianId = 0 cũng bị coi là thiếu
+  // Nay sửa lại để chỉ bắt null/undefined
+  if (librarianId == null) {
     throw new Error("Thiếu librarianId. Vui lòng đăng nhập hoặc cung cấp librarianId.");
   }
 
@@ -131,6 +133,7 @@ export async function cancelReservation(
     });
     return res?.data ?? { success: false };
   } catch (err) {
+    // Giữ nguyên logic của bạn
     throw err;
   }
 }

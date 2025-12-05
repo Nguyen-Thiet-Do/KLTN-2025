@@ -1,3 +1,4 @@
+// src/services/authService.js
 import api from "./api";
 
 /**
@@ -26,10 +27,30 @@ export const registerVerify = async (payload) => {
 };
 
 /**
+ * Bước 2.5: Upload ảnh avatar
+ * formData: FormData với key 'avatar' => file
+ * Ví dụ:
+ *   const fd = new FormData();
+ *   fd.append('avatar', file);
+ *   await uploadAvatar(fd);
+ */
+export const uploadAvatar = async (formData) => {
+  const config = {
+    headers: {
+      "Content-Type": "multipart/form-data",
+    },
+  };
+  const response = await api.post("/files/upload/avatar", formData, config);
+  return response.data;
+};
+
+/**
  * 💳 Bước 3: Hoàn tất đăng ký (chọn thẻ FREE/PREMIUM)
  */
 export const registerComplete = async (payload) => {
-  // payload: { readerId, cardTypeId, action, extraInfo? }
+  // payload: { readerId, cardTypeId, action, avatarUrl?, extraInfo? }
+  // - action: 'SKIP' (free) or 'PAY'
+  // - if backend requires avatar for card issuance, include avatarUrl (string)
   const response = await api.post("/auth/register/complete", payload);
   return response.data;
 };
@@ -51,7 +72,7 @@ export const getCurrentUser = async () => {
 };
 
 /**
- * 💳 Complete Registration (Tạo thẻ)
+ * 💳 Complete Registration (Tạo thẻ) - alias có thể dùng token tùy trường hợp
  */
 export const completeRegistration = async (payload, token = null) => {
   const config = token
@@ -61,6 +82,7 @@ export const completeRegistration = async (payload, token = null) => {
   const response = await api.post("/auth/register/complete", payload, config);
   return response.data;
 };
+
 export const topupMemberCard = async (payload, token = null) => {
   const config = token
     ? { headers: { Authorization: `Bearer ${token}` } }
@@ -78,6 +100,7 @@ export const authService = {
   login,
   registerInit,
   registerVerify,
+  uploadAvatar,        // <-- mới thêm
   registerComplete,
   logout,
   getCurrentUser,

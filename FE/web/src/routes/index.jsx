@@ -26,28 +26,30 @@ import ProfilePage from "../pages/reader/ProfilePage";
 
 import Settings from "../pages/reader/Settings";
 
+import LibraryRules from "../pages/reader/LibraryRules";
+
 export const router = createBrowserRouter([
   {
     path: "/",
-    
+
     children: [
       { index: true, element: <LibraryHome /> },
       { path: "books", element: <ReaderHome type="book" /> },
       { path: "newspapers", element: <ReaderHome type="newspaper" /> },
       { path: "magazines", element: <ReaderHome type="magazine" /> },
-
+      { path: "/reader/rules", element: <LibraryRules /> },
       // ▼ ADD CART ROUTE
       { path: "cart", element: <CartPage /> },
       { path: "favorite", element: <FavoritePage /> },
       { path: "reader/loans/my", element: <LoanHistoryPage /> },
-{ path: "notifications", element: <NotificationPage /> },
-{ path: "notifications/:id", element: <NotificationDetailPage /> },
+      { path: "notifications", element: <NotificationPage /> },
+      { path: "notifications/:id", element: <NotificationDetailPage /> },
       // ▼ Chi tiết tài liệu
       { path: "reader/documents/:id", element: <DocumentDetail /> },
       { path: "/reader/ebook/:id", element: <EbookReader /> },
 
-        { path: "profile", element: <ProfilePage /> }, 
-         { path: "settings", element: <Settings /> },
+      { path: "profile", element: <ProfilePage /> },
+      { path: "settings", element: <Settings /> },
     ],
   },
 

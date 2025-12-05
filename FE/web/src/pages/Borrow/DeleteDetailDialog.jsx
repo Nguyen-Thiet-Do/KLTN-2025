@@ -49,7 +49,9 @@ export default function DeleteDetailDialog({ open, onClose, slip, detail, librar
             <DialogContent>
                 <Stack spacing={1} sx={{ mt: 1 }}>
                     <Typography variant="body2" color="text.secondary">
-                        Bạn sẽ xóa tài liệu <strong>{title}</strong> khỏi phiếu. Nếu đây là tài liệu cuối cùng, hệ thống có thể xóa cả phiếu.
+                        Bạn sẽ xóa tài liệu <strong>{title}</strong> khỏi phiếu.
+                        Vui lòng nhập lý do hủy để thông báo đến độc giả.
+
                     </Typography>
 
                     <TextField

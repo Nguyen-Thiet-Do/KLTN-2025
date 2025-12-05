@@ -15,7 +15,7 @@ import {
   Button,
   IconButton,
   Avatar,
-  Menu, 
+  Menu,
   MenuItem,
   Divider,
   Typography,
@@ -39,7 +39,7 @@ import {
   AccountCircle,
   Settings,
   ExitToApp,
-  ShoppingCartOutlined, 
+  ShoppingCartOutlined,
   FavoriteBorder,
   Menu as MenuIcon,
   Close as CloseIcon,
@@ -54,7 +54,7 @@ export default function ReaderHeader() {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("md"));
   const isSmall = useMediaQuery(theme.breakpoints.down("sm"));
-  
+
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const { user, logout, isAuthenticated } = useAuth();
@@ -64,7 +64,7 @@ export default function ReaderHeader() {
   const [searchValue, setSearchValue] = useState("");
   const [openChat, setOpenChat] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  
+
   const maxContentWidth = 1280;
   const { count } = useCart();
   const { favoriteCount } = useFavorite();
@@ -74,21 +74,21 @@ export default function ReaderHeader() {
     console.log("🔔 ReaderHeader - unreadCount changed:", unreadCount);
   }, [unreadCount]);
 
-const getAvatarUrl = () => {
-  if (!user?.avatarUrl) return null;
+  const getAvatarUrl = () => {
+    if (!user?.avatarUrl) return null;
 
-  const baseURL =
-    window.location.hostname === "localhost"
-      ? "http://localhost:8080"
-      : "https://kltn-2025-ehsx.onrender.com";
+    const baseURL =
+      window.location.hostname === "localhost"
+        ? "http://localhost:8080"
+        : "https://kltn-2025-ehsx.onrender.com";
 
-  // Nếu avatar đã là URL đầy đủ
-  if (user.avatarUrl.startsWith("http")) {
-    return user.avatarUrl;
-  }
+    // Nếu avatar đã là URL đầy đủ
+    if (user.avatarUrl.startsWith("http")) {
+      return user.avatarUrl;
+    }
 
-  return `${baseURL}${user.avatarUrl}`;
-};
+    return `${baseURL}${user.avatarUrl}`;
+  };
 
 
   const tabs = useMemo(
@@ -97,6 +97,7 @@ const getAvatarUrl = () => {
       { path: "/books", label: "Sách", icon: "📚", iconComponent: <MenuBook /> },
       { path: "/newspapers", label: "Báo", icon: "📰", iconComponent: <Newspaper /> },
       { path: "/magazines", label: "Tạp chí", icon: "🎯", iconComponent: <Article /> },
+      { path: "/reader/rules", label: "Nội quy", icon: "📘", iconComponent: <Article /> },
     ],
     []
   );
@@ -240,7 +241,7 @@ const getAvatarUrl = () => {
             <Button
               variant="text"
               onClick={() => navigate("/login")}
-              sx={{ 
+              sx={{
                 fontWeight: 600,
                 fontSize: { xs: "0.85rem", sm: "0.9rem" }
               }}
@@ -321,18 +322,18 @@ const getAvatarUrl = () => {
                 },
               }}
             >
-            <Avatar
-  src={getAvatarUrl() || undefined}
-  sx={{
-    width: { xs: 32, sm: 36 },
-    height: { xs: 32, sm: 36 },
-    bgcolor: "primary.main",
-    fontWeight: 700,
-    fontSize: "0.9rem",
-  }}
->
-  {!getAvatarUrl() && initials}
-</Avatar>
+              <Avatar
+                src={getAvatarUrl() || undefined}
+                sx={{
+                  width: { xs: 32, sm: 36 },
+                  height: { xs: 32, sm: 36 },
+                  bgcolor: "primary.main",
+                  fontWeight: 700,
+                  fontSize: "0.9rem",
+                }}
+              >
+                {!getAvatarUrl() && initials}
+              </Avatar>
 
             </IconButton>
           </Tooltip>
@@ -429,9 +430,9 @@ const getAvatarUrl = () => {
           <CloseIcon />
         </IconButton>
       </Box>
-      
+
       <Divider sx={{ borderColor: "rgba(255,255,255,0.2)" }} />
-      
+
       <List sx={{ px: 1 }}>
         {tabs.map((tab) => (
           <ListItemButton
@@ -464,7 +465,7 @@ const getAvatarUrl = () => {
       {isAuthenticated && (
         <>
           <Divider sx={{ borderColor: "rgba(255,255,255,0.2)", my: 1 }} />
-          
+
           <List sx={{ px: 1 }}>
             <ListItemButton
               onClick={() => {
@@ -568,7 +569,7 @@ const getAvatarUrl = () => {
                 <MenuIcon />
               </IconButton>
             )}
-            
+
             {Left}
             {Center}
             {Right}

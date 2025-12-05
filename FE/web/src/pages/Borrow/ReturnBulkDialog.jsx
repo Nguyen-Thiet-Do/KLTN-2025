@@ -326,7 +326,7 @@ export default function ReturnBulkDialog({ open, onClose, slip, onReturned }) {
       });
       setShowQr(true);
       enqueueSnackbar(
-        "Đã tạo QR/link thanh toán. Vui lòng thanh toán rồi bấm 'Tôi đã thanh toán' hoặc chọn 'Thanh toán tiền mặt'.",
+        "Đã tạo thanh toán. Vui lòng thanh toán rồi bấm 'Tôi đã thanh toán' hoặc chọn 'Thanh toán tiền mặt'.",
         { variant: "info" }
       );
     } catch (err) {
@@ -675,7 +675,7 @@ export default function ReturnBulkDialog({ open, onClose, slip, onReturned }) {
                         Có thể trừ từ thẻ: {nf.format(summary.canPayFromCard)}₫
                       </Typography>
                       <Typography>
-                        Cần thanh toán thêm (QR):{" "}
+                        Cần thanh toán thêm :{" "}
                         {nf.format(summary.needExternalPay)}₫
                       </Typography>
                     </>
