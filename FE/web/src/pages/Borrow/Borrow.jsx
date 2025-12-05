@@ -757,7 +757,6 @@ function Row({
                     <TableCell>Trạng thái</TableCell>
                     <TableCell>Ngày trả</TableCell>
                     <TableCell>Tiền phạt</TableCell>
-                    <TableCell>Lượt gia hạn</TableCell>
                     <TableCell>Ghi chú</TableCell>
                     <TableCell align="right">Thao tác</TableCell>
                   </TableRow>
@@ -879,9 +878,7 @@ function Row({
                             </Typography>
                           </TableCell>
 
-                          <TableCell align="center">
-                            <Chip label={d.renewalCount ?? 0} size="small" color="primary" sx={{ fontWeight: 600 }} />
-                          </TableCell>
+                          
 
                           <TableCell>
                             <Typography variant="caption" color="text.secondary">

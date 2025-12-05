@@ -638,7 +638,7 @@ export default function SignUp() {
 
               <Typography variant="body2" sx={{ opacity: 0.9 }}>
                 Bạn có thể:
-                <br />• Chọn <b>"Làm thẻ ngay"</b> để thanh toán làm thẻ (150.000đ) và dùng đầy đủ
+                <br />• Chọn <b>"Làm thẻ ngay"</b> để thanh toán làm thẻ 
                 chức năng.
                 <br />• Hoặc chọn <b>"Để sau"</b> nếu hiện tại chưa muốn làm thẻ.
               </Typography>
@@ -646,7 +646,7 @@ export default function SignUp() {
               {/* If upload area is requested, show it here */}
               {showUploadArea && (
                 <Box sx={{ p: 2, borderRadius: 2, border: '1px dashed rgba(0,0,0,0.12)', backgroundColor: 'rgba(247,250,252,0.9)' }}>
-                  <Typography variant="subtitle2" sx={{ mb: 1 }}>Tải ảnh chân dung (bắt buộc trước khi tạo QR)</Typography>
+                  <Typography variant="subtitle2" sx={{ mb: 1 }}>Tải ảnh chân dung </Typography>
                   <input accept="image/*" id="avatar-file" type="file" style={{ display: 'none' }} onChange={(e) => {
                     const file = e.target.files && e.target.files[0];
                     if (!file) return;
@@ -693,7 +693,6 @@ export default function SignUp() {
                     <QRCode value={paymentData.qrCode} size={180} />
                   </Box>
                   <Typography variant="caption" sx={{ opacity: 0.7, textAlign: 'center' }}>
-                    Sau khi thanh toán thành công, hệ thống sẽ tự động xác nhận và chuyển bạn sang trang đăng nhập.
                   </Typography>
                 </Stack>
               )}

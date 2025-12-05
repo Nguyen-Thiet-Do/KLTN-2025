@@ -20,6 +20,7 @@ import {
   Alert,
   Box,
   MenuItem,
+  Tooltip,
 } from "@mui/material";
 import { useAuth } from "../../contexts/AuthContext";
 import {
@@ -37,26 +38,152 @@ function parseDateOnly(d = null) {
   return String(d).slice(0, 10);
 }
 
-// Các mốc trạng thái (giữ nguyên code cũ, chỉ thêm helper)
-const CONDITION_RANGES = [
-  { key: "100-90", label: "Mới", upper: 100, lower: 90 },
-  { key: "90-70", label: "Tốt/ Trầy nhẹ", upper: 90, lower: 70 },
-  { key: "70-50", label: "Rách bìa, trang", upper: 69, lower: 50 },
-  { key: "50-0", label: "Hư nặng", upper: 50, lower: 0 },
+// --- LEVEL_LABELS (mô tả chi tiết + penalty info) ---
+const LEVEL_LABELS = [
+  {
+    value: 100,
+    label: "Mới",
+    description: "Sách nguyên vẹn hoàn toàn, như mới xuất bản. Không có vết trầy, không cong mép.",
+    penalty: false,
+    penaltyRate: 0,
+  },
+  {
+    value: 90,
+    label: "Rất tốt",
+    description: "Hầu như không có dấu hiệu sử dụng. Một vài vết xước cực nhỏ không đáng kể.",
+    penalty: false,
+    penaltyRate: 0,
+  },
+  {
+    value: 80,
+    label: "Tốt",
+    description: "Có dấu hiệu sử dụng nhẹ: trầy nhỏ trên bìa, mép hơi quăn. Các trang vẫn nguyên vẹn.",
+    penalty: false,
+    penaltyRate: 0,
+  },
+  {
+    value: 70,
+    label: "Khá",
+    description: "Sách đã dùng nhiều: tróc nhẹ mép bìa, cong gáy. Tuy nhiên vẫn đảm bảo đọc tốt.",
+    penalty: false,
+    penaltyRate: 0,
+  },
+  {
+    value: 60,
+    label: "Trầy nhiều",
+    description:
+      "Bìa bị trầy xước rõ rệt, mất màu, bong lớp cán. Mép bìa có dấu hiệu rách nhỏ hoặc gãy góc. Một số trang nhàu nhẹ.",
+    penalty: true,
+    penaltyRate: 0.2,
+  },
+  {
+    value: 50,
+    label: "Hư nhẹ",
+    description:
+      "Nhiều vết trầy lớn, quăn mép mạnh, có thể gãy gáy một phần. Một vài trang bị quăn hoặc nhăn mạnh.",
+    penalty: true,
+    penaltyRate: 0.4,
+  },
+  {
+    value: 40,
+    label: "Rách nhẹ",
+    description:
+      "Có vết rách nhỏ (2–5 cm) ở bìa hoặc trang bên trong. Gáy sách yếu, dễ bung nếu không sửa chữa.",
+    penalty: true,
+    penaltyRate: 0.6,
+  },
+  {
+    value: 30,
+    label: "Rách nặng",
+    description:
+      "Nhiều trang bị rách lớn, bìa rách hoặc tróc hoàn toàn một phần. Gáy bị gãy mạnh, sách có nguy cơ bung rời.",
+    penalty: true,
+    penaltyRate: 0.8,
+  },
+  {
+    value: 20,
+    label: "Hư nặng",
+    description:
+      "Nhiều trang bị mất hoặc rách lớn, giấy bị quăn mạnh hoặc thấm nước. Gáy bung khỏi thân sách. Gần như không thể sử dụng.",
+    penalty: true,
+    penaltyRate: 1.0,
+  },
+  {
+    value: 10,
+    label: "Rất hư",
+    description:
+      "Sách rất hư hỏng: mất nhiều trang, giấy rời hoàn toàn, bìa không còn gắn với ruột sách. Không thể phục hồi.",
+    penalty: true,
+    penaltyRate: 1.0,
+  },
+  {
+    value: 1,
+    label: "Hỏng hoàn toàn",
+    description:
+      "Sách hỏng nặng đến mức không thể sửa chữa: mất phần lớn trang, nát bìa, giấy mục hoặc biến dạng do nước. Cần thay thế.",
+    penalty: true,
+    penaltyRate: 1.0,
+  },
 ];
 
-function getConditionLabelFromNumber(n) {
-  if (n == null || isNaN(Number(n))) return "-";
-  const v = Number(n);
-  const found = CONDITION_RANGES.find((r) => v <= r.upper && v >= r.lower);
-  return found ? found.label : `${v}`;
+// Tạo OPTIONS cho select từ LEVEL_LABELS (giữ thứ tự giảm dần)
+const CONDITION_OPTIONS = [...LEVEL_LABELS].sort((a, b) => b.value - a.value).map((l) => ({
+  value: l.value,
+  label: l.label,
+}));
+
+// Hàm băm phần trăm bằng FLOOR theo hàng chục -> trả level object
+function percentToLevel(percent) {
+  if (percent == null || isNaN(Number(percent))) return null;
+  const n = Math.max(0, Math.min(100, Number(percent)));
+  const stepped = Math.floor(n / 10) * 10;
+  const found = LEVEL_LABELS.find((l) => l.value === stepped);
+  if (found) return found;
+  for (let i = 0; i < LEVEL_LABELS.length; i++) {
+    if (stepped >= LEVEL_LABELS[i].value) return LEVEL_LABELS[i];
+  }
+  return LEVEL_LABELS[LEVEL_LABELS.length - 1];
 }
 
+// Chuyển các field trạng thái sang %
+function conditionToPercent(copy, document) {
+  if (!copy && !document) return null;
+  const raw =
+    (copy && (copy.conditionGrade ?? copy.conditionPercent ?? copy.qualityPercent ?? copy.condition ?? copy.conditionNote)) ??
+    (document && (document.qualityPercent ?? document.conditionNote)) ??
+    null;
+
+  if (raw == null) return null;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return null;
+  if (n >= 0 && n <= 100) return Math.round(n);
+  if (n >= 1 && n <= 5) return Math.round((n / 5) * 100);
+  return Math.max(0, Math.min(100, Math.round(n)));
+}
+
+// Tính tiền phạt cho 1 bản sao
+function computeFine(copyObj, documentObj, options = {}) {
+  const { fallbackDepositField = "deposit", minFine = 0 } = options;
+  const percent = conditionToPercent(copyObj, documentObj);
+  if (percent == null) return { shouldPenalize: false, fineAmount: 0, percent: null };
+
+  const level = percentToLevel(percent);
+  const shouldPenalize = Boolean(level?.penalty);
+  const rate = shouldPenalize ? Number(level.penaltyRate ?? 0) : 0;
+  const coverPrice = Number(documentObj?.coverPrice ?? documentObj?.book?.coverPrice ?? 0) || 0;
+  const deposit = Number(copyObj?.[fallbackDepositField] ?? documentObj?.deposit ?? 0) || 0;
+  const base = coverPrice > 0 ? coverPrice : deposit > 0 ? deposit : 0;
+  let fine = Math.max(0, Math.round(base * rate));
+  if (fine < minFine) fine = minFine;
+  return { shouldPenalize, rate, fineAmount: fine, base, levelLabel: level?.label ?? null, levelValue: level?.value ?? null, percent };
+}
+
+// helper: lấy representative từ số sử dụng percentToLevel
 function getRepresentativeFromNumber(n) {
   if (n == null || isNaN(Number(n))) return null;
   const v = Number(n);
-  const found = CONDITION_RANGES.find((r) => v <= r.upper && v >= r.lower);
-  return found ? found.upper : null;
+  const level = percentToLevel(v);
+  return level?.value ?? null;
 }
 
 // helper: ưu tiên profile.librarianId, KHÔNG dùng accountId
@@ -65,19 +192,14 @@ function getLibrarianIdFromUser(user) {
     if (user?.librarianId) return Number(user.librarianId);
     if (user?.profile?.librarianId) return Number(user.profile.librarianId);
     if (user?.Librarian?.librarianId) return Number(user.Librarian.librarianId);
-
     const profRaw = sessionStorage.getItem("profile");
     if (profRaw) {
       try {
         const prof = JSON.parse(profRaw);
         if (prof?.librarianId) return Number(prof.librarianId);
-      } catch (e) {
-        // ignore
-      }
+      } catch (e) { }
     }
-  } catch (e) {
-    // ignore
-  }
+  } catch (e) { }
   return null;
 }
 
@@ -105,7 +227,7 @@ export default function ReturnBulkDialog({ open, onClose, slip, onReturned }) {
   const [preview, setPreview] = useState(null); // { loanSlipId, returnDate, totals, items, paymentPreview }
 
   // thông tin payment đang chờ thanh toán (khi cần PayOS)
-  const [pendingPayment, setPendingPayment] = useState(null); // { paymentId, orderCode, amount, checkoutUrl, qrCode }
+  const [pendingPayment, setPendingPayment] = useState(null);
   const [showQr, setShowQr] = useState(false);
 
   // auto preview state + debounce
@@ -123,11 +245,9 @@ export default function ReturnBulkDialog({ open, onClose, slip, onReturned }) {
       setItems(
         borroweds.map((d) => ({
           loanDetailId: d.loanDetailId,
-          // giữ giá trị cũ nhưng map sang representative nếu có
           conditionReturn:
             d.conditionBorrow != null
-              ? (getRepresentativeFromNumber(Number(d.conditionBorrow)) ??
-                Number(d.conditionBorrow))
+              ? (getRepresentativeFromNumber(Number(d.conditionBorrow)) ?? Number(d.conditionBorrow))
               : 100,
           isLost: false,
           note: d.note || "",
@@ -135,6 +255,9 @@ export default function ReturnBulkDialog({ open, onClose, slip, onReturned }) {
           borrowCond: d.conditionBorrow,
           coverPrice: d.DocumentCopy?.Document?.coverPrice || 0,
           barCode: d.DocumentCopy?.barCode || null,
+          // keep original DocumentCopy and Document for computeFine
+          _documentCopy: d.DocumentCopy ?? null,
+          _document: d.DocumentCopy?.Document ?? null,
         }))
       );
 
@@ -234,7 +357,6 @@ export default function ReturnBulkDialog({ open, onClose, slip, onReturned }) {
     if (!returnDate) return;
     if (!items.length) return;
 
-    // debounce 500ms
     if (previewTimeoutRef.current) {
       clearTimeout(previewTimeoutRef.current);
     }
@@ -550,19 +672,23 @@ export default function ReturnBulkDialog({ open, onClose, slip, onReturned }) {
                 ) : (
                   items.map((it) => {
                     const detail = (slip.details || []).find(d => d.loanDetailId === it.loanDetailId);
-                    const copy = detail?.DocumentCopy;
-                    const doc = copy?.Document;
+                    const copy = detail?.DocumentCopy ?? it._documentCopy;
+                    const doc = copy?.Document ?? it._document;
                     const title = doc?.title || "-";
-                    const cover = doc?.coverPhoto || null;
+
+                    // compute percent from stored copy/document if available, fallback to conditionReturn
+                    const percent = conditionToPercent(copy, doc) ?? Number(it.conditionReturn ?? 100);
+                    const levelObj = percent != null ? percentToLevel(percent) : null;
+                    const fineInfo = computeFine(copy ?? {}, doc ?? {}, { fallbackDepositField: "depositAmount", minFine: 0 });
 
                     return (
                       <TableRow key={it.loanDetailId}>
                         <TableCell>{it.loanDetailId}</TableCell>
                         <TableCell>
                           <Stack direction="row" spacing={1.5} alignItems="center">
-                            {cover && (
+                            {doc?.coverPhoto && (
                               <img
-                                src={cover}
+                                src={doc.coverPhoto}
                                 alt={title}
                                 loading="lazy"
                                 style={{ width: 36, height: 48, objectFit: "cover", borderRadius: 4, display: "block", flexShrink: 0 }}
@@ -576,10 +702,12 @@ export default function ReturnBulkDialog({ open, onClose, slip, onReturned }) {
                         <TableCell sx={{ fontFamily: "monospace" }}>
                           {it.barCode || "-"}
                         </TableCell>
-                        {/* Hiển thị label thay vì số cho tình trạng mượn */}
-                        <TableCell>{getConditionLabelFromNumber(it.borrowCond)}</TableCell>
+
+                        <TableCell>{/* Hiển thị label tình trạng mượn (nếu có) */}
+                          {it.borrowCond != null ? (percentToLevel(Number(it.borrowCond))?.label ?? getRepresentativeFromNumber(it.borrowCond)) : "-"}
+                        </TableCell>
+
                         <TableCell>
-                          {/* Thay input số bằng select hiển thị label nhưng lưu số representative */}
                           <TextField
                             select
                             size="small"
@@ -588,19 +716,19 @@ export default function ReturnBulkDialog({ open, onClose, slip, onReturned }) {
                               const v = Number(e.target.value);
                               updateItem(it.loanDetailId, { conditionReturn: v });
                             }}
-                            sx={{ minWidth: 200 }}
+                            sx={{ minWidth: 220 }}
                             disabled={it.isLost}
                           >
-                            {CONDITION_RANGES.map((r) => (
-                              <MenuItem key={r.key} value={r.upper}>
-                                {r.label}
+                            {CONDITION_OPTIONS.map((opt) => (
+                              <MenuItem key={opt.value} value={opt.value}>
+                                {opt.label}
                               </MenuItem>
                             ))}
                           </TextField>
 
-                          {Number(it.conditionReturn) < 70 && !it.isLost && (
-                            <Typography variant="caption" color="error"></Typography>
-                          )}
+                          {/* Hiển thị nhãn + tooltip + phần trăm thực + phạt nếu có */}
+
+
                         </TableCell>
                         <TableCell>
                           <FormControlLabel
@@ -637,11 +765,6 @@ export default function ReturnBulkDialog({ open, onClose, slip, onReturned }) {
               <Typography variant="subtitle2" gutterBottom>
                 Tóm tắt phí
               </Typography>
-
-              {!preview && !autoPreviewing && (
-                <Typography variant="body2" color="text.secondary">
-                </Typography>
-              )}
 
               {autoPreviewing && (
                 <Typography variant="caption" color="text.secondary">
@@ -764,7 +887,6 @@ export default function ReturnBulkDialog({ open, onClose, slip, onReturned }) {
         <DialogActions>
           <Button onClick={() => setShowQr(false)}>Đóng</Button>
 
-          {/* Nút thanh toán tiền mặt: cho phép luôn (nếu modal payment đang mở) */}
           <Button
             variant="outlined"
             onClick={handleCashPayment}
