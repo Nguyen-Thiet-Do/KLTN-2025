@@ -95,7 +95,7 @@ export default function HistoryPayment() {
                 variant="body1"
                 sx={{ color: "rgba(255,255,255,0.85)", mt: 1 }}
               >
-                Theo dõi các giao dịch thẻ thành viên và phí mượn trả của bạn
+                Theo dõi các giao dịch thẻ thành viên và chi phí phạt (Nếu có)
               </Typography>
             </Box>
 
