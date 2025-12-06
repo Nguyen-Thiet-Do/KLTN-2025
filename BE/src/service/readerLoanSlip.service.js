@@ -187,7 +187,7 @@ async function getMyPaymentHistoryService(user, query) {
     sortDir = 'DESC',
   } = query;
 
-  // tìm reader
+  // Tìm reader
   const reader = await Reader.findOne({
     where: { accountId, deleted: false },
     attributes: ['readerId', 'fullName'],
@@ -218,38 +218,43 @@ async function getMyPaymentHistoryService(user, query) {
     offset,
     order: [[sortBy, sortDir]],
     include: [
-      // đính kèm librarian (người thu)
       { model: Librarian, attributes: ['librarianId', 'fullName'] },
-      // đính kèm loanSlip nếu có
       { model: LoanSlip, attributes: ['loanSlipId', 'loanDate'], required: false },
     ],
   });
 
-  // normalize rows
   const rows = result.rows.map((p) => p.toJSON());
 
-  // tóm tắt dòng tiền (mapping cơ bản)
-  // IN: DEPOSIT, CARD_PURCHASE, CARD_REGISTER, CARD_RENEWAL, CARD_UPGRADE
-  // OUT: FINE, VIOLATION
+  // ====================================================================
+  // 🔧 FIX: TÍNH CASHFLOW ĐÚNG
+  // ====================================================================
+  // TIỀN VÀO (INFLOW): Các loại nạp tiền, mua thẻ, gia hạn, nâng cấp
   const inflowTypes = ['DEPOSIT', 'CARD_PURCHASE', 'CARD_REGISTER', 'CARD_RENEWAL', 'CARD_UPGRADE'];
+  
+  // TIỀN RA (OUTFLOW): Phí phạt, vi phạm
   const outflowTypes = ['FINE', 'VIOLATION'];
 
   let inflow = 0;
   let outflow = 0;
 
-  // Lọc theo cùng where (không chỉ page) => cần query tổng (không phân trang)
+  // Lấy tất cả payment theo filter (không phân trang) để tính tổng
   const summaryRows = await Payment.findAll({
     where,
-    attributes: ['paymentType', 'amount'],
+    attributes: ['paymentType', 'amount', 'status'],
   });
 
   summaryRows.forEach((r) => {
     const amt = Number(r.amount || 0);
-    if (inflowTypes.includes(r.paymentType)) inflow += amt;
-    else if (outflowTypes.includes(r.paymentType)) outflow += amt;
-    else {
-      // nếu loại khác, bạn có thể quyết định xử lý (tạm giữ neutral)
+    
+    // ✅ CHỈ TÍNH CÁC PAYMENT ĐÃ HOÀN THÀNH
+    if (r.status !== 'COMPLETED') return;
+
+    if (inflowTypes.includes(r.paymentType)) {
+      inflow += amt;
+    } else if (outflowTypes.includes(r.paymentType)) {
+      outflow += amt;
     }
+    // Các loại khác (nếu có) không tính vào cashflow
   });
 
   return {
