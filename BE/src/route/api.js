@@ -517,138 +517,138 @@ routeApi.get('/', (req, res) => {
         ]
       },
 
-     {
-  group: 'Profile',
-  icon: '👤',
-  routes: [
-    {
-      method: 'GET',
-      path: '/api/profile/me',
-      description: 'Lấy thông tin cá nhân của độc giả hiện tại (bao gồm cả thông tin tài khoản đi kèm)',
-      auth: true,
-      role: 'Reader (roleId = 3)',
-      response: {
-        success: 'boolean',
-        reader: {
-          readerId: 'number',
-          accountId: 'number',
-          roleId: 'number',
-          fullName: 'string',
-          dateOfBirth: 'date (YYYY-MM-DD)',
-          gender: 'string | null',
-          cccd: 'string | null',
-          address: 'string | null',
-          totalBorrow: 'number',
-          note: 'string | null',
-          deleted: 'boolean',
-          created_at: 'datetime',
-          updated_at: 'datetime',
- avatarUrl: 'string | null',
-          email: 'string',
-          phoneNumber: 'string | null',
-          status: 'active | locked | inactive',
-          roleId_account: 'number',
-          created_at_account: 'datetime',
-          updated_at_account: 'datetime',
+      {
+        group: 'Profile',
+        icon: '👤',
+        routes: [
+          {
+            method: 'GET',
+            path: '/api/profile/me',
+            description: 'Lấy thông tin cá nhân của độc giả hiện tại (bao gồm cả thông tin tài khoản đi kèm)',
+            auth: true,
+            role: 'Reader (roleId = 3)',
+            response: {
+              success: 'boolean',
+              reader: {
+                readerId: 'number',
+                accountId: 'number',
+                roleId: 'number',
+                fullName: 'string',
+                dateOfBirth: 'date (YYYY-MM-DD)',
+                gender: 'string | null',
+                cccd: 'string | null',
+                address: 'string | null',
+                totalBorrow: 'number',
+                note: 'string | null',
+                deleted: 'boolean',
+                created_at: 'datetime',
+                updated_at: 'datetime',
+                avatarUrl: 'string | null',
+                email: 'string',
+                phoneNumber: 'string | null',
+                status: 'active | locked | inactive',
+                roleId_account: 'number',
+                created_at_account: 'datetime',
+                updated_at_account: 'datetime',
 
-          account: 'object | null',
-          memberCard: 'object | null',
-          loanCounts: '{ pending, waitingPickup, borrowing, activeTotal }',
-          returnedCount: 'number'
-        }
+                account: 'object | null',
+                memberCard: 'object | null',
+                loanCounts: '{ pending, waitingPickup, borrowing, activeTotal }',
+                returnedCount: 'number'
+              }
+            }
+          },
+
+          {
+            method: 'PUT',
+            path: '/api/profile/me',
+            description: 'Cập nhật thông tin cá nhân của độc giả (chỉ cập nhật bảng Readers, không cập nhật tài khoản)',
+            auth: true,
+            role: 'Reader (roleId = 3)',
+            body: {
+              fullName: 'string (optional)',
+              gender: 'string (optional)',
+              dateOfBirth: 'date (optional, YYYY-MM-DD)',
+              address: 'string (optional)',
+              cccd: 'string (optional)',
+              note: 'string (optional)'
+            },
+            response: {
+              success: 'boolean',
+              message: 'string',
+              reader: 'object (giống GET /api/profile/me)'
+            }
+          },
+
+          {
+            method: 'PUT',
+            path: '/api/profile/account',
+            description: 'Cập nhật thông tin tài khoản (email, phoneNumber, password)',
+            auth: true,
+            role: 'Reader (roleId = 3)',
+            body: {
+              email: 'string (optional)',
+              phoneNumber: 'string (optional)',
+              oldPassword: 'string (optional - bắt buộc khi đổi mật khẩu)',
+              newPassword: 'string (optional)'
+            },
+            response: {
+              success: 'boolean',
+              message: 'string',
+              account: {
+                accountId: 'number',
+                email: 'string',
+                phoneNumber: 'string | null',
+                roleId: 'number',
+                status: 'string',
+                created_at: 'datetime',
+                updated_at: 'datetime'
+              }
+            }
+          },
+
+          {
+            method: 'PUT',
+            path: '/api/profile/full',
+            description: 'Cập nhật đầy đủ thông tin độc giả + tài khoản (Reader + Account) cùng lúc',
+            auth: true,
+            role: 'Reader (roleId = 3)',
+            body: {
+              fullName: 'string (optional)',
+              gender: 'string (optional)',
+              dateOfBirth: 'date (optional)',
+              address: 'string (optional)',
+              cccd: 'string (optional)',
+              note: 'string (optional)',
+
+              email: 'string (optional)',
+              phoneNumber: 'string (optional)',
+              password: 'string (optional)'
+            },
+            response: {
+              success: 'boolean',
+              message: 'string',
+              profile: 'object (full Reader + Account + MemberCard + loanCounts)'
+            }
+          },
+
+          {
+            method: 'POST',
+            path: '/api/profile/upload-avatar',
+            description: 'Upload ảnh đại diện cho độc giả',
+            auth: true,
+            role: 'Reader (roleId = 3)',
+            body: 'FormData { avatar: File }',
+            response: {
+              success: 'boolean',
+              message: 'string',
+              avatarUrl: 'string (đường dẫn public)',
+              reader: 'object (đã cập nhật avatarUrl)'
+            }
+          }
+        ]
       }
-    },
-
-    {
-      method: 'PUT',
-      path: '/api/profile/me',
-      description: 'Cập nhật thông tin cá nhân của độc giả (chỉ cập nhật bảng Readers, không cập nhật tài khoản)',
-      auth: true,
-      role: 'Reader (roleId = 3)',
-      body: {
-        fullName: 'string (optional)',
-        gender: 'string (optional)',
-        dateOfBirth: 'date (optional, YYYY-MM-DD)',
-        address: 'string (optional)',
-        cccd: 'string (optional)',
-        note: 'string (optional)'
-      },
-      response: {
-        success: 'boolean',
-        message: 'string',
-        reader: 'object (giống GET /api/profile/me)'
-      }
-    },
-
-    {
-      method: 'PUT',
-      path: '/api/profile/account',
-      description: 'Cập nhật thông tin tài khoản (email, phoneNumber, password)',
-      auth: true,
-      role: 'Reader (roleId = 3)',
-      body: {
-        email: 'string (optional)',
-        phoneNumber: 'string (optional)',
-        oldPassword: 'string (optional - bắt buộc khi đổi mật khẩu)',
-        newPassword: 'string (optional)'
-      },
-      response: {
-        success: 'boolean',
-        message: 'string',
-        account: {
-          accountId: 'number',
-          email: 'string',
-          phoneNumber: 'string | null',
-          roleId: 'number',
-          status: 'string',
-          created_at: 'datetime',
-          updated_at: 'datetime'
-        }
-      }
-    },
-
-    {
-      method: 'PUT',
-      path: '/api/profile/full',
-      description: 'Cập nhật đầy đủ thông tin độc giả + tài khoản (Reader + Account) cùng lúc',
-      auth: true,
-      role: 'Reader (roleId = 3)',
-      body: {
-        fullName: 'string (optional)',
-        gender: 'string (optional)',
-        dateOfBirth: 'date (optional)',
-        address: 'string (optional)',
-        cccd: 'string (optional)',
-        note: 'string (optional)',
-
-        email: 'string (optional)',
-        phoneNumber: 'string (optional)',
-        password: 'string (optional)'
-      },
-      response: {
-        success: 'boolean',
-        message: 'string',
-        profile: 'object (full Reader + Account + MemberCard + loanCounts)'
-      }
-    },
-
-    {
-      method: 'POST',
-      path: '/api/profile/upload-avatar',
-      description: 'Upload ảnh đại diện cho độc giả',
-      auth: true,
-      role: 'Reader (roleId = 3)',
-      body: 'FormData { avatar: File }',
-      response: {
-        success: 'boolean',
-        message: 'string',
-        avatarUrl: 'string (đường dẫn public)',
-        reader: 'object (đã cập nhật avatarUrl)'
-      }
-    }
-  ]
-}
-,
+      ,
       {
         group: 'Documents of Reader',
         icon: '📚',
@@ -1432,6 +1432,36 @@ routeApi.get('/', (req, res) => {
               loanDetailId:
                 'number (optional; nếu truyền thì áp dụng lên 1 tài liệu cụ thể trong phiếu như mô tả ở trên)'
             }
+          },
+          {
+            method: 'GET',
+            path: '/api/loans/reader/payments/my',
+            description:
+              'Xem lịch sử thanh toán / dòng tiền (inflow/outflow) liên quan tới thẻ/khách hàng (dành cho Độc giả). ' +
+              'Response trả về list các bản ghi thanh toán (phân trang) kèm phần tóm tắt dòng tiền trong phạm vi filter (inflow, outflow, net).',
+            auth: true,
+            role: 'Reader (roleId = 3)',
+            query: {
+              page: 'number (optional, default=1)',
+              limit: 'number (optional, default=20)',
+              paymentType: 'string (optional, lọc theo loại thanh toán, ví dụ DEPOSIT, FINE, ...)',
+              paymentMethod: 'string (optional, ví dụ CASH | QR | CARD | PAYOS)',
+              status: 'string (optional, ví dụ COMPLETED | PENDING | FAILED)',
+              fromDate: 'date (optional, lọc từ ngày)',
+              toDate: 'date (optional, lọc đến ngày)',
+              sortBy: 'string (optional, default="paymentDate" hoặc "created_at")',
+              sortDir: 'string (optional, "ASC" | "DESC", default="DESC")'
+            },
+            response: {
+              reader: '{ readerId, fullName }',
+              pagination: '{ page, limit, total, totalPages }',
+              cashflow: '{ inflow: number, outflow: number, net: number }',
+              data: 'array of payments with joined info (librarian, loanSlip if có) and raw note'
+            },
+            notes:
+              '- Mapping mặc định: các loại như DEPOSIT / CARD_REGISTER /CARD_PURCHASE ... được tính là inflow; FINE / VIOLATION được tính là outflow. Có thể điều chỉnh mapping theo quy tắc hệ thống.\n' +
+              '- Nếu cần xác định document/card liên quan từ trường note (ví dụ requestDocumentId hoặc balance snapshot), API có thể parse JSON/text trong note để hiển thị thêm thông tin.\n' +
+              '- Query summary (inflow/outflow) tính trên toàn bộ tập filter (không chỉ trang hiện tại).'
           }
         ]
       },
@@ -1772,132 +1802,132 @@ routeApi.get('/', (req, res) => {
         ]
       }
       ,
-     {
-  group: 'Reviews',
-  icon: '⭐',
-  routes: [
-    {
-      method: 'GET',
-      path: '/api/reviews/:documentId',
-      description: 'Lấy danh sách review của 1 tài liệu (kèm thông tin người review)',
-      auth: false,
-      params: {
-        documentId: 'number (required) - ID của tài liệu'
-      },
-      response: {
-        success: 'boolean',
-        data: {
-          reviews: 'array [{ reviewId, readerId, rating, comment, created_at, Reader: { fullName, avatarUrl } }]',
-          stats: '{ averageRating, totalReviews }'
-        }
-      },
-      example: {
-        request: 'GET /api/reviews/20',
-        response: {
-          success: true,
-          data: {
-            reviews: [
-              {
-                reviewId: 1,
-                readerId: 33,
-                rating: 4,
-                comment: 'Sách hay',
-                created_at: '2025-01-10',
-                Reader: { 
-                  fullName: 'Nguyễn Văn A',
-                  avatarUrl: '/uploads/avatars/a1b2c3.png'
+      {
+        group: 'Reviews',
+        icon: '⭐',
+        routes: [
+          {
+            method: 'GET',
+            path: '/api/reviews/:documentId',
+            description: 'Lấy danh sách review của 1 tài liệu (kèm thông tin người review)',
+            auth: false,
+            params: {
+              documentId: 'number (required) - ID của tài liệu'
+            },
+            response: {
+              success: 'boolean',
+              data: {
+                reviews: 'array [{ reviewId, readerId, rating, comment, created_at, Reader: { fullName, avatarUrl } }]',
+                stats: '{ averageRating, totalReviews }'
+              }
+            },
+            example: {
+              request: 'GET /api/reviews/20',
+              response: {
+                success: true,
+                data: {
+                  reviews: [
+                    {
+                      reviewId: 1,
+                      readerId: 33,
+                      rating: 4,
+                      comment: 'Sách hay',
+                      created_at: '2025-01-10',
+                      Reader: {
+                        fullName: 'Nguyễn Văn A',
+                        avatarUrl: '/uploads/avatars/a1b2c3.png'
+                      }
+                    }
+                  ],
+                  stats: {
+                    averageRating: 4.0,
+                    totalReviews: 1
+                  }
                 }
               }
-            ],
-            stats: {
-              averageRating: 4.0,
-              totalReviews: 1
+            }
+          },
+
+          {
+            method: 'GET',
+            path: '/api/reviews/:documentId/stats',
+            description: 'Lấy thống kê rating (averageRating, totalReviews)',
+            auth: false,
+            params: {
+              documentId: 'number (required)'
+            },
+            response: {
+              success: 'boolean',
+              data: '{ averageRating, totalReviews }'
+            }
+          },
+
+          {
+            method: 'POST',
+            path: '/api/reviews',
+            description: 'Tạo review mới (Reader roleId=3)',
+            auth: true,
+            role: 'Reader (roleId = 3)',
+            body: {
+              documentId: 'number (required)',
+              rating: 'number (required, 1–5)',
+              comment: 'string (optional)'
+            },
+            response: {
+              success: 'boolean',
+              message: 'string',
+              data: '{ reviewId, readerId, rating, comment, created_at }'
+            },
+            error: {
+              '409': 'Bạn đã nhận xét tài liệu này rồi',
+              '404': 'Không tìm thấy tài liệu'
+            }
+          },
+
+          {
+            method: 'PATCH',
+            path: '/api/reviews/:reviewId',
+            description: 'Cập nhật review của chính độc giả',
+            auth: true,
+            role: 'Reader (roleId = 3)',
+            params: {
+              reviewId: 'number (required)'
+            },
+            body: {
+              rating: 'number (optional)',
+              comment: 'string (optional)'
+            },
+            response: {
+              success: 'boolean',
+              message: 'string'
+            },
+            error: {
+              '403': 'Không có quyền sửa nhận xét này',
+              '404': 'Không tìm thấy nhận xét'
+            }
+          },
+
+          {
+            method: 'DELETE',
+            path: '/api/reviews/:reviewId',
+            description: 'Xóa review của chính độc giả',
+            auth: true,
+            role: 'Reader (roleId = 3)',
+            params: {
+              reviewId: 'number (required)'
+            },
+            response: {
+              success: 'boolean',
+              message: 'string'
+            },
+            error: {
+              '403': 'Không có quyền xóa nhận xét này',
+              '404': 'Không tìm thấy nhận xét'
             }
           }
-        }
+        ]
       }
-    },
-
-    {
-      method: 'GET',
-      path: '/api/reviews/:documentId/stats',
-      description: 'Lấy thống kê rating (averageRating, totalReviews)',
-      auth: false,
-      params: {
-        documentId: 'number (required)'
-      },
-      response: {
-        success: 'boolean',
-        data: '{ averageRating, totalReviews }'
-      }
-    },
-
-    {
-      method: 'POST',
-      path: '/api/reviews',
-      description: 'Tạo review mới (Reader roleId=3)',
-      auth: true,
-      role: 'Reader (roleId = 3)',
-      body: {
-        documentId: 'number (required)',
-        rating: 'number (required, 1–5)',
-        comment: 'string (optional)'
-      },
-      response: {
-        success: 'boolean',
-        message: 'string',
-        data: '{ reviewId, readerId, rating, comment, created_at }'
-      },
-      error: {
-        '409': 'Bạn đã nhận xét tài liệu này rồi',
-        '404': 'Không tìm thấy tài liệu'
-      }
-    },
-
-    {
-      method: 'PATCH',
-      path: '/api/reviews/:reviewId',
-      description: 'Cập nhật review của chính độc giả',
-      auth: true,
-      role: 'Reader (roleId = 3)',
-      params: {
-        reviewId: 'number (required)'
-      },
-      body: {
-        rating: 'number (optional)',
-        comment: 'string (optional)'
-      },
-      response: {
-        success: 'boolean',
-        message: 'string'
-      },
-      error: {
-        '403': 'Không có quyền sửa nhận xét này',
-        '404': 'Không tìm thấy nhận xét'
-      }
-    },
-
-    {
-      method: 'DELETE',
-      path: '/api/reviews/:reviewId',
-      description: 'Xóa review của chính độc giả',
-      auth: true,
-      role: 'Reader (roleId = 3)',
-      params: {
-        reviewId: 'number (required)'
-      },
-      response: {
-        success: 'boolean',
-        message: 'string'
-      },
-      error: {
-        '403': 'Không có quyền xóa nhận xét này',
-        '404': 'Không tìm thấy nhận xét'
-      }
-    }
-  ]
-}
-,
+      ,
       {
         group: 'Test',
         icon: '🧪',

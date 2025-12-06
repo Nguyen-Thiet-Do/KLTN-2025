@@ -17,5 +17,6 @@ router.post(
     requireRole([3]),
     reserveCtrl.requestCancelLoanSlip
 );
+router.get('/payments/my', requireAuth, requireRole([3]), controller.getMyPayments);
 
 module.exports = router;

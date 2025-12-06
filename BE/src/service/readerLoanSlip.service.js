@@ -7,6 +7,8 @@ const {
   Librarian,
   DocumentCopy,
   Document,
+  Payment,
+  
 } = require('../model');
 
 async function getMyLoanHistoryService(user, query) {
@@ -104,45 +106,45 @@ async function getMyLoanHistoryService(user, query) {
             doc = d.DocumentCopy.Document;
           }
 
-         // TH2: PENDING → DocumentCopy = null → lấy documentId từ note
-if (!doc && d.status === 'PENDING') {
-  let docId = null;
+          // TH2: PENDING → DocumentCopy = null → lấy documentId từ note
+          if (!doc && d.status === 'PENDING') {
+            let docId = null;
 
-  if (d.note) {
-    // JSON
-    if (d.note.trim().startsWith("{")) {
-      try {
-        const parsed = JSON.parse(d.note);
-        docId = parsed.requestDocumentId || parsed.documentId || null;
-      } catch {}
-    }
+            if (d.note) {
+              // JSON
+              if (d.note.trim().startsWith("{")) {
+                try {
+                  const parsed = JSON.parse(d.note);
+                  docId = parsed.requestDocumentId || parsed.documentId || null;
+                } catch { }
+              }
 
-    // TEXT dạng REQUEST_DOCUMENT_ID=xxxx
-    if (!docId && d.note.includes("REQUEST_DOCUMENT_ID")) {
-      const parts = d.note.split("=");
-      if (parts.length === 2) {
-        docId = Number(parts[1]);
-      }
-    }
-  }
+              // TEXT dạng REQUEST_DOCUMENT_ID=xxxx
+              if (!docId && d.note.includes("REQUEST_DOCUMENT_ID")) {
+                const parts = d.note.split("=");
+                if (parts.length === 2) {
+                  docId = Number(parts[1]);
+                }
+              }
+            }
 
-  if (docId) {
-    doc = await Document.findByPk(docId, {
-      attributes: ['documentId', 'title', 'coverPhoto', 'shelfLocation', 'ebookUrl'],
-    });
-  }
-}
+            if (docId) {
+              doc = await Document.findByPk(docId, {
+                attributes: ['documentId', 'title', 'coverPhoto', 'shelfLocation', 'ebookUrl'],
+              });
+            }
+          }
 
 
           // Chuẩn hoá output bookInfo
           const bookInfo = doc
             ? {
-                documentId: doc.documentId,
-                title: doc.title,
-                coverPhoto: doc.coverPhoto,
-                shelfLocation: doc.shelfLocation,
-                ebookUrl: doc.ebookUrl,
-              }
+              documentId: doc.documentId,
+              title: doc.title,
+              coverPhoto: doc.coverPhoto,
+              shelfLocation: doc.shelfLocation,
+              ebookUrl: doc.ebookUrl,
+            }
             : null;
 
           return {
@@ -171,4 +173,100 @@ if (!doc && d.status === 'PENDING') {
   };
 }
 
-module.exports = { getMyLoanHistoryService };
+async function getMyPaymentHistoryService(user, query) {
+  const { accountId } = user;
+  const {
+    page = 1,
+    limit = 20,
+    paymentType,
+    paymentMethod,
+    status,
+    fromDate,
+    toDate,
+    sortBy = 'created_at',
+    sortDir = 'DESC',
+  } = query;
+
+  // tìm reader
+  const reader = await Reader.findOne({
+    where: { accountId, deleted: false },
+    attributes: ['readerId', 'fullName'],
+  });
+
+  if (!reader) {
+    const err = new Error('Không tìm thấy tài khoản độc giả');
+    err.statusCode = 404;
+    throw err;
+  }
+
+  const where = { deleted: false, readerId: reader.readerId };
+  if (paymentType) where.paymentType = paymentType;
+  if (paymentMethod) where.paymentMethod = paymentMethod;
+  if (status) where.status = status;
+
+  if (fromDate || toDate) {
+    where.paymentDate = {};
+    if (fromDate) where.paymentDate[Op.gte] = fromDate;
+    if (toDate) where.paymentDate[Op.lte] = toDate;
+  }
+
+  const offset = (Number(page) - 1) * Number(limit);
+
+  const result = await Payment.findAndCountAll({
+    where,
+    limit: Number(limit),
+    offset,
+    order: [[sortBy, sortDir]],
+    include: [
+      // đính kèm librarian (người thu)
+      { model: Librarian, attributes: ['librarianId', 'fullName'] },
+      // đính kèm loanSlip nếu có
+      { model: LoanSlip, attributes: ['loanSlipId', 'loanDate'], required: false },
+    ],
+  });
+
+  // normalize rows
+  const rows = result.rows.map((p) => p.toJSON());
+
+  // tóm tắt dòng tiền (mapping cơ bản)
+  // IN: DEPOSIT, CARD_PURCHASE, CARD_REGISTER, CARD_RENEWAL, CARD_UPGRADE
+  // OUT: FINE, VIOLATION
+  const inflowTypes = ['DEPOSIT', 'CARD_PURCHASE', 'CARD_REGISTER', 'CARD_RENEWAL', 'CARD_UPGRADE'];
+  const outflowTypes = ['FINE', 'VIOLATION'];
+
+  let inflow = 0;
+  let outflow = 0;
+
+  // Lọc theo cùng where (không chỉ page) => cần query tổng (không phân trang)
+  const summaryRows = await Payment.findAll({
+    where,
+    attributes: ['paymentType', 'amount'],
+  });
+
+  summaryRows.forEach((r) => {
+    const amt = Number(r.amount || 0);
+    if (inflowTypes.includes(r.paymentType)) inflow += amt;
+    else if (outflowTypes.includes(r.paymentType)) outflow += amt;
+    else {
+      // nếu loại khác, bạn có thể quyết định xử lý (tạm giữ neutral)
+    }
+  });
+
+  return {
+    reader: { readerId: reader.readerId, fullName: reader.fullName },
+    pagination: {
+      page: Number(page),
+      limit: Number(limit),
+      total: result.count,
+      totalPages: Math.ceil(result.count / Number(limit)),
+    },
+    cashflow: {
+      inflow,      // tổng tiền vào trong phạm vi filter
+      outflow,     // tổng tiền ra (phạt, vi phạm...)
+      net: inflow - outflow,
+    },
+    data: rows,
+  };
+}
+
+module.exports = { getMyLoanHistoryService, getMyPaymentHistoryService };
