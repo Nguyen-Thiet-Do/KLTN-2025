@@ -63,11 +63,39 @@ export const topupMemberCard = async (payload, token) => {
     if (error.response?.data) throw error.response.data;
     throw error;
   }
+  
+};
+export const paymentService = {
+  async getMyPayments(params = {}) {
+    try {
+      const query = {
+        page: params.page || 1,
+        limit: params.limit || 10,
+        sortBy: params.sortBy || "created_at",
+        sortDir: params.sortDir || "DESC",
+        ...params
+      };
+
+      console.log('🔍 Calling API:', '/loans/reader/payments/my', query);
+
+      const res = await api.get("/loans/reader/payments/my", {
+        params: query
+      });
+
+      console.log('✅ API Response:', res.data);
+      return res.data;
+    } catch (error) {
+      console.error('❌ getMyPayments error:', error);
+      console.error('❌ Error response:', error.response?.data);
+      throw error;
+    }
+  },
 };
 
 
 export default {
   checkPaymentStatus,
   createMemberCardPayment,
-  topupMemberCard
+  topupMemberCard,
+  paymentService,
 };

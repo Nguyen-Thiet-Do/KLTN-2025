@@ -27,7 +27,7 @@ import ProfilePage from "../pages/reader/ProfilePage";
 import Settings from "../pages/reader/Settings";
 
 import LibraryRules from "../pages/reader/LibraryRules";
-
+import HistoryPayment from "../pages/reader/HistoryPayment";
 export const router = createBrowserRouter([
   {
     path: "/",
@@ -49,7 +49,8 @@ export const router = createBrowserRouter([
       { path: "/reader/ebook/:id", element: <EbookReader /> },
 
       { path: "profile", element: <ProfilePage /> },
-      { path: "settings", element: <Settings /> },
+      { path: "settings", element: <Settings /> },  
+      { path: "reader/payments/history", element: <HistoryPayment /> },
     ],
   },
 

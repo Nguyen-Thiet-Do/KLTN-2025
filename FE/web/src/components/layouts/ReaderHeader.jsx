@@ -377,9 +377,15 @@ export default function ReaderHeader() {
               to="/reader/loans/my"
               onClick={() => setAnchorEl(null)}
             >
-              <History sx={{ mr: 2, fontSize: 20 }} /> Lịch sử
+              <History sx={{ mr: 2, fontSize: 20 }} /> Lịch sử mượn trả
             </MenuItem>
-
+ <MenuItem
+              component={RouterLink}
+              to="/reader/payments/history"
+              onClick={() => setAnchorEl(null)}
+            >
+              <History sx={{ mr: 2, fontSize: 20 }} /> Lịch sử thanh toán
+            </MenuItem>
             <MenuItem
               component={RouterLink}
               to="/settings"

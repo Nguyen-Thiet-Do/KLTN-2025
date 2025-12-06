@@ -231,6 +231,7 @@ export default function QRPaymentModal({
               </Typography>
             </Box>
 
+
             {/* ✅ Generate QR Code từ chuỗi EMVCo */}
             {paymentData?.qrCode && (
               <Box sx={{ 
